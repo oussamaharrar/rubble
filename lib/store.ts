@@ -45,6 +45,9 @@ function defaultStats(): RunStats {
     timeLeft: 60,
     lastColor: undefined,
     chainLen: 0,
+    energyOrbsCollected: 0,
+    paidEntryOrbs: 0,
+    entryMode: null,
   };
 }
 
@@ -145,14 +148,17 @@ type GameStore = {
   dailyKey: string;
   survivalAccumulator: number;
   currentStreak: number;
-  startRun: () => void;
+  resumePhase: 'playing' | 'storm' | null;
+  startRun: (mode?: 'trial' | 'paid') => void;
   endRun: () => void;
   resetToStart: () => void;
+  pauseRun: () => void;
+  resumeRun: () => void;
   tick: (dt: number) => void;
   spawnBubbles: (count?: number) => void;
   spawnStormOrbs: () => void;
   tap: (x: number, y: number) => { hit: boolean; energy?: boolean; drain?: boolean; combo?: number };
-  grantBooster: (count: number) => void;
+  grantBooster: (count: number, source?: 'energy' | 'paid' | 'mission' | 'other') => void;
   consumeBooster: () => boolean;
   loadDaily: (seed?: string | number) => void;
   setStageSize: (width: number, height: number) => void;
@@ -181,11 +187,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
   dailyKey: '',
   survivalAccumulator: 0,
   currentStreak: 0,
-  startRun: () => {
+  resumePhase: null,
+  startRun: (mode = 'trial') => {
     const seed = hashString(`${Date.now()}-${Math.random()}`);
     set({
       phase: 'playing',
-      stats: { ...defaultStats(), timeLeft: 60 },
+      stats: { ...defaultStats(), timeLeft: 60, entryMode: mode },
       bubbles: [],
       stormAt: STORM_INTERVAL_MS,
       now: 0,
@@ -196,11 +203,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       startedAt: performance.now(),
       survivalAccumulator: 0,
       currentStreak: 0,
+      resumePhase: null,
     });
     get().spawnBubbles(MAX_BUBBLES / 2);
   },
   endRun: () => {
-    set({ phase: 'summary' });
+    set({ phase: 'summary', resumePhase: null });
   },
   resetToStart: () => {
     set({
@@ -212,7 +220,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
       slowTimeUntil: 0,
       survivalAccumulator: 0,
       currentStreak: 0,
+      resumePhase: null,
     });
+  },
+  pauseRun: () => {
+    const state = get();
+    if (state.phase !== 'playing' && state.phase !== 'storm') {
+      return;
+    }
+    set({ phase: 'paused', resumePhase: state.phase });
+  },
+  resumeRun: () => {
+    const state = get();
+    if (state.phase !== 'paused') {
+      return;
+    }
+    const target = state.resumePhase ?? 'playing';
+    set({ phase: target, resumePhase: null });
   },
   tick: (dt) => {
     const state = get();
@@ -368,12 +392,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ stats, bubbles: remaining, comboWindowUntil, currentStreak });
 
     if (energy) {
-      get().grantBooster(1);
+      get().grantBooster(1, 'energy');
     }
 
     return { hit: true, energy, drain, combo: stats.chainLen };
   },
-  grantBooster: (count) => {
+  grantBooster: (count, source = 'other') => {
     if (count <= 0) return;
     const state = get();
     const bank: BoosterBank = {
@@ -381,7 +405,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
       lastDailyKey: state.boosterBank.lastDailyKey,
     };
     persistBooster(bank);
-    set({ boosterBank: bank });
+    let statsPatch: RunStats | null = null;
+    if (source === 'energy') {
+      statsPatch = { ...state.stats, energyOrbsCollected: state.stats.energyOrbsCollected + count };
+    } else if (source === 'paid') {
+      statsPatch = { ...state.stats, paidEntryOrbs: state.stats.paidEntryOrbs + count };
+    }
+    if (statsPatch) {
+      set({ boosterBank: bank, stats: statsPatch });
+    } else {
+      set({ boosterBank: bank });
+    }
   },
   consumeBooster: () => {
     const state = get();
@@ -443,13 +477,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
     const claimedMission = missions.find((mission) => mission.id === id);
     if (claimedMission && claimedMission.completed && claimedMission.claimed) {
-      get().grantBooster(claimedMission.rewardOrbs);
+    get().grantBooster(claimedMission.rewardOrbs, 'mission');
     }
     if (missions.every((mission) => mission.claimed)) {
       if (typeof window !== 'undefined') {
         const bonusKey = bonusStorageKey(state.dailyKey);
         if (!window.localStorage.getItem(bonusKey)) {
-          get().grantBooster(1);
+          get().grantBooster(1, 'mission');
           window.localStorage.setItem(bonusKey, 'claimed');
         }
       }

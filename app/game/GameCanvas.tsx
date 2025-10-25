@@ -68,15 +68,18 @@ export default function GameCanvas() {
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
-      const { bubbles, width, stats, slowTimeUntil, now } = state;
+      const { bubbles, width, stats, slowTimeUntil, now, phase } = state;
       const ratio = width > 0 ? canvas.width / width : 1;
       ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const comboIntensity = Math.min(stats.chainLen / 10, 1);
+      const playingPhase = phase === 'playing' || phase === 'storm';
       const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      gradient.addColorStop(0, `rgba(${18 + comboIntensity * 40},${24 + comboIntensity * 20},${43 + comboIntensity * 32},0.85)`);
-      gradient.addColorStop(1, 'rgba(10,13,23,0.94)');
+      const topAlpha = playingPhase ? 0.72 : 0.85;
+      const bottomAlpha = playingPhase ? 0.88 : 0.94;
+      gradient.addColorStop(0, `rgba(${18 + comboIntensity * 40},${24 + comboIntensity * 20},${43 + comboIntensity * 32},${topAlpha})`);
+      gradient.addColorStop(1, `rgba(10,13,23,${bottomAlpha})`);
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
