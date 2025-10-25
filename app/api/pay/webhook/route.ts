@@ -2,96 +2,257 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
-import { verifyBasePayWebhook } from '@/lib/pay';
+import { verifyCommerceWebhook } from '@/lib/pay';
 import { markSessionGranted } from '@/lib/pay-session-store';
 
-const RESPONSE_HEADERS = {
-  'Cache-Control': 'no-store',
-  'Access-Control-Allow-Origin': '*',
-};
+const RESPONSE_HEADERS = { 'Cache-Control': 'no-store' } as const;
 
-export function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      ...RESPONSE_HEADERS,
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'content-type,x-basepay-signature,basepay-signature',
-    },
-  });
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-type WebhookAmount = {
-  value?: string | number;
-  currency?: string;
-};
-
-type WebhookPayload = {
-  id?: string;
-  sessionId?: string;
-  chain?: string;
-  chainId?: string;
-  recipient?: string;
-  recipientAddress?: string;
-  amount?: WebhookAmount | string | number;
-  amountWei?: string | number;
-  status?: string;
-  data?: WebhookPayload;
-};
-
-function toBigInt(value: string | number) {
-  try {
-    return BigInt(value);
-  } catch {
-    return 0n;
-  }
+function normaliseString(value: string) {
+  return value.trim().toLowerCase();
 }
 
-function extractAmount(payload: WebhookPayload) {
-  if (typeof payload.amountWei !== 'undefined') {
-    return toBigInt(payload.amountWei as string | number);
+function toBigInt(value: unknown): bigint | null {
+  if (typeof value === 'bigint') {
+    return value;
   }
-  const amount = payload.amount;
-  if (!amount) return 0n;
-  if (typeof amount === 'string' || typeof amount === 'number') {
-    return toBigInt(amount);
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return BigInt(Math.trunc(value));
   }
-  if (typeof amount.value === 'string' || typeof amount.value === 'number') {
-    return toBigInt(amount.value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    try {
+      if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
+        return BigInt(trimmed);
+      }
+      if (!/^\d+(?:\.\d+)?$/u.test(trimmed)) {
+        return null;
+      }
+      if (trimmed.includes('.')) {
+        const [whole, fractional = ''] = trimmed.split('.');
+        const padded = `${fractional}${'0'.repeat(18)}`.slice(0, 18);
+        return BigInt(`${whole}${padded}`);
+      }
+      return BigInt(trimmed);
+    } catch {
+      return null;
+    }
   }
-  return 0n;
+  return null;
 }
 
-function normalise(value?: string | null) {
-  return value?.toLowerCase() ?? '';
+const AMOUNT_KEYS: readonly string[] = [
+  'amountWei',
+  'valueWei',
+  'amount',
+  'value',
+  'total',
+  'quantity',
+  'subtotal',
+  'baseAmount',
+];
+
+function extractAmount(value: unknown, depth = 0): bigint | null {
+  if (depth > 3) {
+    return null;
+  }
+  const parsed = toBigInt(value);
+  if (parsed !== null) {
+    return parsed;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of AMOUNT_KEYS) {
+    if (key in value) {
+      const inner = value[key];
+      const amount = extractAmount(inner, depth + 1);
+      if (amount !== null) {
+        return amount;
+      }
+    }
+  }
+  return null;
 }
 
-export async function POST(request: Request) {
+const CHAIN_KEYS: readonly string[] = [
+  'chainId',
+  'chain',
+  'network',
+  'assetNetwork',
+  'blockchain',
+];
+
+function extractChainId(value: unknown, depth = 0): string | null {
+  if (depth > 3) {
+    return null;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value).toString();
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of CHAIN_KEYS) {
+    if (key in value) {
+      const nested = extractChainId(value[key], depth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+const RECIPIENT_KEYS: readonly string[] = [
+  'payToAddress',
+  'recipient',
+  'recipientAddress',
+  'destination',
+  'to',
+];
+
+function extractRecipient(value: unknown, depth = 0): string | null {
+  if (depth > 3) {
+    return null;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of RECIPIENT_KEYS) {
+    if (key in value) {
+      const nested = extractRecipient(value[key], depth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+const SESSION_KEYS: readonly string[] = [
+  'sessionId',
+  'id',
+  'referenceId',
+  'paymentIntentId',
+  'checkoutId',
+];
+
+function extractSessionId(value: unknown, depth = 0): string | null {
+  if (depth > 4) {
+    return null;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value).toString();
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of SESSION_KEYS) {
+    if (key in value) {
+      const nested = extractSessionId(value[key], depth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  for (const entry of Object.values(value)) {
+    const nested = extractSessionId(entry, depth + 1);
+    if (nested) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+const STATUS_KEYS: readonly string[] = ['status', 'state', 'type', 'event'];
+
+function extractStatus(value: unknown, depth = 0): string | null {
+  if (depth > 3) {
+    return null;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of STATUS_KEYS) {
+    if (key in value) {
+      const nested = extractStatus(value[key], depth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+function statusIndicatesPaid(status: string | null) {
+  if (!status) {
+    return false;
+  }
+  const normalised = status.toLowerCase();
+  return (
+    normalised === 'paid' ||
+    normalised === 'confirmed' ||
+    normalised.includes('paid') ||
+    normalised.includes('confirm')
+  );
+}
+
+function isBaseChain(chain: string | null) {
+  if (!chain) {
+    return false;
+  }
+  const value = normaliseString(chain);
+  return value === '8453' || value === '0x2105' || value === 'base-mainnet' || value === 'base';
+}
+
+export async function POST(req: Request) {
+  if (!ENV.PAYMENTS_MODE_B_ENABLED) {
+    return NextResponse.json({ ok: false, reason: 'MODE_B_DISABLED' }, { status: 400 });
+  }
+
   const signature =
-    request.headers.get('x-basepay-signature') ?? request.headers.get('basepay-signature');
-  const rawBody = await request.text();
+    req.headers.get('x-cc-webhook-signature') ??
+    req.headers.get('x-webhook-signature') ??
+    '';
+  const rawBody = await req.text();
+  const verification = await verifyCommerceWebhook(rawBody, signature);
 
-  const verified = verifyBasePayWebhook(rawBody, signature);
-  if (!verified) {
+  if (!verification.ok) {
     return NextResponse.json(
-      { ok: false, reason: 'INVALID_SIGNATURE' },
-      { status: 401, headers: RESPONSE_HEADERS }
-    );
-  }
-
-  let payload: WebhookPayload;
-  try {
-    payload = JSON.parse(rawBody) as WebhookPayload;
-  } catch {
-    return NextResponse.json(
-      { ok: false, reason: 'INVALID_JSON' },
+      { ok: false, reason: verification.code },
       { status: 400, headers: RESPONSE_HEADERS }
     );
   }
-  const data = payload.data ?? payload;
-  const sessionId = data.sessionId ?? data.id;
 
+  const event = verification.event;
+  const payload = isRecord(event) && isRecord(event.data) ? event.data : event;
+  if (!isRecord(payload)) {
+    return NextResponse.json(
+      { ok: false, reason: 'BAD_EVENT' },
+      { status: 400, headers: RESPONSE_HEADERS }
+    );
+  }
+
+  const sessionId = extractSessionId(payload);
   if (!sessionId) {
     return NextResponse.json(
       { ok: false, reason: 'MISSING_SESSION_ID' },
@@ -99,32 +260,33 @@ export async function POST(request: Request) {
     );
   }
 
-  const chain = normalise(data.chain ?? data.chainId);
-  if (chain !== 'base-mainnet' && chain !== '0x2105' && chain !== '8453') {
+  const chainId = extractChainId(payload);
+  if (!isBaseChain(chainId)) {
     return NextResponse.json(
-      { ok: false, reason: 'UNSUPPORTED_CHAIN', chain },
+      { ok: false, reason: 'UNSUPPORTED_CHAIN', chainId },
       { status: 400, headers: RESPONSE_HEADERS }
     );
   }
 
-  const recipient = normalise(data.recipient ?? data.recipientAddress);
-  if (!recipient || recipient !== ENV.PAY_TO_ADDRESS.toLowerCase()) {
+  const recipient = extractRecipient(payload)?.toLowerCase();
+  const expectedRecipient = ENV.PAY_TO_ADDRESS.toLowerCase();
+  if (!recipient || recipient !== expectedRecipient) {
     return NextResponse.json(
-      { ok: false, reason: 'INVALID_RECIPIENT', recipient },
+      { ok: false, reason: 'INVALID_RECIPIENT' },
       { status: 400, headers: RESPONSE_HEADERS }
     );
   }
 
-  const amountWei = extractAmount(data);
-  if (amountWei < ENV.MIN_PRICE_WEI) {
+  const amountWei = extractAmount(payload);
+  if (amountWei === null || amountWei < ENV.MIN_PRICE_WEI) {
     return NextResponse.json(
-      { ok: false, reason: 'UNDER_MINIMUM', amount: amountWei.toString() },
+      { ok: false, reason: 'UNDER_MINIMUM' },
       { status: 400, headers: RESPONSE_HEADERS }
     );
   }
 
-  const status = normalise(data.status);
-  if (status !== 'paid' && status !== 'confirmed') {
+  const status = extractStatus(payload);
+  if (!statusIndicatesPaid(status)) {
     return NextResponse.json(
       { ok: true, pending: true },
       { status: 202, headers: RESPONSE_HEADERS }

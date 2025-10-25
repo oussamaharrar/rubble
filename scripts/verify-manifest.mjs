@@ -183,9 +183,19 @@ try {
   );
 
   assert(Array.isArray(miniapp?.tags) && miniapp.tags.length > 0, 'miniapp.tags must be populated');
-  if (baseBuilder) {
-    assert(Boolean(baseBuilder.ownerAddress), 'baseBuilder.ownerAddress missing');
+
+  const expectedEmbed = `${manifestOrigin}/game-icons/embed.png`;
+  assert(
+    Array.isArray(miniapp?.screenshotUrls) && miniapp.screenshotUrls.includes(expectedEmbed),
+    'miniapp.screenshotUrls must include the embed artwork'
+  );
+
+  if (Array.isArray(miniapp?.embeds) && miniapp.embeds.length > 0) {
+    const embedEntry = miniapp.embeds.find((entry) => entry?.url === expectedEmbed);
+    assert(Boolean(embedEntry), 'miniapp.embeds must reference the embed artwork');
   }
+
+  assert(baseBuilder && baseBuilder.ownerAddress, 'baseBuilder.ownerAddress missing');
 
   console.log('✅ Manifest verified at', manifestUrl);
 } catch (error) {

@@ -9,7 +9,7 @@ const integerString = z
   .regex(/^\d+$/u, 'Expected a non-negative integer string');
 const relativeOrAbsolute = z
   .string()
-  .min(1)
+  .min(1, 'Expected a non-empty string')
   .refine((value) => {
     if (value.startsWith('/')) {
       return true;
@@ -24,47 +24,40 @@ const relativeOrAbsolute = z
 const optionalString = z.string().min(1).optional();
 const booleanFlag = z.enum(['0', '1']);
 
-const DEFAULT_BASE_PAY_API_BASE = 'https://api.basepay.coinbase.com/v1';
-const isProductionDeployment =
-  process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
-
-const inferredMockFlag = (() => {
-  const explicit = process.env.BASE_PAY_MOCK;
-  if (explicit === '0' || explicit === '1') {
-    return explicit;
-  }
-  const haveCredentials = Boolean(
-    process.env.BASE_PAY_API_KEY_ID && process.env.BASE_PAY_API_SECRET
-  );
-  return haveCredentials ? '0' : '1';
-})();
-
 const rawEnv = {
   NEXT_PUBLIC_URL: process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000',
   NEXT_PUBLIC_WEBHOOK_URL:
     process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/webhook',
   NEXT_PUBLIC_BASE_RPC_URL:
-    process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.org',
+    process.env.NEXT_PUBLIC_BASE_RPC_URL ??
+    process.env.BASE_RPC_URL ??
+    'https://api.developer.coinbase.com/rpc/v1/base',
   NEXT_PUBLIC_MIN_PRICE_WEI:
-    process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? process.env.MIN_PRICE_WEI ?? '1',
+    process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
+    process.env.MIN_PRICE_WEI ??
+    '1',
   BASE_RPC_URL:
     process.env.BASE_RPC_URL ??
     process.env.NEXT_PUBLIC_BASE_RPC_URL ??
-    'https://mainnet.base.org',
+    'https://api.developer.coinbase.com/rpc/v1/base',
   PAY_TO_ADDRESS:
     process.env.PAY_TO_ADDRESS ?? '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
-  MIN_PRICE_WEI: process.env.MIN_PRICE_WEI ?? process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '1',
+  MIN_PRICE_WEI:
+    process.env.MIN_PRICE_WEI ??
+    process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
+    '1',
   FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE,
-  BASE_PAY_API_KEY_ID: process.env.BASE_PAY_API_KEY_ID,
-  BASE_PAY_API_SECRET: process.env.BASE_PAY_API_SECRET,
-  BASE_PAY_API_BASE:
-    process.env.BASE_PAY_API_BASE ??
-    (isProductionDeployment ? DEFAULT_BASE_PAY_API_BASE : undefined),
-  BASE_PAY_MOCK: inferredMockFlag,
+  PAYMENTS_API_BASE: process.env.PAYMENTS_API_BASE,
+  PAYMENTS_API_KEY_ID: process.env.PAYMENTS_API_KEY_ID,
+  PAYMENTS_API_SECRET: process.env.PAYMENTS_API_SECRET,
+  PAYMENTS_WEBHOOK_SECRET: process.env.PAYMENTS_WEBHOOK_SECRET,
+  BASE_PAY_MOCK: process.env.BASE_PAY_MOCK ?? '0',
   BASE_BUILDER_OWNER_ADDRESS:
-    process.env.BASE_BUILDER_OWNER_ADDRESS ?? '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
+    process.env.BASE_BUILDER_OWNER_ADDRESS ??
+    process.env.PAY_TO_ADDRESS ??
+    '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
 } as const;
 
 const EnvSchema = z
@@ -79,9 +72,10 @@ const EnvSchema = z
     FARCASTER_ACCOUNT_HEADER: optionalString,
     FARCASTER_ACCOUNT_PAYLOAD: optionalString,
     FARCASTER_ACCOUNT_SIGNATURE: optionalString,
-    BASE_PAY_API_KEY_ID: optionalString,
-    BASE_PAY_API_SECRET: optionalString,
-    BASE_PAY_API_BASE: url.optional(),
+    PAYMENTS_API_BASE: url.optional(),
+    PAYMENTS_API_KEY_ID: optionalString,
+    PAYMENTS_API_SECRET: optionalString,
+    PAYMENTS_WEBHOOK_SECRET: optionalString,
     BASE_PAY_MOCK: booleanFlag,
     BASE_BUILDER_OWNER_ADDRESS: evmAddress.optional(),
   })
@@ -100,23 +94,19 @@ const EnvSchema = z
       });
     }
 
-    const usingMock = value.BASE_PAY_MOCK === '1';
-    const haveKeys = Boolean(
-      value.BASE_PAY_API_KEY_ID && value.BASE_PAY_API_SECRET
-    );
-    if (!usingMock && !haveKeys) {
+    const paymentsFields: Array<string | undefined> = [
+      value.PAYMENTS_API_BASE,
+      value.PAYMENTS_API_KEY_ID,
+      value.PAYMENTS_API_SECRET,
+      value.PAYMENTS_WEBHOOK_SECRET,
+    ];
+    const suppliedPayments = paymentsFields.filter(Boolean).length;
+    if (suppliedPayments > 0 && suppliedPayments < paymentsFields.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'BASE_PAY_API_KEY_ID and BASE_PAY_API_SECRET are required',
-        path: ['BASE_PAY_API_KEY_ID'],
-      });
-    }
-
-    if (!usingMock && !value.BASE_PAY_API_BASE) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'BASE_PAY_API_BASE must be configured when not mocking Base Pay',
-        path: ['BASE_PAY_API_BASE'],
+        message:
+          'When enabling Commerce/OnchainKit payments, all PAYMENTS_* variables must be provided',
+        path: ['PAYMENTS_API_BASE'],
       });
     }
   });
@@ -124,20 +114,32 @@ const EnvSchema = z
 const parsed = EnvSchema.parse(rawEnv);
 
 const MIN_PRICE_WEI = BigInt(parsed.MIN_PRICE_WEI);
-const NEXT_PUBLIC_MIN_PRICE_WEI = parsed.NEXT_PUBLIC_MIN_PRICE_WEI ?? parsed.MIN_PRICE_WEI;
+const NEXT_PUBLIC_MIN_PRICE_WEI =
+  parsed.NEXT_PUBLIC_MIN_PRICE_WEI ?? parsed.MIN_PRICE_WEI;
+
+const modeBEnabled = Boolean(
+  parsed.PAYMENTS_API_BASE &&
+  parsed.PAYMENTS_API_KEY_ID &&
+  parsed.PAYMENTS_API_SECRET &&
+  parsed.PAYMENTS_WEBHOOK_SECRET
+);
 
 export const ENV = {
   BASE_RPC_URL: parsed.BASE_RPC_URL,
   PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
   MIN_PRICE_WEI,
+  MIN_PRICE_WEI_RAW: parsed.MIN_PRICE_WEI,
   FARCASTER_ACCOUNT_HEADER: parsed.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: parsed.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: parsed.FARCASTER_ACCOUNT_SIGNATURE,
-  BASE_PAY_API_KEY_ID: parsed.BASE_PAY_API_KEY_ID,
-  BASE_PAY_API_SECRET: parsed.BASE_PAY_API_SECRET,
-  BASE_PAY_API_BASE: parsed.BASE_PAY_API_BASE?.replace(/\/$/, ''),
+  PAYMENTS_API_BASE: parsed.PAYMENTS_API_BASE?.replace(/\/$/, ''),
+  PAYMENTS_API_KEY_ID: parsed.PAYMENTS_API_KEY_ID,
+  PAYMENTS_API_SECRET: parsed.PAYMENTS_API_SECRET,
+  PAYMENTS_WEBHOOK_SECRET: parsed.PAYMENTS_WEBHOOK_SECRET,
+  PAYMENTS_MODE_B_ENABLED: modeBEnabled,
   BASE_PAY_MOCK: parsed.BASE_PAY_MOCK,
-  BASE_BUILDER_OWNER_ADDRESS: parsed.BASE_BUILDER_OWNER_ADDRESS,
+  BASE_BUILDER_OWNER_ADDRESS:
+    parsed.BASE_BUILDER_OWNER_ADDRESS ?? parsed.PAY_TO_ADDRESS,
   NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
@@ -149,6 +151,7 @@ export const PUBLIC_ENV = {
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
   NEXT_PUBLIC_MIN_PRICE_WEI,
+  PAYMENTS_MODE_B_ENABLED: modeBEnabled ? '1' : '0',
 } as const;
 
 export type Env = typeof ENV;
