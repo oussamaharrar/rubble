@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import MiniAppShell from './MiniAppShell';
 import WalletBar from './WalletBar';
 import Modal from './Modal';
@@ -10,6 +11,9 @@ import MissionsModal from './MissionsModal';
 import SummaryModal from './SummaryModal';
 import ShopModal from './ShopModal';
 import StatsModal, { type LifetimeStats } from './StatsModal';
+import PrePlayModal from './PrePlayModal';
+import PauseOverlay from './PauseOverlay';
+import FullScreenButton from './FullScreenButton';
 import GameCanvas from '@/app/game/GameCanvas';
 import { useGameStore } from '@/lib/store';
 
@@ -59,12 +63,17 @@ export default function HomeContent() {
   const stats = useGameStore((state) => state.stats);
   const now = useGameStore((state) => state.now);
   const missions = useGameStore((state) => state.missions);
+  const pauseGame = useGameStore((state) => state.pause);
+  const resumeGame = useGameStore((state) => state.resume);
+  const paused = useGameStore((state) => state.paused);
 
   const [missionsOpen, setMissionsOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [howOpen, setHowOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [prePlayOpen, setPrePlayOpen] = useState(false);
+  const [pauseReason, setPauseReason] = useState<'manual' | 'visibility' | 'wallet' | null>(null);
   const [lifetime, setLifetime] = useState<LifetimeStats>(() => readLifetime());
 
   useEffect(() => {
@@ -100,26 +109,104 @@ export default function HomeContent() {
     }
   }, [phase, stats.score, stats.bestCombo, now]);
 
-  const handleReplay = useCallback(() => {
+  useEffect(() => {
+    if (phase === 'playing' || phase === 'storm') {
+      setMissionsOpen(false);
+      setShopOpen(false);
+      setHowOpen(false);
+      setStatsOpen(false);
+    }
+    if (phase === 'start') {
+      setPauseReason(null);
+    }
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== 'playing' && phase !== 'storm') {
+      return;
+    }
+    const handleVisibility = () => {
+      if (document.hidden) {
+        pauseGame();
+        setPauseReason((current) => current ?? 'visibility');
+      }
+    };
+    const handleBlur = () => {
+      pauseGame();
+      setPauseReason((current) => current ?? 'visibility');
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [pauseGame, phase]);
+
+  const handleStartRequest = useCallback(() => {
+    setPrePlayOpen(true);
+  }, []);
+
+  const handleBeginRun = useCallback(() => {
     setSummaryOpen(false);
+    setPrePlayOpen(false);
+    resumeGame();
     startRun();
-  }, [startRun]);
+    setPauseReason(null);
+  }, [resumeGame, startRun]);
 
   const handleSummaryClose = useCallback(() => {
     setSummaryOpen(false);
     resetToStart();
   }, [resetToStart]);
 
+  const handleReplay = useCallback(() => {
+    setSummaryOpen(false);
+    setPrePlayOpen(true);
+  }, []);
+
+  const handleManualPause = useCallback(() => {
+    pauseGame();
+    setPauseReason('manual');
+  }, [pauseGame]);
+
+  const handleWalletPause = useCallback(() => {
+    pauseGame();
+    setPauseReason('wallet');
+  }, [pauseGame]);
+
+  const handleResume = useCallback(() => {
+    resumeGame();
+    setPauseReason(null);
+  }, [resumeGame]);
+
+  const handleExit = useCallback(() => {
+    resumeGame();
+    setPauseReason(null);
+    setSummaryOpen(false);
+    setPrePlayOpen(false);
+    resetToStart();
+  }, [resetToStart, resumeGame]);
+
   const showHud = phase === 'playing' || phase === 'storm';
   const showStartScreen = phase === 'start';
+  const isInRun = showHud;
 
-  const completedMissions = useMemo(() => missions.filter((mission) => mission.completed).length, [missions]);
+  const completedMissions = useMemo(
+    () => missions.filter((mission) => mission.completed).length,
+    [missions]
+  );
 
   return (
     <MiniAppShell>
-      <div className="flex h-full flex-col bg-gradient-to-b from-slate-950 via-slate-950/80 to-slate-950">
-        <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <WalletBar />
+      <div className="flex h-full flex-col bg-gradient-to-b from-slate-950 via-slate-950/85 to-slate-950">
+        <motion.header
+          animate={{ opacity: isInRun ? 0 : 1, y: isInRun ? -20 : 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+          style={{ pointerEvents: isInRun ? 'none' : 'auto' }}
+          className="flex items-center justify-between border-b border-white/10 px-4 py-3"
+        >
+          <WalletBar onWalletModalOpen={handleWalletPause} />
           <div className="flex items-center gap-3 text-xs text-slate-300">
             <button
               type="button"
@@ -136,14 +223,28 @@ export default function HomeContent() {
               Missions {missions.length > 0 ? `(${completedMissions}/${missions.length})` : ''}
             </button>
           </div>
-        </header>
+        </motion.header>
         <div className="relative flex-1 overflow-hidden p-4">
           <div className="relative h-full w-full overflow-hidden rounded-3xl border border-white/10 bg-slate-950/60 shadow-inner shadow-black/40">
             <GameCanvas />
-            {showHud ? <HUD onOpenMissions={() => setMissionsOpen(true)} onOpenShop={() => setShopOpen(true)} /> : null}
+            <motion.div
+              className="pointer-events-none absolute inset-0 z-10 bg-slate-950/75"
+              initial={false}
+              animate={{ opacity: isInRun ? 1 : 0 }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+            />
+            <FullScreenButton className="absolute left-4 top-4 z-30" />
+            {showHud ? (
+              <HUD
+                onPause={handleManualPause}
+                onBoostFallback={() => setShopOpen(true)}
+                onWalletOpen={handleWalletPause}
+              />
+            ) : null}
+            <PauseOverlay open={paused} reason={pauseReason} onResume={handleResume} onExit={handleExit} />
             <StartScreen
               open={showStartScreen}
-              onPlay={startRun}
+              onPlay={handleStartRequest}
               onOpenMissions={() => setMissionsOpen(true)}
               onOpenHowTo={() => setHowOpen(true)}
               onOpenStats={() => setStatsOpen(true)}
@@ -151,7 +252,12 @@ export default function HomeContent() {
             />
           </div>
         </div>
-        <footer className="flex items-center justify-between border-t border-white/5 px-4 py-3 text-xs text-slate-400">
+        <motion.footer
+          animate={{ opacity: isInRun ? 0 : 1, y: isInRun ? 20 : 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+          style={{ pointerEvents: isInRun ? 'none' : 'auto' }}
+          className="flex items-center justify-between border-t border-white/5 px-4 py-3 text-xs text-slate-400"
+        >
           <button
             type="button"
             onClick={() => setHowOpen(true)}
@@ -166,12 +272,18 @@ export default function HomeContent() {
           >
             Stats
           </button>
-        </footer>
+        </motion.footer>
       </div>
       <MissionsModal open={missionsOpen} onClose={() => setMissionsOpen(false)} />
       <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} />
       <SummaryModal open={summaryOpen} onClose={handleSummaryClose} onReplay={handleReplay} />
       <StatsModal open={statsOpen} onClose={() => setStatsOpen(false)} stats={lifetime} />
+      <PrePlayModal
+        open={prePlayOpen}
+        onClose={() => setPrePlayOpen(false)}
+        onStart={handleBeginRun}
+        onWalletModalOpen={handleWalletPause}
+      />
       <Modal
         open={howOpen}
         onClose={() => setHowOpen(false)}

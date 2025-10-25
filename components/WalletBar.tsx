@@ -20,7 +20,11 @@ function normalizeChainId(chainId: string | null) {
   return chainId ? chainId.toLowerCase() : null;
 }
 
-export default function WalletBar() {
+interface WalletBarProps {
+  onWalletModalOpen?: () => void;
+}
+
+export default function WalletBar({ onWalletModalOpen }: WalletBarProps) {
   const address = useWalletStore((state) => state.address);
   const chainId = useWalletStore((state) => state.chainId);
   const setWallet = useWalletStore((state) => state.setWallet);
@@ -111,6 +115,7 @@ export default function WalletBar() {
     }
     try {
       setConnecting(true);
+      onWalletModalOpen?.();
       const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
       const [primary] = accounts;
       const currentChain = await window.ethereum
@@ -126,12 +131,13 @@ export default function WalletBar() {
     } finally {
       setConnecting(false);
     }
-  }, [connecting, switching, setWallet]);
+  }, [connecting, onWalletModalOpen, setWallet, switching]);
 
   const handleSwitchNetwork = useCallback(async () => {
     if (switching) return;
     try {
       setSwitching(true);
+      onWalletModalOpen?.();
       const nextAddress = await ensureBaseNetwork();
       setWallet(nextAddress, BASE_CHAIN_ID_HEX);
       setStatusMessage('Switched to Base Mainnet.');
@@ -143,7 +149,7 @@ export default function WalletBar() {
     } finally {
       setSwitching(false);
     }
-  }, [setWallet, switching]);
+  }, [onWalletModalOpen, setWallet, switching]);
 
   const statusLabel = useMemo(() => {
     if (!hasProvider) {

@@ -40,4 +40,5 @@ export type RunStats = {
   timeLeft: number;
   lastColor?: BubbleColor;
   chainLen: number;
+  energyOrbs: number;
 };

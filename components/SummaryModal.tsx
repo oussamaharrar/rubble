@@ -1,6 +1,8 @@
 'use client';
 
 import Modal from './Modal';
+import { useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
 
 interface SummaryModalProps {
@@ -13,8 +15,13 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
   const stats = useGameStore((state) => state.stats);
   const missions = useGameStore((state) => state.missions);
   const now = useGameStore((state) => state.now);
+  const boosterBank = useGameStore((state) => state.boosterBank);
 
   const elapsed = Math.max(0, Math.round(now / 1000));
+  const missionSummaries = useMemo(() => missions.map((mission) => {
+    const progressPct = Math.min(100, Math.round((mission.progress / mission.target) * 100));
+    return { ...mission, progressPct };
+  }), [missions]);
 
   return (
     <Modal
@@ -28,7 +35,7 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
           onClick={onReplay}
           className="rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
         >
-          Replay
+          Retry (free if Boost active)
         </button>,
         <button
           key="close"
@@ -58,17 +65,39 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
           <p className="text-2xl font-semibold text-slate-100">{elapsed}s</p>
         </div>
       </div>
-      <div className="mt-4 space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Mission Progress</p>
-        {missions.map((mission) => {
-          const progressPct = Math.min(100, Math.round((mission.progress / mission.target) * 100));
-          return (
-            <div key={mission.id} className="flex items-center justify-between gap-2 rounded-xl bg-slate-900/50 px-3 py-2 text-xs text-slate-200">
-              <span className="truncate">{mission.label}</span>
-              <span className="font-semibold text-sky-200">{mission.completed ? 'Done' : `${progressPct}%`}</span>
-            </div>
-          );
-        })}
+      <div className="mt-4 space-y-3">
+        <div className="flex items-center justify-between rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-sky-200/70">Energy Orbs Earned</p>
+            <p className="text-lg font-semibold">{stats.energyOrbs}</p>
+          </div>
+          <div className="text-xs text-slate-200">
+            {boosterBank.freeOrbs > 0 ? `${boosterBank.freeOrbs} free boost${boosterBank.freeOrbs > 1 ? 's' : ''} ready.` : 'Collect orbs by storm hunting.'}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Mission Progress</p>
+          <div className="mt-2 space-y-2">
+            {missionSummaries.map((mission) => (
+              <div key={mission.id} className="space-y-1 rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-xs text-slate-200">
+                <div className="flex items-center justify-between">
+                  <span className="truncate pr-2">{mission.label}</span>
+                  <span className="font-semibold text-sky-200">
+                    {mission.completed ? 'Done' : `${mission.progressPct}%`}
+                  </span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${mission.completed ? 100 : mission.progressPct}%` }}
+                    transition={{ type: 'spring', stiffness: 120, damping: 20 }}
+                    className="h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-500"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </Modal>
   );
