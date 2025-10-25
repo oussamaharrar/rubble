@@ -9,48 +9,46 @@ const RESPONSE_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST,OPTIONS',
   'Access-Control-Allow-Headers': 'content-type',
-};
+} as const;
 
 export function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: RESPONSE_HEADERS,
-  });
+  return new Response(null, { status: 204, headers: RESPONSE_HEADERS });
 }
 
-type SessionRequestBody = {
-  sku?: string;
-  amountWei?: string | number | bigint;
-  buyerAddress?: string;
-};
+export async function POST(req: Request) {
+  const body = (await req.json().catch(() => ({}))) as {
+    sku?: unknown;
+    amountWei?: unknown;
+  };
 
-export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
-  const sku = body.sku ?? 'booster_time_freeze';
-  const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
+  const sku = typeof body.sku === 'string' && body.sku ? body.sku : undefined;
 
-  let amount: bigint;
-  try {
-    amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
-  } catch {
-    return NextResponse.json(
-      { ok: false, reason: 'INVALID_AMOUNT' },
-      { status: 400, headers: RESPONSE_HEADERS }
-    );
+  let normalizedAmount: string | undefined;
+  if (typeof body.amountWei !== 'undefined') {
+    try {
+      const amountBigInt = BigInt(body.amountWei as never);
+      if (amountBigInt <= 0n) {
+        return NextResponse.json(
+          { ok: false, reason: 'INVALID_AMOUNT', error: 'Amount must be positive' },
+          { status: 400, headers: RESPONSE_HEADERS }
+        );
+      }
+      if (amountBigInt < ENV.MIN_PRICE_WEI) {
+        return NextResponse.json(
+          { ok: false, reason: 'UNDER_MINIMUM_AMOUNT', error: 'Amount below minimum' },
+          { status: 400, headers: RESPONSE_HEADERS }
+        );
+      }
+      normalizedAmount = amountBigInt.toString();
+    } catch {
+      return NextResponse.json(
+        { ok: false, reason: 'INVALID_AMOUNT', error: 'Amount must be numeric' },
+        { status: 400, headers: RESPONSE_HEADERS }
+      );
+    }
   }
 
-  if (amount < ENV.MIN_PRICE_WEI) {
-    return NextResponse.json(
-      { ok: false, reason: 'UNDER_MINIMUM_AMOUNT' },
-      { status: 400, headers: RESPONSE_HEADERS }
-    );
-  }
-
-  const result = await createBasePaySession({
-    sku,
-    amountWei: amount,
-    buyerAddress: body.buyerAddress,
-  });
+  const result = await createBasePaySession({ sku, amountWei: normalizedAmount });
 
   if (result.ok) {
     return NextResponse.json(
@@ -58,15 +56,9 @@ export async function POST(request: Request) {
       { headers: RESPONSE_HEADERS }
     );
   }
-
-  const status = result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+  const status = result.status ?? (result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502);
   return NextResponse.json(
-    {
-      ok: false,
-      reason: result.code,
-      error: result.detail,
-      status: result.status,
-    },
+    { ok: false, reason: result.code, error: result.detail },
     { status, headers: RESPONSE_HEADERS }
   );
 }

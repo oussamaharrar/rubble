@@ -70,23 +70,49 @@ async function loadFromBuild() {
 }
 
 async function loadFromPreview(baseUrl) {
+  if (!baseUrl) return null;
   const normalisedBase = normaliseBase(baseUrl);
   const manifestUrl = `${normalisedBase}/.well-known/farcaster.json`;
-  const response = await fetch(manifestUrl, {
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'rubble-manifest-verifier/1.0',
-    },
-    cache: 'no-store',
-  });
-  if (response.status === 401 || response.status === 403) {
-    return { manifest: undefined, manifestUrl, normalisedBase, status: response.status };
+  try {
+    const response = await fetch(manifestUrl, {
+      headers: {
+        accept: 'application/json',
+        'user-agent': 'rubble-postbuild/1.0',
+      },
+      cache: 'no-store',
+    });
+    if ([401, 403, 404].includes(response.status)) {
+      console.log(
+        `ℹ️ Preview manifest not publicly available (${response.status}); using compiled output.`,
+        manifestUrl
+      );
+      return null;
+    }
+    if (!response.ok) {
+      console.log(
+        `ℹ️ Failed to fetch preview manifest (${response.status}); using compiled output.`,
+        manifestUrl
+      );
+      return null;
+    }
+    const manifest = await response.json();
+    return { manifest, manifestUrl, previewBase: normalisedBase };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`ℹ️ Preview fetch error: ${message}; using compiled output.`, manifestUrl);
+    return null;
   }
-  if (!response.ok) {
-    throw new Error(`Failed to fetch manifest: ${response.status}`);
+}
+
+function assertHomeUrl(manifest, previewBase) {
+  if (!previewBase) return true;
+  const home = manifest?.miniapp?.homeUrl || '';
+  const a = new URL(home);
+  const b = new URL(previewBase);
+  if (a.host !== b.host) {
+    throw new Error(`miniapp.homeUrl host (${a.host}) != preview host (${b.host})`);
   }
-  const manifest = await response.json();
-  return { manifest, manifestUrl, normalisedBase, status: response.status };
+  return true;
 }
 
 try {
@@ -95,23 +121,13 @@ try {
   let fetchedFromPreview = false;
 
   const baseUrl = getPreviewBaseUrl();
-  if (baseUrl) {
-    try {
-      const result = await loadFromPreview(baseUrl);
-      if (result.manifest) {
-        manifest = result.manifest;
-        manifestUrl = result.manifestUrl;
-        fetchedFromPreview = true;
-        console.log('ℹ️ Validating remote manifest at', manifestUrl);
-      } else {
-        console.warn(
-          `⚠️ Preview manifest returned ${result.status}. Falling back to compiled output.`,
-          result.manifestUrl
-        );
-      }
-    } catch (error) {
-      console.warn('⚠️ Failed to fetch preview manifest, falling back to build output:', error);
-    }
+  const previewResult = await loadFromPreview(baseUrl);
+  const previewBase = previewResult?.previewBase;
+  if (previewResult?.manifest) {
+    manifest = previewResult.manifest;
+    manifestUrl = previewResult.manifestUrl;
+    fetchedFromPreview = true;
+    console.log('ℹ️ Validating remote manifest at', manifestUrl);
   }
 
   if (!manifest) {
@@ -136,15 +152,10 @@ try {
 
   const manifestOrigin = normaliseBase(manifestHomeUrl.origin);
 
-  if (preview && fetchedFromPreview) {
-    const previewUrl = new URL(preview);
-    if (manifestHomeUrl.host !== previewUrl.host) {
-      console.warn(
-        `⚠️ miniapp.homeUrl host mismatch: expected ${previewUrl.host}, received ${manifestHomeUrl.host}`
-      );
-      throw new Error('miniapp.homeUrl must use the preview deployment host');
-    }
-    const expectedPreviewBase = normaliseBase(previewUrl.origin);
+  const previewForValidation = fetchedFromPreview ? previewBase ?? preview : undefined;
+  if (previewForValidation) {
+    assertHomeUrl(manifest, previewForValidation);
+    const expectedPreviewBase = normaliseBase(previewForValidation);
     assert(
       manifestOrigin === expectedPreviewBase,
       `miniapp.homeUrl mismatch: expected ${expectedPreviewBase}, received ${manifestHomeRaw}`
@@ -168,12 +179,9 @@ try {
     throw new Error('miniapp.webhookUrl must be a valid absolute URL');
   }
 
-  if (preview && fetchedFromPreview) {
-    const previewHost = new URL(preview).host;
+  if (previewForValidation) {
+    const previewHost = new URL(previewForValidation).host;
     if (webhookUrl.host !== previewHost) {
-      console.warn(
-        `⚠️ miniapp.webhookUrl host mismatch: expected ${previewHost}, received ${webhookUrl.host}`
-      );
       throw new Error('miniapp.webhookUrl must use the preview deployment host');
     }
   }
