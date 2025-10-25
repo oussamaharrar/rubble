@@ -26,31 +26,29 @@ type SessionRequestBody = {
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
-  const sku = body.sku ?? 'booster_time_freeze';
-  const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
+  const sku = body.sku;
+  const rawAmount = body.amountWei;
 
-  let amount: bigint;
-  try {
-    amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
-  } catch {
-    return NextResponse.json(
-      { ok: false, reason: 'INVALID_AMOUNT' },
-      { status: 400, headers: RESPONSE_HEADERS }
-    );
+  let normalizedAmount: string | undefined;
+  if (rawAmount !== undefined) {
+    try {
+      const amountBigInt = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
+      if (amountBigInt < ENV.MIN_PRICE_WEI) {
+        return NextResponse.json(
+          { ok: false, reason: 'UNDER_MINIMUM_AMOUNT' },
+          { status: 400, headers: RESPONSE_HEADERS }
+        );
+      }
+      normalizedAmount = amountBigInt.toString();
+    } catch {
+      return NextResponse.json(
+        { ok: false, reason: 'INVALID_AMOUNT' },
+        { status: 400, headers: RESPONSE_HEADERS }
+      );
+    }
   }
 
-  if (amount < ENV.MIN_PRICE_WEI) {
-    return NextResponse.json(
-      { ok: false, reason: 'UNDER_MINIMUM_AMOUNT' },
-      { status: 400, headers: RESPONSE_HEADERS }
-    );
-  }
-
-  const result = await createBasePaySession({
-    sku,
-    amountWei: amount,
-    buyerAddress: body.buyerAddress,
-  });
+  const result = await createBasePaySession({ sku, amountWei: normalizedAmount });
 
   if (result.ok) {
     return NextResponse.json(
@@ -59,14 +57,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const status = result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+  const status = result.status ?? (result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502);
   return NextResponse.json(
-    {
-      ok: false,
-      reason: result.code,
-      error: result.detail,
-      status: result.status,
-    },
+    { ok: false, reason: result.code, error: result.detail },
     { status, headers: RESPONSE_HEADERS }
   );
 }
