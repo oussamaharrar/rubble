@@ -2,13 +2,13 @@ import type { Metadata } from 'next';
 import HomeContent from '@/components/HomeContent';
 
 const description =
-  'Tap bubbles, rack combos, and trigger Base Pay boosters in this Base mini arcade.';
+  'Race Base storms, build color combo chains, and bank booster orbs in the Rubble Rush time attack.';
 
 export const metadata: Metadata = {
-  title: 'Rubble — Bubble Hunt',
+  title: 'Rubble Rush — Storm & Combos',
   description,
   openGraph: {
-    title: 'Rubble — Bubble Hunt',
+    title: 'Rubble Rush — Storm & Combos',
     description,
     url: '/',
     type: 'website',
@@ -17,12 +17,12 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Rubble — Bubble Hunt',
+    title: 'Rubble Rush — Storm & Combos',
     description,
     images: ['/game-icons/og.png'],
   },
   other: {
-    'fc:miniapp:name': 'Rubble (Bubble Hunt)',
+    'fc:miniapp:name': 'Rubble Rush',
     'fc:miniapp:image': '/game-icons/embed.png',
     'fc:miniapp:url': '/',
     'fc:miniapp:button:text': 'Play',
