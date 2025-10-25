@@ -81,12 +81,11 @@ export default function BoosterStore({ boosters, walletConnected, onBoosterTrigg
             <div className="mt-3">
               <PayButton
                 sku={booster.sku}
-                label={booster.label}
                 amountWei={booster.priceWei}
                 boosterType={booster.type}
                 durationMs={booster.durationMs}
                 disabled={!walletConnected || seconds > 0}
-                icon={<Image src={booster.icon} alt={`${booster.label} icon`} width={28} height={28} />}
+                floating={false}
               />
             </div>
           </div>
