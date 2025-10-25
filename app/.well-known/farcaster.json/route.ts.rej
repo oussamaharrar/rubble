@@ -1,0 +1,68 @@
+diff a/app/.well-known/farcaster.json/route.ts b/app/.well-known/farcaster.json/route.ts	(rejected hunks)
+@@ -5,61 +5,62 @@ export const dynamic = 'force-dynamic';
+ 
+ function getOriginFromRequest(req: Request) {
+   const url = new URL(req.url);
+   const proto = req.headers.get('x-forwarded-proto') || url.protocol.replace(':', '');
+   const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || url.host;
+   return `${proto}://${host}`;
+ }
+ 
+ export async function GET(request: Request) {
+   const origin = getOriginFromRequest(request);
+ 
+   const iconUrl = `${origin}/game-icons/icon.png`;
+   const splashUrl = `${origin}/game-icons/splash.png`;
+   const ogUrl = `${origin}/game-icons/og.png`;
+   const homeUrl = origin;
+ 
+   const envWebhook = ENV.NEXT_PUBLIC_WEBHOOK_URL || '/api/pay/webhook';
+   const webhookUrl = envWebhook.startsWith('http')
+     ? envWebhook
+     : `${origin}${envWebhook.startsWith('/') ? envWebhook : `/api/pay/webhook`}`;
+ 
+   const body: Record<string, unknown> = {
+     version: '1',
+     miniapp: {
+       version: '1',
+-      name: 'Rubble (Bubble Hunt)',
+-      subtitle: 'Tap • Combo • Boost on Base',
+-      description: 'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
++      name: 'Rubble (Bubble Hunt Evolution)',
++      subtitle: 'Neon rhythm hunting on Base',
++      description:
++        'Chain neon bubbles, unlock Base Pay boosters, and chase the Rubble Crown with color combos and rush waves.',
+       homeUrl,
+       iconUrl,
+       splashImageUrl: splashUrl,
+       splashBackgroundColor: '#04060B',
+       ogImageUrl: ogUrl,
+       webhookUrl,
+       primaryCategory: 'games',
+-      tags: ['game', 'arcade', 'base', 'booster'],
++      tags: ['game', 'arcade', 'base', 'booster', 'farcaster'],
+       screenshotUrls: [`${origin}/screenshot-portrait.png`],
+       buttonTitle: 'Play',
+     },
+   };
+ 
+   if (
+     ENV.FARCASTER_ACCOUNT_HEADER &&
+     ENV.FARCASTER_ACCOUNT_PAYLOAD &&
+     ENV.FARCASTER_ACCOUNT_SIGNATURE
+   ) {
+     body.accountAssociation = {
+       header: ENV.FARCASTER_ACCOUNT_HEADER,
+       payload: ENV.FARCASTER_ACCOUNT_PAYLOAD,
+       signature: ENV.FARCASTER_ACCOUNT_SIGNATURE,
+     };
+   }
+ 
+   if (ENV.BASE_BUILDER_OWNER_ADDRESS) {
+     body.baseBuilder = { ownerAddress: ENV.BASE_BUILDER_OWNER_ADDRESS };
+   }
+ 
+   return NextResponse.json(body, {
+     headers: { 'Cache-Control': 'public, max-age=600' },
+   });
+ }

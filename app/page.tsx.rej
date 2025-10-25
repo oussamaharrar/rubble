@@ -1,0 +1,50 @@
+diff a/app/page.tsx b/app/page.tsx	(rejected hunks)
+@@ -1,41 +1,39 @@
+ import type { Metadata } from 'next';
+ import MiniAppShell from '@/components/MiniAppShell';
+-import BubbleGameCanvas from './game/BubbleGameCanvas';
+-import PayButton from '@/components/PayButton';
++import GameExperience from './game/GameExperience';
+ 
+ const description =
+-  'Tap bubbles, rack combos, and trigger Base Pay boosters in this Base mini arcade.';
++  'Tap neon bubbles in rhythm, chain colors, unlock boosters with Base Pay, and race for the Rubble Crown.';
+ 
+ export const metadata: Metadata = {
+-  title: 'Rubble — Bubble Hunt',
++  title: 'Rubble — Bubble Hunt Evolution',
+   description,
+   openGraph: {
+-    title: 'Rubble — Bubble Hunt',
++    title: 'Rubble — Bubble Hunt Evolution',
+     description,
+     url: '/',
+     type: 'website',
+     siteName: 'Rubble',
+     images: ['/game-icons/og.png'],
+   },
+   twitter: {
+     card: 'summary_large_image',
+-    title: 'Rubble — Bubble Hunt',
++    title: 'Rubble — Bubble Hunt Evolution',
+     description,
+     images: ['/game-icons/og.png'],
+   },
+   other: {
+-    'fc:miniapp:name': 'Rubble (Bubble Hunt)',
++    'fc:miniapp:name': 'Rubble (Bubble Hunt Evolution)',
+     'fc:miniapp:image': '/game-icons/embed.png',
+     'fc:miniapp:url': '/',
+     'fc:miniapp:button:text': 'Play',
+   },
+ };
+ 
+ export default function Page() {
+   return (
+     <MiniAppShell>
+-      <BubbleGameCanvas />
+-      <PayButton />
++      <GameExperience />
+     </MiniAppShell>
+   );
+ }
