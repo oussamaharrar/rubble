@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { formatEther } from 'viem';
 import { ensureBaseNetwork } from '@/lib/base';
+import type { BoosterType } from '@/lib/game/types';
 
 const PAY_TO_ADDRESS = process.env.NEXT_PUBLIC_PAY_TO_ADDRESS ?? '';
 const SESSION_SKU = 'booster_time_freeze';
@@ -17,16 +18,16 @@ const MIN_PRICE_WEI = (() => {
 
 const BOOSTER_DURATION_MS = 5000;
 
-function formatMinPrice() {
-  if (MIN_PRICE_WEI === 0n) return '0 ETH';
-  return `${formatEther(MIN_PRICE_WEI)} ETH`;
+function formatPrice(amount: bigint) {
+  if (amount === 0n) return '0 ETH';
+  return `${formatEther(amount)} ETH`;
 }
 
-function dispatchBooster(duration: number) {
+function dispatchBooster(type: BoosterType, duration: number) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
     new CustomEvent('rubble:booster', {
-      detail: { duration },
+      detail: { type, duration },
     })
   );
 }
@@ -45,7 +46,25 @@ type SessionResponse = {
 
 type Status = 'idle' | 'pending' | 'success' | 'error';
 
-export default function PayButton() {
+interface PayButtonProps {
+  sku?: string;
+  label?: string;
+  amountWei?: bigint;
+  boosterType?: BoosterType;
+  durationMs?: number;
+  disabled?: boolean;
+  icon?: ReactNode;
+}
+
+export default function PayButton({
+  sku = SESSION_SKU,
+  label,
+  amountWei = MIN_PRICE_WEI,
+  boosterType = 'time-freeze',
+  durationMs = BOOSTER_DURATION_MS,
+  disabled: disabledProp = false,
+  icon,
+}: PayButtonProps = {}) {
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>('');
   const timeoutRef = useRef<number | undefined>(undefined);
@@ -115,8 +134,8 @@ export default function PayButton() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          sku: SESSION_SKU,
-          amountWei: MIN_PRICE_WEI.toString(),
+          sku,
+          amountWei: amountWei.toString(),
           buyerAddress: address,
         }),
         cache: 'no-store',
@@ -149,16 +168,18 @@ export default function PayButton() {
 
       setStatus('success');
       setMessage('Booster activated! 🎉');
-      dispatchBooster(BOOSTER_DURATION_MS);
+      dispatchBooster(boosterType, durationMs);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Payment failed';
       setStatus('error');
       setMessage(reason);
       console.error(error);
     }
-  }, [pollForGrant, status]);
+  }, [amountWei, boosterType, durationMs, pollForGrant, sku, status]);
 
-  const disabled = status === 'pending';
+  const disabled = disabledProp || status === 'pending';
+  const formattedPrice = formatPrice(amountWei);
+  const idleLabel = label ?? `Boost on Base (${formattedPrice})`;
 
   return (
     <div className="pay-button-container">
@@ -168,7 +189,14 @@ export default function PayButton() {
         onClick={handlePay}
         disabled={disabled}
       >
-        {status === 'pending' ? 'Waiting…' : `Boost on Base (${formatMinPrice()})`}
+        {status === 'pending' ? (
+          'Waiting…'
+        ) : (
+          <span className="flex items-center gap-2">
+            {icon}
+            <span>{idleLabel}</span>
+          </span>
+        )}
       </button>
       {message && (
         <p className="pay-message" role="status">
