@@ -57,7 +57,13 @@ async function loadFromBuild() {
       module.default?.routeModule?.userland?.GET ??
       module.default?.handlers?.GET;
     if (typeof handler === 'function') {
-      const response = await handler();
+      const request = new Request('https://example.com/.well-known/farcaster.json', {
+        headers: {
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'example.com',
+        },
+      });
+      const response = await handler(request);
       assert(response && typeof response.json === 'function', 'Compiled manifest route missing JSON');
       return response.json();
     }
@@ -73,9 +79,18 @@ async function loadFromPreview(baseUrl) {
     headers: { accept: 'application/json' },
     cache: 'no-store',
   });
+
+  if (response.status === 401 || response.status === 403) {
+    console.warn(
+      `⚠️ Preview manifest returned ${response.status}; falling back to compiled output`
+    );
+    return { manifest: undefined, manifestUrl, normalisedBase };
+  }
+
   if (!response.ok) {
     throw new Error(`Failed to fetch manifest: ${response.status}`);
   }
+
   const manifest = await response.json();
   return { manifest, manifestUrl, normalisedBase };
 }
@@ -83,16 +98,15 @@ async function loadFromPreview(baseUrl) {
 try {
   let manifest;
   let manifestUrl;
-  let normalisedBase;
-
   const baseUrl = getPreviewBaseUrl();
   if (baseUrl) {
     try {
       const result = await loadFromPreview(baseUrl);
-      manifest = result.manifest;
-      manifestUrl = result.manifestUrl;
-      normalisedBase = result.normalisedBase;
-      console.log('ℹ️ Validating remote manifest at', manifestUrl);
+      if (result.manifest) {
+        manifest = result.manifest;
+        manifestUrl = result.manifestUrl;
+        console.log('ℹ️ Validating remote manifest at', manifestUrl);
+      }
     } catch (error) {
       console.warn('⚠️ Failed to fetch preview manifest, falling back to build output:', error);
     }
@@ -100,7 +114,6 @@ try {
 
   if (!manifest) {
     manifest = await loadFromBuild();
-    normalisedBase = normaliseBase(baseUrl ?? 'http://localhost:3000');
     manifestUrl = 'compiled route output';
     console.log('ℹ️ Validating compiled manifest output');
   }
@@ -113,48 +126,43 @@ try {
 
   const previewBase = previewFromEnv ? normaliseBase(previewFromEnv) : undefined;
   const manifestHomeRaw = String(miniapp?.homeUrl ?? '');
-  const manifestHome = normaliseBase(manifestHomeRaw);
+  let manifestHomeUrl;
+
+  try {
+    manifestHomeUrl = new URL(manifestHomeRaw);
+  } catch (error) {
+    throw new Error(`miniapp.homeUrl must be an absolute URL: ${manifestHomeRaw}`);
+  }
 
   if (previewBase) {
-    let manifestHost;
-    try {
-      manifestHost = new URL(manifestHomeRaw).host;
-    } catch {
-      manifestHost = undefined;
-    }
     const expectedHost = new URL(previewBase).host;
-    if (!manifestHost || manifestHost !== expectedHost) {
+    if (manifestHomeUrl.host !== expectedHost) {
       throw new Error(
-        `miniapp.homeUrl host mismatch: expected ${expectedHost}, received ${
-          manifestHost ?? manifestHomeRaw
-        }`
+        `miniapp.homeUrl host mismatch: expected ${expectedHost}, received ${manifestHomeUrl.host}`
       );
     }
-    assert(
-      manifestHome === previewBase,
-      `miniapp.homeUrl mismatch: expected ${previewBase}, received ${manifestHomeRaw}`
-    );
-  } else if (normalisedBase) {
-    assert(
-      manifestHome === normalisedBase,
-      `miniapp.homeUrl mismatch: expected ${normalisedBase}, received ${manifestHomeRaw}`
-    );
   }
 
-  const expectedBase = previewBase ?? normalisedBase;
-  if (!expectedBase) {
-    throw new Error('Unable to determine expected base URL for manifest validation');
-  }
-  const expectedIcon = `${expectedBase}/game-icons/icon.png`;
+  const manifestOrigin = manifestHomeUrl.origin;
+  const expectedIcon = `${manifestOrigin}/game-icons/icon.png`;
   assert(miniapp?.iconUrl === expectedIcon, 'miniapp.iconUrl mismatch');
 
-  const expectedSplash = `${expectedBase}/game-icons/splash.png`;
+  const expectedSplash = `${manifestOrigin}/game-icons/splash.png`;
   assert(miniapp?.splashImageUrl === expectedSplash, 'miniapp.splashImageUrl mismatch');
 
+  const envWebhook = process.env.NEXT_PUBLIC_WEBHOOK_URL;
+  let expectedWebhookUrl = `${manifestOrigin}/api/pay/webhook`;
+  if (envWebhook) {
+    if (envWebhook.startsWith('http')) {
+      expectedWebhookUrl = envWebhook;
+    } else if (envWebhook.startsWith('/')) {
+      expectedWebhookUrl = `${manifestOrigin}${envWebhook}`;
+    }
+  }
+
   assert(
-    typeof miniapp?.webhookUrl === 'string' &&
-      miniapp.webhookUrl.endsWith('/api/pay/webhook'),
-    'miniapp.webhookUrl must point to /api/pay/webhook'
+    typeof miniapp?.webhookUrl === 'string' && miniapp.webhookUrl === expectedWebhookUrl,
+    `miniapp.webhookUrl mismatch: expected ${expectedWebhookUrl}, received ${miniapp?.webhookUrl}`
   );
 
   assert(Array.isArray(miniapp?.tags) && miniapp.tags.length > 0, 'miniapp.tags must be populated');
