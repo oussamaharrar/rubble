@@ -27,7 +27,10 @@ type SessionRequestBody = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
-    const sku = body.sku ?? 'bubble-hunt-booster';
+    const sku =
+      typeof body.sku === 'string' && body.sku.trim().length > 0
+        ? body.sku.trim()
+        : undefined;
     const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
     const amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
 

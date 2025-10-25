@@ -114,7 +114,7 @@ export default function PayButton() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          sku: 'bubble-hunt-booster',
+          sku: 'booster_time_freeze',
           amountWei: MIN_PRICE_WEI.toString(),
           buyerAddress: address,
         }),

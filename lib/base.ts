@@ -1,20 +1,16 @@
-import { createPublicClient, http } from 'viem';
-import { base } from 'viem/chains';
-import { ENV } from './env';
+const FALLBACK_RPC_URL =
+  process.env.NEXT_PUBLIC_BASE_RPC_URL && process.env.NEXT_PUBLIC_BASE_RPC_URL.length > 0
+    ? process.env.NEXT_PUBLIC_BASE_RPC_URL
+    : undefined;
 
 export const BASE_CHAIN_ID_HEX = '0x2105';
 
-export const basePublicClient = createPublicClient({
-  chain: base,
-  transport: http(ENV.BASE_RPC_URL),
-});
-
-type EthereumRequestArgs<TParams = unknown[]> = {
+export type EthereumRequestArgs<TParams = unknown[]> = {
   method: string;
   params?: TParams;
 };
 
-type EthereumProvider = {
+export type EthereumProvider = {
   request<TResponse = unknown, TParams = unknown[]>(
     args: EthereumRequestArgs<TParams>
   ): Promise<TResponse>;
@@ -49,15 +45,21 @@ export async function ensureBaseNetwork(): Promise<string> {
       params: [{ chainId: BASE_CHAIN_ID_HEX }],
     });
   } catch (error) {
-    const code = typeof error === 'object' && error !== null ? (error as { code?: number }).code : undefined;
+    const code =
+      typeof error === 'object' && error !== null ? (error as { code?: number }).code : undefined;
     if (code === 4902) {
+      const rpcUrls = FALLBACK_RPC_URL ? [FALLBACK_RPC_URL] : [];
+      if (rpcUrls.length === 0) {
+        throw new Error('Missing NEXT_PUBLIC_BASE_RPC_URL for Base Mainnet configuration.');
+      }
+
       await provider.request({
         method: 'wallet_addEthereumChain',
         params: [
           {
             chainId: BASE_CHAIN_ID_HEX,
             chainName: 'Base Mainnet',
-            rpcUrls: [ENV.BASE_RPC_URL],
+            rpcUrls,
             nativeCurrency: {
               name: 'Ether',
               symbol: 'ETH',

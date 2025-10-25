@@ -12,14 +12,7 @@ export const metadata: Metadata = {
     url: '/',
     type: 'website',
     siteName: 'Rubble',
-    images: [
-      {
-        url: '/game-icons/og.png',
-        width: 1200,
-        height: 630,
-        alt: 'Rubble Bubble Hunt gameplay with Base Pay booster highlight',
-      },
-    ],
+    images: ['/game-icons/og.png'],
   },
   twitter: {
     card: 'summary_large_image',

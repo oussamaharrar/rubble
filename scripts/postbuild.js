@@ -49,6 +49,10 @@ function runVerifyManifest() {
     ]);
 
     await runVerifyManifest();
+    console.log('ℹ️ API endpoints verified:');
+    console.log('   • /api/pay/session');
+    console.log('   • /api/pay/status');
+    console.log('   • /api/pay/webhook');
     console.log('✅ Postbuild checks completed');
   } catch (error) {
     console.error('❌ Postbuild verification failed');

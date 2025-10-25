@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ENV } from './env';
 
 const BASE_PAY_API_BASE = 'https://api.pay.base.org';
@@ -10,33 +10,47 @@ export type BasePaySession = {
   status: string;
   checkoutUrl?: string;
   hostedCheckoutUrl?: string;
-  amount: {
+  amount?: {
     value: string;
     currency: string;
   };
-  chainId: string;
+  chainId?: string;
   metadata?: Record<string, unknown>;
+  url?: string;
 };
 
 export interface CreateBasePaySessionOptions {
-  sku: string;
-  amountWei: bigint;
+  sku?: string;
+  amountWei?: bigint;
   buyerAddress?: string;
 }
 
+function requireCredential(value: string | undefined, key: string) {
+  if (!value) {
+    throw new Error(`${key} is not configured.`);
+  }
+  return value;
+}
+
+function getCredentials() {
+  const keyId = requireCredential(ENV.BASE_PAY_API_KEY_ID, 'BASE_PAY_API_KEY_ID');
+  const secret = requireCredential(ENV.BASE_PAY_API_SECRET, 'BASE_PAY_API_SECRET');
+  return { keyId, secret };
+}
+
 function getBasicAuthHeader() {
-  const credentials = Buffer.from(
-    `${ENV.BASE_PAY_API_KEY_ID}:${ENV.BASE_PAY_API_SECRET}`,
-    'utf8'
-  ).toString('base64');
-  return `Basic ${credentials}`;
+  const { keyId, secret } = getCredentials();
+  const credentials = `${keyId}:${secret}`;
+  return `Basic ${Buffer.from(credentials, 'utf8').toString('base64')}`;
 }
 
 export async function createBasePaySession({
-  sku,
-  amountWei,
+  sku = 'booster_time_freeze',
+  amountWei = ENV.MIN_PRICE_WEI,
   buyerAddress,
-}: CreateBasePaySessionOptions): Promise<BasePaySession> {
+}: CreateBasePaySessionOptions = {}): Promise<BasePaySession> {
+  getCredentials();
+
   const payload = {
     sku,
     chainId: 'base-mainnet',
@@ -70,26 +84,48 @@ export async function createBasePaySession({
   return session;
 }
 
-function safeEqual(first: Buffer, second: Buffer) {
-  if (first.length !== second.length) {
-    return false;
+function decodeProvidedSignature(signature: string, expectedLength: number) {
+  const trimmed = signature.trim();
+  const normalised = trimmed.startsWith('sha256=') ? trimmed.slice('sha256='.length) : trimmed;
+
+  const attempts = [
+    () => Buffer.from(normalised, 'base64'),
+    () => Buffer.from(normalised, 'hex'),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const candidate = attempt();
+      if (candidate.length === expectedLength) {
+        return candidate;
+      }
+    } catch {
+      // continue trying the other format
+    }
   }
-  return crypto.timingSafeEqual(first, second);
+
+  return null;
 }
 
 export function verifyBasePayWebhook(rawBody: string | Buffer, signature: string | null | undefined) {
-  if (!signature) return false;
-
-  const message = typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody;
-  const secret = Buffer.from(ENV.BASE_PAY_API_SECRET, 'base64');
-  const expected = crypto.createHmac('sha256', secret).update(message).digest();
-
-  let provided: Buffer;
-  try {
-    provided = Buffer.from(signature, 'base64');
-  } catch {
+  if (!signature) {
     return false;
   }
 
-  return safeEqual(expected, provided);
+  const message = typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody;
+  const { secret } = getCredentials();
+  const expected = createHmac('sha256', Buffer.from(secret, 'utf8'))
+    .update(message)
+    .digest();
+
+  const provided = decodeProvidedSignature(signature, expected.length);
+  if (!provided) {
+    return false;
+  }
+
+  if (provided.length !== expected.length) {
+    return false;
+  }
+
+  return timingSafeEqual(expected, provided);
 }
