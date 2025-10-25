@@ -4,11 +4,17 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 
+const previewFromEnv = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : undefined;
+
 function getPreviewBaseUrl() {
+  if (previewFromEnv) {
+    return previewFromEnv;
+  }
   const fromArg = process.argv[2];
   if (fromArg) return fromArg;
   if (process.env.VERCEL_PREVIEW_URL) return process.env.VERCEL_PREVIEW_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return process.env.NEXT_PUBLIC_URL;
 }
 
@@ -94,7 +100,7 @@ try {
 
   if (!manifest) {
     manifest = await loadFromBuild();
-    normalisedBase = normaliseBase(getPreviewBaseUrl() ?? 'http://localhost:3000');
+    normalisedBase = normaliseBase(baseUrl ?? 'http://localhost:3000');
     manifestUrl = 'compiled route output';
     console.log('ℹ️ Validating compiled manifest output');
   }
@@ -105,13 +111,44 @@ try {
   assert(miniapp?.version === '1', 'miniapp.version must be "1"');
   assert(miniapp?.name === 'Rubble (Bubble Hunt)', 'miniapp.name mismatch');
 
-  const manifestHome = normaliseBase(String(miniapp?.homeUrl ?? ''));
-  assert(manifestHome === normalisedBase, 'miniapp.homeUrl must match preview base URL');
+  const previewBase = previewFromEnv ? normaliseBase(previewFromEnv) : undefined;
+  const manifestHomeRaw = String(miniapp?.homeUrl ?? '');
+  const manifestHome = normaliseBase(manifestHomeRaw);
 
-  const expectedIcon = `${normalisedBase}/game-icons/icon.png`;
+  if (previewBase) {
+    let manifestHost;
+    try {
+      manifestHost = new URL(manifestHomeRaw).host;
+    } catch {
+      manifestHost = undefined;
+    }
+    const expectedHost = new URL(previewBase).host;
+    if (!manifestHost || manifestHost !== expectedHost) {
+      throw new Error(
+        `miniapp.homeUrl host mismatch: expected ${expectedHost}, received ${
+          manifestHost ?? manifestHomeRaw
+        }`
+      );
+    }
+    assert(
+      manifestHome === previewBase,
+      `miniapp.homeUrl mismatch: expected ${previewBase}, received ${manifestHomeRaw}`
+    );
+  } else if (normalisedBase) {
+    assert(
+      manifestHome === normalisedBase,
+      `miniapp.homeUrl mismatch: expected ${normalisedBase}, received ${manifestHomeRaw}`
+    );
+  }
+
+  const expectedBase = previewBase ?? normalisedBase;
+  if (!expectedBase) {
+    throw new Error('Unable to determine expected base URL for manifest validation');
+  }
+  const expectedIcon = `${expectedBase}/game-icons/icon.png`;
   assert(miniapp?.iconUrl === expectedIcon, 'miniapp.iconUrl mismatch');
 
-  const expectedSplash = `${normalisedBase}/game-icons/splash.png`;
+  const expectedSplash = `${expectedBase}/game-icons/splash.png`;
   assert(miniapp?.splashImageUrl === expectedSplash, 'miniapp.splashImageUrl mismatch');
 
   assert(
