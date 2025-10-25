@@ -1,0 +1,10 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad-play" x1="8" y1="8" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8" />
+      <stop offset="1" stop-color="#2563EB" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="40" height="40" rx="14" stroke="url(#grad-play)" stroke-width="3" fill="rgba(15,23,42,0.35)" />
+  <path d="M20 16L32 24L20 32V16Z" fill="url(#grad-play)" />
+</svg>
