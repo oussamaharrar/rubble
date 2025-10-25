@@ -37,12 +37,14 @@ export async function GET(request: Request) {
   const origin = resolveOrigin(request);
   const webhookUrl = resolveWebhookUrl(origin);
 
+  const embedUrl = `${origin}/game-icons/embed.png`;
+
   const miniapp = {
     version: '1',
     name: 'Rubble (Bubble Hunt)',
     subtitle: 'Tap • Combo • Boost on Base',
     description:
-      'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
+      'Tap bubbles, rack combos, and trigger Base boosts to freeze time on-chain.',
     homeUrl: origin,
     iconUrl: `${origin}/game-icons/icon.png`,
     splashImageUrl: `${origin}/game-icons/splash.png`,
@@ -51,7 +53,15 @@ export async function GET(request: Request) {
     webhookUrl,
     primaryCategory: 'games',
     tags: ['game', 'arcade', 'base', 'booster'],
-    screenshotUrls: [`${origin}/screenshot-portrait.png`],
+    screenshotUrls: [embedUrl],
+    embeds: [
+      {
+        url: embedUrl,
+        mimeType: 'image/png',
+        width: 424,
+        height: 695,
+      },
+    ],
     buttonTitle: 'Play',
   } as const;
 

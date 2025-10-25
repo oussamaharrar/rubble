@@ -2,26 +2,30 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
-import { createBasePaySession } from '@/lib/pay';
+import { createPaymentCommerce, createPaymentNativeBase } from '@/lib/pay';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
 
 type SessionRequestBody = {
   sku?: unknown;
   amountWei?: unknown;
-  buyerAddress?: unknown;
+};
+
+type ParsedBody = {
+  sku: string;
+  amountWei: bigint;
 };
 
 function parseAmount(value: unknown): bigint | null {
   if (typeof value === 'bigint') {
     return value;
   }
-  if (typeof value === 'number' && Number.isInteger(value)) {
+  if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
     return BigInt(value);
   }
   if (typeof value === 'string' && value.trim().length > 0) {
     try {
-      return BigInt(value);
+      return BigInt(value.trim());
     } catch {
       return null;
     }
@@ -29,58 +33,79 @@ function parseAmount(value: unknown): bigint | null {
   return null;
 }
 
-export async function POST(request: Request) {
-  let body: SessionRequestBody = {};
-  try {
-    body = (await request.json()) as SessionRequestBody;
-  } catch {
-    body = {};
-  }
-
-  const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
-  const parsedAmount = parseAmount(rawAmount);
-  if (parsedAmount === null) {
-    return NextResponse.json(
-      { ok: false, reason: 'INVALID_AMOUNT' },
-      { status: 400, headers: NO_STORE_HEADERS }
-    );
-  }
-
-  if (parsedAmount < ENV.MIN_PRICE_WEI) {
-    return NextResponse.json(
-      { ok: false, reason: 'UNDER_MINIMUM_AMOUNT' },
-      { status: 400, headers: NO_STORE_HEADERS }
-    );
-  }
-
-  const sku =
-    typeof body.sku === 'string' && body.sku.trim().length > 0
-      ? body.sku
+function parseBody(input: SessionRequestBody): ParsedBody | null {
+  const skuValue =
+    typeof input.sku === 'string' && input.sku.trim().length > 0
+      ? input.sku.trim()
       : 'booster_time_freeze';
 
-  const buyerAddress =
-    typeof body.buyerAddress === 'string' && body.buyerAddress.length > 0
-      ? body.buyerAddress
-      : undefined;
+  const amountSource = input.amountWei ?? ENV.MIN_PRICE_WEI;
+  const amount = parseAmount(amountSource);
+  if (amount === null) {
+    return null;
+  }
+  return { sku: skuValue, amountWei: amount };
+}
 
-  const result = await createBasePaySession({
-    sku,
-    amountWei: parsedAmount,
-    buyerAddress,
+export async function POST(req: Request) {
+  const body = await req.json().catch(() => ({})) as SessionRequestBody;
+  const parsed = parseBody(body);
+
+  if (!parsed) {
+    return NextResponse.json(
+      { ok: false, reason: 'BAD_REQUEST', error: 'Invalid amount' },
+      { status: 400, headers: NO_STORE_HEADERS }
+    );
+  }
+
+  if (parsed.amountWei < ENV.MIN_PRICE_WEI) {
+    return NextResponse.json(
+      {
+        ok: false,
+        reason: 'BAD_REQUEST',
+        error: `Amount must be at least ${ENV.MIN_PRICE_WEI.toString()} wei`,
+      },
+      { status: 400, headers: NO_STORE_HEADERS }
+    );
+  }
+
+  const modeBEnabled = ENV.PAYMENTS_MODE_B_ENABLED;
+
+  if (modeBEnabled) {
+    const commerce = await createPaymentCommerce({ sku: parsed.sku, amountWei: parsed.amountWei });
+    if (commerce.ok) {
+      return NextResponse.json(
+        { ok: true, session: commerce.session },
+        { headers: NO_STORE_HEADERS }
+      );
+    }
+    const status =
+      commerce.code === 'API_NON_2XX'
+        ? commerce.status ?? 502
+        : commerce.code === 'MODE_B_DISABLED'
+          ? 500
+          : 502;
+    const detail = 'detail' in commerce ? commerce.detail : undefined;
+    return NextResponse.json(
+      { ok: false, reason: commerce.code, error: detail },
+      { status, headers: NO_STORE_HEADERS }
+    );
+  }
+
+  const native = await createPaymentNativeBase({
+    amountWei: parsed.amountWei,
+    to: ENV.PAY_TO_ADDRESS,
   });
 
-  if (result.ok) {
+  if (native.ok) {
     return NextResponse.json(
-      { ok: true, session: result.session },
+      { ok: true, intent: native.intent },
       { headers: NO_STORE_HEADERS }
     );
   }
 
-  const status =
-    result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
-
   return NextResponse.json(
-    { ok: false, reason: result.code, error: result.detail },
-    { status, headers: NO_STORE_HEADERS }
+    { ok: false, reason: native.code, error: native.detail },
+    { status: 400, headers: NO_STORE_HEADERS }
   );
 }

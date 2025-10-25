@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { formatUnits } from 'viem';
-import { GhostButton } from './Buttons';
-import Modal from './Modal';
-import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import type { BoosterType } from '@/lib/game/types';
+import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { useWalletStore } from '@/lib/wallet-store';
 
 const MIN_PRICE_WEI = (() => {
@@ -20,56 +18,86 @@ const MIN_PRICE_WEI = (() => {
 
 const BOOSTER_DURATION_MS = 5000;
 
+type Toast = { type: 'success' | 'error' | 'info'; message: string };
+
+type PayIntent = {
+  to: string;
+  value: string;
+  valueHex?: string;
+  chainId: number;
+  chainIdHex?: string;
+  type?: string;
+  maxFeePerGas?: string;
+  maxPriorityFeePerGas?: string;
+  memo?: string;
+};
+
 type PaySessionResponse =
+  | { ok: true; intent: PayIntent }
   | { ok: true; session: unknown }
   | { ok: false; reason?: string; error?: string };
 
-type Toast = { type: 'success' | 'error' | 'info'; message: string };
+type PayStatusResponse = { granted?: boolean };
 
-type PayButtonProps = {
+interface PayButtonProps {
   sku?: string;
-  label?: string;
   amountWei?: bigint;
   boosterType?: BoosterType;
   durationMs?: number;
   disabled?: boolean;
+  label?: string;
   icon?: ReactNode;
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+type EthereumProvider = {
+  request<T = unknown>(args: { method: string; params?: unknown[] }): Promise<T>;
 };
 
-type SessionRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is SessionRecord {
-  return typeof value === 'object' && value !== null;
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function readSessionId(session: SessionRecord | null): string | null {
-  if (!session) {
-    return null;
+function isPayIntent(value: unknown): value is PayIntent {
+  if (!isRecord(value)) return false;
+  if (typeof value.to !== 'string' || typeof value.value !== 'string') return false;
+  if (typeof value.chainId !== 'number') return false;
+  if (value.valueHex && typeof value.valueHex !== 'string') return false;
+  if (value.chainIdHex && typeof value.chainIdHex !== 'string') return false;
+  if (value.type && typeof value.type !== 'string') return false;
+  if (value.maxFeePerGas && typeof value.maxFeePerGas !== 'string') return false;
+  if (value.maxPriorityFeePerGas && typeof value.maxPriorityFeePerGas !== 'string') return false;
+  if (value.memo && typeof value.memo !== 'string') return false;
+  return true;
+}
+
+function hasIntent(response: PaySessionResponse): response is { ok: true; intent: PayIntent } {
+  return response.ok === true && 'intent' in response && isPayIntent(response.intent);
+}
+
+function hasSession(response: PaySessionResponse): response is { ok: true; session: UnknownRecord } {
+  return response.ok === true && 'session' in response && isRecord(response.session);
+}
+
+function formatCompactWei(amount: bigint) {
+  if (amount <= 0n) {
+    return 'Free';
   }
-  const raw = session['id'];
-  return typeof raw === 'string' && raw.length > 0 ? raw : null;
-}
-
-function readStringField(session: SessionRecord | null, key: string): string | null {
-  if (!session) {
-    return null;
+  const threshold = 1_000_000_000_000n; // 0.000001 ETH
+  if (amount < threshold) {
+    return `${amount.toString()} wei`;
   }
-  const value = session[key];
-  return typeof value === 'string' && value.length > 0 ? value : null;
+  const eth = formatUnits(amount, 18);
+  const [whole, fraction = ''] = eth.split('.');
+  const trimmedFraction = fraction.slice(0, 6).replace(/0+$/u, '');
+  return trimmedFraction.length > 0 ? `${whole}.${trimmedFraction} ETH` : `${whole} ETH`;
 }
 
-function sessionHasMockFlag(session: SessionRecord | null) {
-  return Boolean(session && session['mock'] === true);
-}
-
-function collectCheckoutUrls(session: SessionRecord | null) {
-  if (!session) {
-    return [] as string[];
-  }
-  const keys = ['hostedCheckoutUrl', 'checkoutUrl', 'url'] as const;
-  return keys
-    .map((key) => readStringField(session, key))
-    .filter((value): value is string => Boolean(value));
+function decimalToHex(value: string) {
+  const trimmed = value.trim();
+  const numeric = trimmed.startsWith('0x') || trimmed.startsWith('0X') ? BigInt(trimmed) : BigInt(trimmed);
+  return `0x${numeric.toString(16)}`;
 }
 
 function dispatchBooster(type: BoosterType, duration: number) {
@@ -83,19 +111,56 @@ function dispatchBooster(type: BoosterType, duration: number) {
   );
 }
 
-const WEI_THRESHOLD = 1_000_000_000_000n; // 0.000001 ETH
+function readStringField(record: UnknownRecord, key: string) {
+  const value = record[key];
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+  return null;
+}
 
-function formatCompactWei(amount: bigint) {
-  if (amount <= 0n) {
-    return 'Free';
+function readBooleanField(record: UnknownRecord, key: string) {
+  return record[key] === true;
+}
+
+const SESSION_ID_KEYS: readonly string[] = ['sessionId', 'id', 'referenceId', 'paymentIntentId', 'checkoutId'];
+
+function extractSessionId(record: UnknownRecord) {
+  for (const key of SESSION_ID_KEYS) {
+    const value = readStringField(record, key);
+    if (value) {
+      return value;
+    }
   }
-  if (amount < WEI_THRESHOLD) {
-    return `${amount.toString()} wei`;
+  if (isRecord(record.metadata)) {
+    for (const key of SESSION_ID_KEYS) {
+      const nested = readStringField(record.metadata, key);
+      if (nested) {
+        return nested;
+      }
+    }
   }
-  const eth = formatUnits(amount, 18);
-  const [whole, fraction = ''] = eth.split('.');
-  const trimmedFraction = fraction.slice(0, 6).replace(/0+$/u, '');
-  return trimmedFraction.length > 0 ? `${whole}.${trimmedFraction} ETH` : `${whole} ETH`;
+  return null;
+}
+
+const CHECKOUT_URL_KEYS: readonly string[] = ['redirectUrl', 'hostedCheckoutUrl', 'checkoutUrl', 'url'];
+
+function extractCheckoutUrl(record: UnknownRecord) {
+  for (const key of CHECKOUT_URL_KEYS) {
+    const value = readStringField(record, key);
+    if (value) {
+      return value;
+    }
+  }
+  if (isRecord(record.links)) {
+    for (const key of CHECKOUT_URL_KEYS) {
+      const value = readStringField(record.links, key);
+      if (value) {
+        return value;
+      }
+    }
+  }
+  return null;
 }
 
 function mapErrorMessage(payload: PaySessionResponse, status: number) {
@@ -104,253 +169,238 @@ function mapErrorMessage(payload: PaySessionResponse, status: number) {
   }
   const detail = payload.error ?? undefined;
   switch (payload.reason) {
-    case 'NO_API_BASE':
-      return 'Base Pay API base URL is not configured. Contact the operator.';
-    case 'NO_API_KEYS':
-      return 'Base Pay API credentials are missing. Contact the operator.';
+    case 'MODE_B_DISABLED':
+      return 'Payments mode B is not available. Please try again later.';
     case 'API_NON_2XX':
-      return detail
-        ? `Base Pay API error: ${detail}`
-        : `Base Pay API returned status ${status}.`;
+      return detail ? `Payments API error: ${detail}` : `Payments API returned status ${status}.`;
     case 'FETCH_ERROR':
-      return detail ? `Network error: ${detail}` : 'Network error communicating with Base Pay.';
-    case 'UNDER_MINIMUM_AMOUNT':
-      return 'Amount is below the minimum booster price.';
-    case 'INVALID_AMOUNT':
-      return 'Amount must be a valid integer string in wei.';
+      return detail ? `Network error: ${detail}` : 'Unable to reach payments API.';
+    case 'BAD_REQUEST':
+      return detail ?? 'Payment request was invalid. Please try again.';
     default:
-      return detail ?? 'Failed to create a Base Pay session. Please try again.';
+      return detail ?? 'Unable to prepare the Base payment session.';
   }
+}
+
+function getProvider(): EthereumProvider {
+  if (typeof window === 'undefined' || !window.ethereum) {
+    throw new Error('No wallet provider detected.');
+  }
+  return window.ethereum as unknown as EthereumProvider;
+}
+
+async function pollForGrant(sessionId: string, isMounted: () => boolean) {
+  const maxAttempts = 15;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (!isMounted()) {
+      return false;
+    }
+    if (attempt > 0) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000);
+      });
+    }
+    try {
+      const response = await fetch(`/api/pay/status?sessionId=${encodeURIComponent(sessionId)}`, {
+        method: 'GET',
+        headers: { accept: 'application/json' },
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        continue;
+      }
+      const payload = (await response.json()) as PayStatusResponse;
+      if (payload.granted) {
+        return true;
+      }
+    } catch {
+      // swallow network errors and continue polling
+    }
+  }
+  return false;
 }
 
 export default function PayButton({
   sku = 'booster_time_freeze',
-  label,
   amountWei = MIN_PRICE_WEI,
   boosterType = 'time-freeze',
   durationMs = BOOSTER_DURATION_MS,
-  disabled: disabledProp = false,
+  disabled = false,
+  label,
   icon,
-}: PayButtonProps = {}) {
-  const address = useWalletStore((state) => state.address);
-  const chainId = useWalletStore((state) => state.chainId);
-  const setWallet = useWalletStore((state) => state.setWallet);
-
+}: PayButtonProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [sessionModal, setSessionModal] = useState<SessionRecord | null>(null);
-
   const mountedRef = useRef(true);
-  const pollTimeoutRef = useRef<number | null>(null);
+
+  const setWallet = useWalletStore((state) => state.setWallet);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      if (pollTimeoutRef.current !== null) {
-        window.clearTimeout(pollTimeoutRef.current);
-      }
     };
   }, []);
 
+  const isMounted = useCallback(() => mountedRef.current, []);
+
+  const buttonLabel = useMemo(
+    () => label ?? `Boost on Base · ${formatCompactWei(amountWei)}`,
+    [amountWei, label]
+  );
+
   useEffect(() => {
-    if (!toast) {
-      return undefined;
-    }
-    const timeout = window.setTimeout(() => setToast(null), 4200);
+    if (!toast) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), 3500);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
-  const showToast = useCallback((nextToast: Toast) => {
-    setToast(nextToast);
+  const showToast = useCallback((next: Toast) => {
+    setToast(next);
   }, []);
 
-  const pollForGrant = useCallback(async (sessionId: string) => {
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      if (!mountedRef.current) {
-        return false;
+  const handleNativeIntent = useCallback(
+    async (intent: PayIntent, fromAddress: string) => {
+      const provider = getProvider();
+      const chainIdHex = intent.chainIdHex ?? `0x${intent.chainId.toString(16)}`;
+      const tx: Record<string, string> = {
+        from: fromAddress,
+        to: intent.to,
+        value: intent.valueHex ?? decimalToHex(intent.value),
+      };
+
+      if (intent.type) {
+        tx.type = intent.type;
       }
-      try {
-        const response = await fetch(
-          `/api/pay/status?sessionId=${encodeURIComponent(sessionId)}`,
-          {
-            cache: 'no-store',
-          }
-        );
-        if (response.ok) {
-          const payload = (await response.json()) as { granted?: boolean };
-          if (payload.granted) {
-            return true;
-          }
-        }
-      } catch (error: unknown) {
-        console.debug('Polling error', error);
+      tx.chainId = chainIdHex;
+      if (intent.maxFeePerGas) {
+        tx.maxFeePerGas = intent.maxFeePerGas;
       }
-      await new Promise<void>((resolve) => {
-        pollTimeoutRef.current = window.setTimeout(() => {
-          pollTimeoutRef.current = null;
-          resolve();
-        }, 2000);
+      if (intent.maxPriorityFeePerGas) {
+        tx.maxPriorityFeePerGas = intent.maxPriorityFeePerGas;
+      }
+
+      await provider.request<string>({
+        method: 'eth_sendTransaction',
+        params: [tx],
       });
-    }
-    return false;
-  }, []);
 
-  const isConnected = Boolean(address);
-  const isOnBase = (chainId ?? '').toLowerCase() === BASE_CHAIN_ID_HEX;
+      dispatchBooster(boosterType, durationMs);
+      showToast({ type: 'success', message: 'Boost activated on Base!' });
+      setInfoMessage(null);
+    },
+    [boosterType, durationMs, showToast]
+  );
 
-  const buttonLabel = useMemo(() => {
-    const priceLabel = formatCompactWei(amountWei);
-    const resolvedLabel = label ?? 'Boost on Base';
-    return `${resolvedLabel} · ${priceLabel}`;
-  }, [amountWei, label]);
+  const handleCommerceSession = useCallback(
+    async (session: UnknownRecord) => {
+      if (readBooleanField(session, 'mock')) {
+        dispatchBooster(boosterType, durationMs);
+        showToast({ type: 'success', message: 'Mock payment confirmed. Boost active!' });
+        return;
+      }
 
-  const disabled = disabledProp || isSubmitting || !isConnected || !isOnBase;
+      const sessionId = extractSessionId(session);
+      if (!sessionId) {
+        showToast({ type: 'error', message: 'Payment session created without identifier.' });
+        return;
+      }
+
+      const checkoutUrl = extractCheckoutUrl(session);
+      if (checkoutUrl) {
+        window.open(checkoutUrl, '_blank', 'noopener');
+      }
+
+      setInfoMessage('Waiting for Coinbase confirmation…');
+      const granted = await pollForGrant(sessionId, isMounted);
+      setInfoMessage(null);
+
+      if (!granted) {
+        showToast({ type: 'error', message: 'Payment timed out. Try again when ready.' });
+        return;
+      }
+
+      dispatchBooster(boosterType, durationMs);
+      showToast({ type: 'success', message: 'Payment confirmed! Time Freeze engaged.' });
+    },
+    [boosterType, durationMs, isMounted, showToast]
+  );
 
   const handlePay = useCallback(async () => {
-    if (isSubmitting) {
+    if (isSubmitting || disabled) {
       return;
     }
 
-    if (!isConnected) {
-      showToast({ type: 'error', message: 'Connect your wallet to activate boosters.' });
-      return;
-    }
-
-    setIsSubmitting(true);
-    setInfoMessage('Confirming wallet and Base network…');
-
-    let buyerAddress: string;
     try {
-      buyerAddress = await ensureBaseNetwork();
-      setWallet(buyerAddress, BASE_CHAIN_ID_HEX);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
-      showToast({ type: 'error', message });
-      setIsSubmitting(false);
-      setInfoMessage(null);
-      return;
-    }
+      setIsSubmitting(true);
+      setInfoMessage('Preparing Base boost…');
 
-    setInfoMessage('Creating Base Pay session…');
+      const account = await ensureBaseNetwork();
+      setWallet(account, BASE_CHAIN_ID_HEX);
 
-    let response: Response;
-    try {
-      response = await fetch('/api/pay/session', {
+      const response = await fetch('/api/pay/session', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          sku,
-          amountWei: amountWei.toString(),
-          buyerAddress,
-        }),
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
         cache: 'no-store',
+        body: JSON.stringify({ sku, amountWei: amountWei.toString() }),
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Network error calling Base Pay.';
-      showToast({ type: 'error', message });
-      setIsSubmitting(false);
-      setInfoMessage(null);
-      return;
-    }
 
-    let payload: PaySessionResponse;
-    try {
-      payload = (await response.json()) as PaySessionResponse;
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : 'Unexpected response from Base Pay session API.';
-      showToast({ type: 'error', message });
-      setIsSubmitting(false);
-      setInfoMessage(null);
-      return;
-    }
-
-    if (!payload.ok) {
+      const payload = (await response.json()) as PaySessionResponse;
       const message = mapErrorMessage(payload, response.status);
-      showToast({ type: 'error', message: message ?? 'Failed to create Base Pay session.' });
+      if (!payload.ok) {
+        showToast({ type: 'error', message: message ?? 'Failed to create payment session.' });
+        setInfoMessage(null);
+        return;
+      }
+
+      if (hasIntent(payload)) {
+        await handleNativeIntent(payload.intent, account);
+      } else if (hasSession(payload)) {
+        await handleCommerceSession(payload.session);
+      } else {
+        showToast({ type: 'error', message: 'Unexpected payment response.' });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Payment flow failed.';
+      showToast({ type: 'error', message });
+    } finally {
       setIsSubmitting(false);
       setInfoMessage(null);
-      return;
     }
-
-    const session = isRecord(payload.session) ? payload.session : null;
-    const sessionId = readSessionId(session);
-    if (!sessionId) {
-      showToast({ type: 'error', message: 'Base Pay session missing identifier.' });
-      setIsSubmitting(false);
-      setInfoMessage(null);
-      return;
-    }
-
-    const redirectUrl = readStringField(session, 'redirectUrl');
-    if (redirectUrl) {
-      window.location.href = redirectUrl;
-    }
-
-    const checkoutUrls = collectCheckoutUrls(session);
-    if (!redirectUrl && checkoutUrls.length > 0) {
-      setSessionModal(session);
-    }
-
-    if (sessionHasMockFlag(session)) {
-      dispatchBooster(boosterType, durationMs);
-      showToast({ type: 'success', message: 'Mock Base Pay session granted. Booster active!' });
-      setInfoMessage(null);
-      setIsSubmitting(false);
-      setSessionModal(null);
-      return;
-    }
-
-    setInfoMessage('Waiting for Base Pay confirmation…');
-    const granted = await pollForGrant(sessionId);
-
-    setIsSubmitting(false);
-    setInfoMessage(null);
-
-    if (!granted) {
-      showToast({ type: 'error', message: 'Payment timed out. You can retry the boost.' });
-      return;
-    }
-
-    dispatchBooster(boosterType, durationMs);
-    showToast({ type: 'success', message: 'Base Pay confirmed! Time Freeze activated.' });
-    setSessionModal(null);
   }, [
     amountWei,
-    boosterType,
-    durationMs,
-    isConnected,
+    disabled,
+    handleCommerceSession,
+    handleNativeIntent,
     isSubmitting,
-    pollForGrant,
     setWallet,
     showToast,
     sku,
   ]);
 
-  const closeModal = useCallback(() => setSessionModal(null), []);
-
-  const checkoutLinks = useMemo(() => collectCheckoutUrls(sessionModal), [sessionModal]);
-
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <motion.button
         type="button"
         onClick={handlePay}
-        disabled={disabled}
-        whileHover={disabled ? undefined : { scale: 1.02 }}
-        whileTap={disabled ? undefined : { scale: 0.98 }}
-        className="relative inline-flex w-full items-center justify-center gap-2 rounded-full border border-sky-500/60 bg-sky-500/20 px-4 py-2 text-sm font-semibold text-sky-50 shadow-[0_8px_24px_rgba(56,189,248,0.35)] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={disabled || isSubmitting}
+        whileHover={disabled || isSubmitting ? undefined : { scale: 1.02 }}
+        whileTap={disabled || isSubmitting ? undefined : { scale: 0.97 }}
+        className="relative inline-flex w-full items-center justify-center gap-2 rounded-full border border-sky-500/50 bg-sky-500/15 px-5 py-2 text-sm font-semibold text-sky-100 shadow-[0_12px_32px_rgba(14,165,233,0.35)] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isSubmitting ? (
-          <span className="truncate">Processing…</span>
-        ) : (
-          <span className="flex min-w-0 items-center justify-center gap-2">
-            {icon}
-            <span className="truncate whitespace-nowrap text-ellipsis">{buttonLabel}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          {icon ? (
+            <span className="flex h-5 w-5 items-center justify-center text-lg" aria-hidden>
+              {icon}
+            </span>
+          ) : (
+            <span className="inline-flex h-2 w-2 rounded-full bg-sky-300" aria-hidden />
+          )}
+          <span className="truncate whitespace-nowrap text-ellipsis">
+            {isSubmitting ? 'Processing…' : buttonLabel}
           </span>
-        )}
+        </span>
       </motion.button>
       {infoMessage ? <p className="text-xs text-slate-300">{infoMessage}</p> : null}
       <AnimatePresence>
@@ -358,17 +408,17 @@ export default function PayButton({
           <motion.div
             key={toast.message}
             className="pointer-events-none fixed inset-x-0 bottom-8 flex justify-center px-4"
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
+            exit={{ opacity: 0, y: 16 }}
           >
             <div
               className={
                 toast.type === 'success'
-                  ? 'rounded-2xl border border-emerald-400/50 bg-emerald-500/15 px-4 py-2 text-sm font-medium text-emerald-100 shadow-lg shadow-emerald-500/20'
+                  ? 'rounded-2xl border border-emerald-400/50 bg-emerald-500/15 px-4 py-2 text-sm font-medium text-emerald-100 shadow-lg shadow-emerald-500/25'
                   : toast.type === 'info'
-                    ? 'rounded-2xl border border-sky-400/40 bg-sky-500/15 px-4 py-2 text-sm font-medium text-sky-100 shadow-lg shadow-sky-500/20'
-                    : 'rounded-2xl border border-rose-500/50 bg-rose-500/15 px-4 py-2 text-sm font-medium text-rose-100 shadow-lg shadow-rose-500/20'
+                    ? 'rounded-2xl border border-sky-400/40 bg-sky-500/15 px-4 py-2 text-sm font-medium text-sky-100 shadow-lg shadow-sky-500/25'
+                    : 'rounded-2xl border border-rose-500/50 bg-rose-500/15 px-4 py-2 text-sm font-medium text-rose-100 shadow-lg shadow-rose-500/25'
               }
             >
               {toast.message}
@@ -376,41 +426,6 @@ export default function PayButton({
           </motion.div>
         ) : null}
       </AnimatePresence>
-      <Modal
-        open={Boolean(sessionModal)}
-        title="Base Pay Session Created"
-        onClose={closeModal}
-        footer={
-          checkoutLinks.length
-            ? checkoutLinks.map((link) => (
-                <GhostButton
-                  key={link}
-                  type="button"
-                  onClick={() => window.open(link, '_blank', 'noopener')}
-                >
-                  Open Checkout
-                </GhostButton>
-              ))
-            : null
-        }
-      >
-        {sessionModal ? (
-          <div className="space-y-3 text-sm">
-            <p>
-              Session{' '}
-              <span className="font-mono text-xs text-slate-200">{readSessionId(sessionModal)}</span>
-            </p>
-            <p>
-              Complete the checkout in the Base Pay window. This dialog closes automatically once the payment is confirmed.
-            </p>
-            {checkoutLinks.length === 0 ? (
-              <p className="text-xs text-slate-300">
-                No checkout URL was provided. If this persists, contact the app operator.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-      </Modal>
     </div>
   );
 }

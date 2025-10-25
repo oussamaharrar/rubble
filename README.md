@@ -6,7 +6,7 @@ Rubble is a Farcaster Mini App built with Next.js 15 that brings an arcade bubbl
 
 - [Next.js 15 App Router](https://nextjs.org/) with TypeScript
 - Canvas-driven mini game with optional Phaser scene
-- Base (via [`viem`](https://viem.sh/)) payment verification
+- Base (via [`viem`](https://viem.sh/)) payment helpers and Coinbase RPC integration
 - Farcaster Mini App metadata and manifest endpoints
 - pnpm + Node.js 20 (required by Vercel build)
 
@@ -35,12 +35,21 @@ Create a `.env.local` (and mirror it to `.env.example`) with the following value
 | Name | Required | Description | Example |
 | --- | :---: | --- | --- |
 | `NEXT_PUBLIC_URL` | ✅ | Public base URL for the deployed mini app. | `https://rubble.example.com` |
-| `NEXT_PUBLIC_WEBHOOK_URL` | ✅ | Public URL that the client calls for payment verification (usually `/api/pay/verify`). | `https://rubble.example.com/api/pay/verify` |
-| `BASE_RPC_URL` | ✅ | Base RPC endpoint used for verifying transactions. | `https://mainnet.base.org` |
-| `PAY_TO_ADDRESS` | ✅ | Recipient address that must receive the payment. | `0xabc123...` |
-| `MIN_PRICE_WEI` | ✅ | Minimum accepted payment amount in wei. | `1000000000000` |
-| `NEXT_PUBLIC_PAY_TO_ADDRESS` | ➖ | Optional. Overrides the client-exposed payment address (defaults to `PAY_TO_ADDRESS`). | `0xabc123...` |
-| `NEXT_PUBLIC_MIN_PRICE_WEI` | ➖ | Optional. Overrides the client-exposed minimum amount (defaults to `MIN_PRICE_WEI`). | `1000000000000` |
+| `NEXT_PUBLIC_WEBHOOK_URL` | ✅ | Relative or absolute URL to the payment webhook (defaults to `/api/pay/webhook`). | `/api/pay/webhook` |
+| `NEXT_PUBLIC_BASE_RPC_URL` | ✅ | Coinbase Developer Platform RPC for Base (client-safe). | `https://api.developer.coinbase.com/rpc/v1/base/YOUR_KEY` |
+| `NEXT_PUBLIC_MIN_PRICE_WEI` | ✅ | Minimum payment amount exposed to the client, in wei. | `1` |
+| `BASE_RPC_URL` | ✅ | Server-side Coinbase Base RPC URL. | `https://api.developer.coinbase.com/rpc/v1/base/YOUR_KEY` |
+| `PAY_TO_ADDRESS` | ✅ | Recipient address that must receive the boost payment. | `0xabc123...` |
+| `MIN_PRICE_WEI` | ✅ | Server-enforced minimum payment amount in wei. | `1` |
+| `FARCASTER_ACCOUNT_HEADER` | ➖ | Optional Farcaster account association header. | `...` |
+| `FARCASTER_ACCOUNT_PAYLOAD` | ➖ | Optional Farcaster account association payload. | `...` |
+| `FARCASTER_ACCOUNT_SIGNATURE` | ➖ | Optional Farcaster account association signature. | `...` |
+| `PAYMENTS_API_BASE` | ➖ | Coinbase Commerce/OnchainKit base URL (enables Mode B when set with credentials). | `https://api.commerce.coinbase.com` |
+| `PAYMENTS_API_KEY_ID` | ➖ | Commerce/OnchainKit API key identifier. | `commerce-key-id` |
+| `PAYMENTS_API_SECRET` | ➖ | Commerce/OnchainKit API secret. | `commerce-secret` |
+| `PAYMENTS_WEBHOOK_SECRET` | ➖ | Secret for verifying Commerce/OnchainKit webhooks. | `webhook-secret` |
+| `BASE_PAY_MOCK` | ➖ | `1` to bypass remote calls during local development. | `0` |
+| `BASE_BUILDER_OWNER_ADDRESS` | ➖ | Address included in the Farcaster Base Builder manifest section. | `0xabc123...` |
 
 After updating `.env.local`, run `pnpm dev` or restart the dev server to propagate changes.
 
@@ -61,4 +70,8 @@ After updating `.env.local`, run `pnpm dev` or restart the dev server to propaga
 
 ## Base payments
 
-The `POST /api/pay/verify` endpoint confirms the transaction succeeded on Base, the recipient matches `PAY_TO_ADDRESS`, and the paid amount meets or exceeds `MIN_PRICE_WEI`. Extend this handler to associate transactions with sessions, Farcaster identities, or Base Pay receipts as you integrate wallets.
+- `POST /api/pay/session` returns either a native Base transfer intent (Mode A) or a Coinbase Commerce/OnchainKit session payload (Mode B) depending on which environment variables are configured.
+- `POST /api/pay/webhook` validates Coinbase Commerce/OnchainKit webhook signatures in Mode B and marks boost sessions as granted once paid on Base Mainnet (chain `8453`).
+- `GET /api/pay/status?sessionId=` polls in-memory boost grants to let the client unlock boosters without reloading.
+
+Extend these handlers to back your own persistence layer, Farcaster identity checks, or advanced pricing logic once you connect additional infrastructure.
