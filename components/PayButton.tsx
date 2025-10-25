@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { formatUnits } from 'viem';
 import type { BoosterType } from '@/lib/game/types';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
+import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
 
 const MIN_PRICE_WEI = (() => {
@@ -336,6 +337,7 @@ export default function PayButton({
       setIsSubmitting(true);
       setInfoMessage('Preparing Base boost…');
 
+      dispatchWalletModalOpen();
       const account = await ensureBaseNetwork();
       setWallet(account, BASE_CHAIN_ID_HEX);
 

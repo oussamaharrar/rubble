@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PrimaryButton, GhostButton } from './Buttons';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
+import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
 
 const STATUS_VARIANTS = {
@@ -111,6 +112,7 @@ export default function WalletBar() {
     }
     try {
       setConnecting(true);
+      dispatchWalletModalOpen();
       const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
       const [primary] = accounts;
       const currentChain = await window.ethereum
@@ -132,6 +134,7 @@ export default function WalletBar() {
     if (switching) return;
     try {
       setSwitching(true);
+      dispatchWalletModalOpen();
       const nextAddress = await ensureBaseNetwork();
       setWallet(nextAddress, BASE_CHAIN_ID_HEX);
       setStatusMessage('Switched to Base Mainnet.');

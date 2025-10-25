@@ -13,7 +13,7 @@ export type Bubble = {
   createdAt: number;
 };
 
-export type GamePhase = 'start' | 'playing' | 'storm' | 'summary';
+export type GamePhase = 'start' | 'playing' | 'storm' | 'paused' | 'summary';
 
 export type MissionKind = 'color' | 'combo' | 'survival';
 
@@ -40,4 +40,7 @@ export type RunStats = {
   timeLeft: number;
   lastColor?: BubbleColor;
   chainLen: number;
+  energyOrbsCollected: number;
+  paidEntryOrbs: number;
+  entryMode: 'trial' | 'paid' | null;
 };

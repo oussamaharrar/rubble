@@ -13,8 +13,11 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
   const stats = useGameStore((state) => state.stats);
   const missions = useGameStore((state) => state.missions);
   const now = useGameStore((state) => state.now);
+  const boosterBank = useGameStore((state) => state.boosterBank);
 
   const elapsed = Math.max(0, Math.round(now / 1000));
+  const retryLabel = boosterBank.freeOrbs > 0 ? 'Retry now (Boost active)' : 'Retry (free if Boost active)';
+  const entryModeLabel = stats.entryMode === 'paid' ? 'Paid Entry' : 'Daily Trial';
 
   return (
     <Modal
@@ -28,7 +31,7 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
           onClick={onReplay}
           className="rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
         >
-          Replay
+          {retryLabel}
         </button>,
         <button
           key="close"
@@ -56,6 +59,19 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
         <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-300/80">Time Survived</p>
           <p className="text-2xl font-semibold text-slate-100">{elapsed}s</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-center text-sm">
+        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-300/80">Energy Orbs Earned</p>
+          <p className="text-xl font-semibold text-sky-200">{stats.energyOrbsCollected}</p>
+          {stats.paidEntryOrbs > 0 && (
+            <p className="mt-1 text-xs text-slate-300">+{stats.paidEntryOrbs} bonus from paid entry</p>
+          )}
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-300/80">Entry Mode</p>
+          <p className="text-xl font-semibold text-slate-100">{entryModeLabel}</p>
         </div>
       </div>
       <div className="mt-4 space-y-2">
