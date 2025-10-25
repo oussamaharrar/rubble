@@ -15,6 +15,11 @@ interface Bubble {
 
 const COLORS = [188, 320, 220, 160, 40];
 const BASE_BUBBLE_COUNT = 14;
+const BOOSTER_DURATION = 5000;
+
+interface BubbleGameCanvasProps {
+  boosterSignal?: number;
+}
 
 function spawnBubble(canvas: HTMLCanvasElement, speedMultiplier: number): Bubble {
   const radius = 16 + Math.random() * 20;
@@ -29,7 +34,7 @@ function spawnBubble(canvas: HTMLCanvasElement, speedMultiplier: number): Bubble
   };
 }
 
-export default function BubbleGameCanvas() {
+export default function BubbleGameCanvas({ boosterSignal = 0 }: BubbleGameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const bubblesRef = useRef<Bubble[]>([]);
@@ -39,12 +44,18 @@ export default function BubbleGameCanvas() {
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(1);
   const [streak, setStreak] = useState(0);
+  const [boosterActive, setBoosterActive] = useState(false);
+  const [boosterTimeLeft, setBoosterTimeLeft] = useState(0);
+  const boosterStateRef = useRef<{ active: boolean; until: number }>({ active: false, until: 0 });
+  const boosterRemainingRef = useRef(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext('2d');
     if (!context) return;
+
+    let disposed = false;
 
     const resize = () => {
       const width = Math.min(424, Math.floor(window.innerWidth));
@@ -59,15 +70,32 @@ export default function BubbleGameCanvas() {
     let last = performance.now();
 
     const loop = (now: number) => {
+      if (disposed) {
+        return;
+      }
       const dt = Math.min(32, now - last);
       last = now;
       const ctx = context;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      if (boosterStateRef.current.active && now >= boosterStateRef.current.until) {
+        boosterStateRef.current.active = false;
+        boosterRemainingRef.current = 0;
+        setBoosterActive(false);
+        setBoosterTimeLeft(0);
+      } else if (boosterStateRef.current.active) {
+        const remaining = Math.max(0, boosterStateRef.current.until - now);
+        if (Math.abs(remaining - boosterRemainingRef.current) > 120) {
+          boosterRemainingRef.current = remaining;
+          setBoosterTimeLeft(remaining);
+        }
+      }
+
       for (const bubble of bubblesRef.current) {
         if (!bubble.alive) continue;
-        bubble.x += bubble.vx * dt * 0.6;
-        bubble.y += bubble.vy * dt * 0.6;
+        const slowFactor = boosterStateRef.current.active ? 0.38 : 0.6;
+        bubble.x += bubble.vx * dt * slowFactor;
+        bubble.y += bubble.vy * dt * slowFactor;
 
         const gradient = ctx.createRadialGradient(
           bubble.x - bubble.radius * 0.35,
@@ -156,6 +184,7 @@ export default function BubbleGameCanvas() {
     window.addEventListener('resize', resize);
 
     return () => {
+      disposed = true;
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       if (comboTimeoutRef.current !== null) window.clearTimeout(comboTimeoutRef.current);
       canvas.removeEventListener('pointerdown', pointerDown);
@@ -164,14 +193,29 @@ export default function BubbleGameCanvas() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!boosterSignal) return;
+    const now = performance.now();
+    boosterStateRef.current = { active: true, until: now + BOOSTER_DURATION };
+    boosterRemainingRef.current = BOOSTER_DURATION;
+    setBoosterActive(true);
+    setBoosterTimeLeft(BOOSTER_DURATION);
+    speedRef.current = Math.max(1, speedRef.current * 0.75);
+  }, [boosterSignal]);
+
   return (
-    <div className="game-root">
+    <div className={`game-root${boosterActive ? ' booster-active' : ''}`}>
       <canvas ref={canvasRef} className="game-canvas" aria-label="Bubble Hunt playfield" role="img" />
       <div className="hud" aria-live="polite">
         <span>Score {score}</span>
         <span>Combo ×{combo}</span>
         <span>Streak {streak}</span>
       </div>
+      {boosterActive && (
+        <div className="booster-banner" aria-live="assertive">
+          <span>Slow motion {Math.ceil(boosterTimeLeft / 1000)}s</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,102 +1,128 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { ensureBaseNetwork } from '@/lib/base';
 
-const PAY_TO_ADDRESS = process.env.NEXT_PUBLIC_PAY_TO_ADDRESS ?? '';
-const MIN_PRICE_WEI = process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '';
+type PayButtonStatus = 'idle' | 'connecting' | 'pending' | 'polling' | 'granted' | 'error';
 
-interface EthereumRequestArgs<TParams = unknown[]> {
-  method: string;
-  params?: TParams;
+interface PayButtonProps {
+  onBoost?: () => void;
 }
 
-type EthereumProvider = {
-  request<TResponse = unknown, TParams = unknown[]>(args: EthereumRequestArgs<TParams>): Promise<TResponse>;
-};
+const MIN_PRICE_WEI = process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '0';
+const POLL_INTERVAL = 2000;
+const POLL_TIMEOUT = 90_000;
 
-type SendTransactionParams = Array<{
-  from: string;
-  to: string;
-  value: string;
-}>;
+function shortAddress(address: string) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
 
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
+async function pollForGrant(sessionId: string) {
+  const start = Date.now();
+  while (Date.now() - start < POLL_TIMEOUT) {
+    const response = await fetch(`/api/pay/status?sessionId=${encodeURIComponent(sessionId)}`, {
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      throw new Error('Unable to confirm payment status');
+    }
+    const payload = (await response.json()) as { granted: boolean };
+    if (payload.granted) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
   }
+  return false;
 }
 
-function toHexWei(value: string) {
-  try {
-    const numeric = BigInt(value);
-    return `0x${numeric.toString(16)}`;
-  } catch {
-    return '0x0';
-  }
-}
-
-export default function PayButton() {
-  const [status, setStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+export default function PayButton({ onBoost }: PayButtonProps) {
+  const [status, setStatus] = useState<PayButtonStatus>('idle');
   const [message, setMessage] = useState<string>('');
 
-  const disabled = !PAY_TO_ADDRESS || status === 'pending';
-
-  async function handlePay() {
-    if (typeof window === 'undefined' || !window.ethereum) {
-      setStatus('error');
-      setMessage('Wallet not detected');
-      return;
-    }
-
-    const provider = window.ethereum;
-
+  const handlePay = useCallback(async () => {
     try {
-      setStatus('pending');
-      setMessage('Confirm the transaction in your wallet');
-      const [account] = await provider.request<string[]>({
-        method: 'eth_requestAccounts',
-      });
-      const txHash = await provider.request<string, SendTransactionParams>({
-        method: 'eth_sendTransaction',
-        params: [
-          {
-            from: account,
-            to: PAY_TO_ADDRESS,
-            value: toHexWei(MIN_PRICE_WEI || '0'),
-          },
-        ],
-      });
+      setStatus('connecting');
+      setMessage('Connecting wallet…');
 
-      const response = await fetch(process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/verify', {
+      const account = await ensureBaseNetwork();
+      setMessage(`Wallet ${shortAddress(account)} connected. Creating Base Pay session…`);
+
+      setStatus('pending');
+      const response = await fetch('/api/pay/session', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ txHash }),
+        body: JSON.stringify({ sku: 'rubble-booster', amountWei: MIN_PRICE_WEI }),
       });
-      const payload = (await response.json()) as { ok?: boolean; reason?: string };
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.reason ?? 'Verification failed');
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error((payload as { reason?: string }).reason ?? 'Failed to create Base Pay session');
       }
-      setStatus('success');
-      setMessage('Boost active! 🎉');
-    } catch (error: unknown) {
+
+      const { session } = (await response.json()) as {
+        ok: boolean;
+        session: { id: string; checkoutUrl?: string; paymentUrl?: string; url?: string; clientSecret?: string };
+      };
+
+      const sessionId = session?.id;
+      if (!sessionId) {
+        throw new Error('Base Pay session missing id');
+      }
+
+      const fallbackUrl =
+        session.checkoutUrl ||
+        session.paymentUrl ||
+        session.url ||
+        (session.clientSecret ? `https://pay.base.org/${session.clientSecret}` : undefined);
+      const popup = typeof window !== 'undefined' ? window.open('', 'base-pay', 'width=480,height=720') : null;
+
+      if (fallbackUrl) {
+        if (popup) {
+          popup.focus();
+          popup.location.href = fallbackUrl;
+        } else {
+          window.location.href = fallbackUrl;
+        }
+      } else if (popup) {
+        popup.close();
+      }
+
+      setStatus('polling');
+      setMessage('Waiting for Base Pay confirmation…');
+
+      const granted = await pollForGrant(sessionId);
+      if (!granted) {
+        throw new Error('Timed out waiting for Base Pay confirmation');
+      }
+
+      setStatus('granted');
+      setMessage('Boost activated! Enjoy the slow-mo.');
+      onBoost?.();
+    } catch (error) {
       const reason = error instanceof Error ? error.message : 'Payment failed';
       setStatus('error');
       setMessage(reason);
     }
-  }
+  }, [onBoost]);
 
   return (
     <div className="pay-button-container">
       <button
         type="button"
-        className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+        className="pay-button"
         onClick={handlePay}
-        disabled={disabled}
+        disabled={status === 'connecting' || status === 'pending' || status === 'polling'}
       >
-        {status === 'pending' ? 'Waiting…' : 'Boost (Base)'}
+        {status === 'connecting'
+          ? 'Connecting…'
+          : status === 'pending'
+          ? 'Opening Base Pay…'
+          : status === 'polling'
+          ? 'Awaiting confirmation…'
+          : 'Boost with Base Pay'}
       </button>
       {message && (
-        <p className="mt-2 max-w-xs text-xs text-slate-200" role="status">
+        <p className="pay-button__message" role="status">
           {message}
         </p>
       )}
