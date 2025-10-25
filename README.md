@@ -1,133 +1,64 @@
-# Waitlist Mini App Quickstart
+# Rubble (Bubble Hunt)
 
-This is a demo Mini App application built using OnchainKit and the Farcaster SDK. Build a waitlist sign-up mini app for your company that can be published to the Base app and Farcaster.
+Rubble is a Farcaster Mini App built with Next.js 15 that brings an arcade bubble tapper to Base. It ships with a dynamic Farcaster manifest, Base payment verification endpoint, and production-ready scaffolding for Vercel deployments.
 
-## Prerequisites
+## Tech stack
 
-Before getting started, make sure you have:
+- [Next.js 15 App Router](https://nextjs.org/) with TypeScript
+- Canvas-driven mini game with optional Phaser scene
+- Base (via [`viem`](https://viem.sh/)) payment verification
+- Farcaster Mini App metadata and manifest endpoints
+- pnpm + Node.js 20 (required by Vercel build)
 
-* Base app account
-* A [Farcaster](https://farcaster.xyz/) account
-* [Vercel](https://vercel.com/) account for hosting the application
-* [Coinbase Developer Platform](https://portal.cdp.coinbase.com/) Client API Key
-
-## Getting Started
-
-### 1. Clone this repository 
+## Getting started
 
 ```bash
-git clone https://github.com/base/demos.git
+pnpm install
+pnpm dev
 ```
 
-### 2. Install dependencies:
+Open `http://localhost:3000` to load the mini app shell. Touch/click the bubbles to rack up combos and use the Boost button to simulate Base payments.
 
-```bash
-cd demos/minikit/waitlist-mini-app-qs
-npm install
-```
+### Scripts
 
-### 3. Configure environment variables
+| Command | Description |
+| --- | --- |
+| `pnpm dev` | Start the development server. |
+| `pnpm build` | Create a production build. Runs `scripts/postbuild.js` after compilation. |
+| `pnpm start` | Serve the production build. |
+| `pnpm verify:manifest` | Verify the built Farcaster manifest in `.next`. |
 
-Create a `.env.local` file and add your environment variables:
+## Environment variables
 
-```bash
-NEXT_PUBLIC_PROJECT_NAME="Your App Name"
-NEXT_PUBLIC_ONCHAINKIT_API_KEY=<Replace-WITH-YOUR-CDP-API-KEY>
-NEXT_PUBLIC_URL=
-```
+Create a `.env.local` (and mirror it to `.env.example`) with the following values:
 
-### 4. Run locally:
+| Name | Required | Description | Example |
+| --- | :---: | --- | --- |
+| `NEXT_PUBLIC_URL` | ✅ | Public base URL for the deployed mini app. | `https://rubble.example.com` |
+| `NEXT_PUBLIC_WEBHOOK_URL` | ✅ | Public URL that the client calls for payment verification (usually `/api/pay/verify`). | `https://rubble.example.com/api/pay/verify` |
+| `BASE_RPC_URL` | ✅ | Base RPC endpoint used for verifying transactions. | `https://mainnet.base.org` |
+| `PAY_TO_ADDRESS` | ✅ | Recipient address that must receive the payment. | `0xabc123...` |
+| `MIN_PRICE_WEI` | ✅ | Minimum accepted payment amount in wei. | `1000000000000` |
+| `NEXT_PUBLIC_PAY_TO_ADDRESS` | ➖ | Optional. Overrides the client-exposed payment address (defaults to `PAY_TO_ADDRESS`). | `0xabc123...` |
+| `NEXT_PUBLIC_MIN_PRICE_WEI` | ➖ | Optional. Overrides the client-exposed minimum amount (defaults to `MIN_PRICE_WEI`). | `1000000000000` |
 
-```bash
-npm run dev
-```
+After updating `.env.local`, run `pnpm dev` or restart the dev server to propagate changes.
 
-## Customization
+## Vercel deployment
 
-### Update Manifest Configuration
+1. Push this repository to your own GitHub project and import it into Vercel.
+2. In Vercel project settings, set **Node.js Version** to `20.x` (also enforced via `package.json` > `engines`).
+3. Add the environment variables above to the **Production** and **Preview** environments.
+4. Deploy. Once `next build` finishes, the postbuild script runs and the manifest becomes available at `https://your-domain/.well-known/farcaster.json`.
+5. Run `pnpm verify:manifest` locally or in CI to validate the generated manifest before publishing the deployment URL to Farcaster.
 
-The `minikit.config.ts` file configures your manifest located at `app/.well-known/farcaster.json`.
+## Manifest + Farcaster checks
 
-**Skip the `accountAssociation` object for now.**
+- `/.well-known/farcaster.json` is generated using validated environment variables.
+- `app/page.tsx` includes Farcaster embed metadata for the primary CTA.
+- Placeholder icons live in `public/game-icons/` and are referenced by the manifest and Open Graph tags.
+- `scripts/verify-manifest.mjs` provides a quick sanity check after builds.
 
-To personalize your app, change the `name`, `subtitle`, and `description` fields and add images to your `/public` folder. Then update their URLs in the file.
+## Base payments
 
-## Deployment
-
-### 1. Deploy to Vercel
-
-```bash
-vercel --prod
-```
-
-You should have a URL deployed to a domain similar to: `https://your-vercel-project-name.vercel.app/`
-
-### 2. Update environment variables
-
-Add your production URL to your local `.env` file:
-
-```bash
-NEXT_PUBLIC_PROJECT_NAME="Your App Name"
-NEXT_PUBLIC_ONCHAINKIT_API_KEY=<Replace-WITH-YOUR-CDP-API-KEY>
-NEXT_PUBLIC_URL=https://your-vercel-project-name.vercel.app/
-```
-
-### 3. Upload environment variables to Vercel
-
-Add environment variables to your production environment:
-
-```bash
-vercel env add NEXT_PUBLIC_PROJECT_NAME production
-vercel env add NEXT_PUBLIC_ONCHAINKIT_API_KEY production
-vercel env add NEXT_PUBLIC_URL production
-```
-
-## Account Association
-
-### 1. Sign Your Manifest
-
-1. Navigate to [Farcaster Manifest tool](https://farcaster.xyz/~/developers/mini-apps/manifest)
-2. Paste your domain in the form field (ex: your-vercel-project-name.vercel.app)
-3. Click the `Generate account association` button and follow the on-screen instructions for signing with your Farcaster wallet
-4. Copy the `accountAssociation` object
-
-### 2. Update Configuration
-
-Update your `minikit.config.ts` file to include the `accountAssociation` object:
-
-```ts
-export const minikitConfig = {
-    accountAssociation: {
-        "header": "your-header-here",
-        "payload": "your-payload-here",
-        "signature": "your-signature-here"
-    },
-    frame: {
-        // ... rest of your frame configuration
-    },
-}
-```
-
-### 3. Deploy Updates
-
-```bash
-vercel --prod
-```
-
-## Testing and Publishing
-
-### 1. Preview Your App
-
-Go to [base.dev/preview](https://base.dev/preview) to validate your app:
-
-1. Add your app URL to view the embeds and click the launch button to verify the app launches as expected
-2. Use the "Account association" tab to verify the association credentials were created correctly
-3. Use the "Metadata" tab to see the metadata added from the manifest and identify any missing fields
-
-### 2. Publish to Base App
-
-To publish your app, create a post in the Base app with your app's URL.
-
-## Learn More
-
-For detailed step-by-step instructions, see the [Create a Mini App tutorial](https://docs.base.org/docs/mini-apps/quickstart/create-new-miniapp/) in the Base documentation.
+The `POST /api/pay/verify` endpoint confirms the transaction succeeded on Base, the recipient matches `PAY_TO_ADDRESS`, and the paid amount meets or exceeds `MIN_PRICE_WEI`. Extend this handler to associate transactions with sessions, Farcaster identities, or Base Pay receipts as you integrate wallets.
