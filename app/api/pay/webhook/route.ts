@@ -2,30 +2,17 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
-import { verifyBasePayWebhook } from '@/lib/pay';
 import { markSessionGranted } from '@/lib/pay-session-store';
+import { verifyBasePayWebhook } from '@/lib/pay';
 
 const RESPONSE_HEADERS = {
   'Cache-Control': 'no-store',
   'Access-Control-Allow-Origin': '*',
-};
+  'Access-Control-Allow-Methods': 'POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type,x-basepay-signature,basepay-signature',
+} as const;
 
-export function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      ...RESPONSE_HEADERS,
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'content-type,x-basepay-signature,basepay-signature',
-    },
-  });
-}
-
-type WebhookAmount = {
-  value?: string | number;
-  currency?: string;
-};
+type WebhookAmount = { value?: string | number; currency?: string };
 
 type WebhookPayload = {
   id?: string;
@@ -53,7 +40,9 @@ function extractAmount(payload: WebhookPayload) {
     return toBigInt(payload.amountWei as string | number);
   }
   const amount = payload.amount;
-  if (!amount) return 0n;
+  if (!amount) {
+    return 0n;
+  }
   if (typeof amount === 'string' || typeof amount === 'number') {
     return toBigInt(amount);
   }
@@ -65,6 +54,10 @@ function extractAmount(payload: WebhookPayload) {
 
 function normalise(value?: string | null) {
   return value?.toLowerCase() ?? '';
+}
+
+export function OPTIONS() {
+  return new Response(null, { status: 204, headers: RESPONSE_HEADERS });
 }
 
 export async function POST(request: Request) {
@@ -89,9 +82,9 @@ export async function POST(request: Request) {
       { status: 400, headers: RESPONSE_HEADERS }
     );
   }
+
   const data = payload.data ?? payload;
   const sessionId = data.sessionId ?? data.id;
-
   if (!sessionId) {
     return NextResponse.json(
       { ok: false, reason: 'MISSING_SESSION_ID' },
@@ -99,8 +92,17 @@ export async function POST(request: Request) {
     );
   }
 
+  const reportedChain = normalise(data.chain);
+  if (reportedChain && reportedChain !== 'base-mainnet') {
+    return NextResponse.json(
+      { ok: false, reason: 'UNSUPPORTED_CHAIN', chain: reportedChain },
+      { status: 400, headers: RESPONSE_HEADERS }
+    );
+  }
+
   const chain = normalise(data.chain ?? data.chainId);
-  if (chain !== 'base-mainnet' && chain !== '0x2105' && chain !== '8453') {
+  const isBaseMainnet = chain === 'base-mainnet' || chain === '0x2105' || chain === '8453';
+  if (!isBaseMainnet) {
     return NextResponse.json(
       { ok: false, reason: 'UNSUPPORTED_CHAIN', chain },
       { status: 400, headers: RESPONSE_HEADERS }

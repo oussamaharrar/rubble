@@ -3,15 +3,16 @@ import { ENV } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
-function getOriginFromRequest(req: Request) {
-  const url = new URL(req.url);
-  const proto = req.headers.get('x-forwarded-proto') || url.protocol.replace(':', '');
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || url.host;
+function resolveOrigin(request: Request) {
+  const url = new URL(request.url);
+  const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '');
+  const host =
+    request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host;
   return `${proto}://${host}`;
 }
 
 function resolveWebhookUrl(origin: string) {
-  const webhookPath = ENV.NEXT_PUBLIC_WEBHOOK_URL || '/api/pay/webhook';
+  const webhookPath = ENV.NEXT_PUBLIC_WEBHOOK_URL;
   if (webhookPath.startsWith('http://') || webhookPath.startsWith('https://')) {
     return webhookPath;
   }
@@ -20,31 +21,30 @@ function resolveWebhookUrl(origin: string) {
 }
 
 export async function GET(request: Request) {
-  const origin = getOriginFromRequest(request);
+  const origin = resolveOrigin(request);
   const homeUrl = origin;
-  const iconUrl = `${origin}/game-icons/icon.png`;
-  const splashUrl = `${origin}/game-icons/splash.png`;
-  const ogUrl = `${origin}/game-icons/og.png`;
   const webhookUrl = resolveWebhookUrl(origin);
+
+  const miniapp = {
+    version: '1',
+    name: 'Rubble (Bubble Hunt)',
+    subtitle: 'Tap • Combo • Boost on Base',
+    description: 'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
+    homeUrl,
+    iconUrl: `${origin}/game-icons/icon.png`,
+    splashImageUrl: `${origin}/game-icons/splash.png`,
+    splashBackgroundColor: '#04060B',
+    ogImageUrl: `${origin}/game-icons/og.png`,
+    webhookUrl,
+    primaryCategory: 'games',
+    tags: ['game', 'arcade', 'base', 'booster'],
+    screenshotUrls: [`${origin}/screenshot-portrait.png`],
+    buttonTitle: 'Play',
+  } as const;
 
   const body: Record<string, unknown> = {
     version: '1',
-    miniapp: {
-      version: '1',
-      name: 'Rubble (Bubble Hunt)',
-      subtitle: 'Tap • Combo • Boost on Base',
-      description: 'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
-      homeUrl,
-      iconUrl,
-      splashImageUrl: splashUrl,
-      splashBackgroundColor: '#04060B',
-      ogImageUrl: ogUrl,
-      webhookUrl,
-      primaryCategory: 'games',
-      tags: ['game', 'arcade', 'base', 'booster'],
-      screenshotUrls: [`${origin}/screenshot-portrait.png`],
-      buttonTitle: 'Play',
-    },
+    miniapp,
   };
 
   if (
