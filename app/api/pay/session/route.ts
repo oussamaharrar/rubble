@@ -48,8 +48,7 @@ export async function POST(request: Request) {
 
   const result = await createBasePaySession({
     sku,
-    amountWei: amount,
-    buyerAddress: body.buyerAddress,
+    amountWei: amount.toString(),
   });
 
   if (result.ok) {
@@ -59,13 +58,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const status = result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+  const status = result.status ?? (result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502);
   return NextResponse.json(
     {
       ok: false,
       reason: result.code,
       error: result.detail,
-      status: result.status,
     },
     { status, headers: RESPONSE_HEADERS }
   );
