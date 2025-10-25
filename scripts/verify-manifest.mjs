@@ -4,11 +4,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 
+const preview = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined;
+
 function getPreviewBaseUrl() {
   const fromArg = process.argv[2];
   if (fromArg) return fromArg;
+  if (preview) return preview;
   if (process.env.VERCEL_PREVIEW_URL) return process.env.VERCEL_PREVIEW_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return process.env.NEXT_PUBLIC_URL;
 }
 
@@ -78,6 +80,7 @@ try {
   let manifest;
   let manifestUrl;
   let normalisedBase;
+  let source = 'build';
 
   const baseUrl = getPreviewBaseUrl();
   if (baseUrl) {
@@ -86,6 +89,7 @@ try {
       manifest = result.manifest;
       manifestUrl = result.manifestUrl;
       normalisedBase = result.normalisedBase;
+      source = 'preview';
       console.log('ℹ️ Validating remote manifest at', manifestUrl);
     } catch (error) {
       console.warn('⚠️ Failed to fetch preview manifest, falling back to build output:', error);
@@ -96,6 +100,7 @@ try {
     manifest = await loadFromBuild();
     normalisedBase = normaliseBase(getPreviewBaseUrl() ?? 'http://localhost:3000');
     manifestUrl = 'compiled route output';
+    source = 'build';
     console.log('ℹ️ Validating compiled manifest output');
   }
 
@@ -106,12 +111,25 @@ try {
   assert(miniapp?.name === 'Rubble (Bubble Hunt)', 'miniapp.name mismatch');
 
   const manifestHome = normaliseBase(String(miniapp?.homeUrl ?? ''));
-  assert(manifestHome === normalisedBase, 'miniapp.homeUrl must match preview base URL');
+  const previewBase = preview ? normaliseBase(preview) : undefined;
 
-  const expectedIcon = `${normalisedBase}/game-icons/icon.png`;
+  if (previewBase) {
+    if (manifestHome !== previewBase) {
+      throw new Error(
+        `miniapp.homeUrl must match preview origin. Expected ${previewBase} from ${preview ?? 'preview'}, received ${manifestHome} (source: ${manifestUrl}).`
+      );
+    }
+  } else {
+    assert(
+      manifestHome === normalisedBase,
+      `miniapp.homeUrl must match ${normalisedBase}, received ${manifestHome}`
+    );
+  }
+
+  const expectedIcon = `${manifestHome}/game-icons/icon.png`;
   assert(miniapp?.iconUrl === expectedIcon, 'miniapp.iconUrl mismatch');
 
-  const expectedSplash = `${normalisedBase}/game-icons/splash.png`;
+  const expectedSplash = `${manifestHome}/game-icons/splash.png`;
   assert(miniapp?.splashImageUrl === expectedSplash, 'miniapp.splashImageUrl mismatch');
 
   assert(
@@ -123,7 +141,7 @@ try {
   assert(Array.isArray(miniapp?.tags) && miniapp.tags.length > 0, 'miniapp.tags must be populated');
   assert(Boolean(baseBuilder?.ownerAddress), 'baseBuilder.ownerAddress missing');
 
-  console.log('✅ Manifest verified at', manifestUrl);
+  console.log('✅ Manifest verified at', manifestUrl, `(${source})`);
 } catch (error) {
   console.error('❌ Manifest verification failed');
   console.error(error instanceof Error ? error.message : error);
