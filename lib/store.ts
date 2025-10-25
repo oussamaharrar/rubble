@@ -45,6 +45,7 @@ function defaultStats(): RunStats {
     timeLeft: 60,
     lastColor: undefined,
     chainLen: 0,
+    energyOrbs: 0,
   };
 }
 
@@ -129,6 +130,7 @@ function isDrainOrb(bubble: Bubble) {
 
 type GameStore = {
   phase: GamePhase;
+  paused: boolean;
   stats: RunStats;
   bubbles: Bubble[];
   missions: Mission[];
@@ -148,6 +150,8 @@ type GameStore = {
   startRun: () => void;
   endRun: () => void;
   resetToStart: () => void;
+  pause: () => void;
+  resume: () => void;
   tick: (dt: number) => void;
   spawnBubbles: (count?: number) => void;
   spawnStormOrbs: () => void;
@@ -165,6 +169,7 @@ type GameStore = {
 
 export const useGameStore = create<GameStore>((set, get) => ({
   phase: 'start',
+  paused: false,
   stats: defaultStats(),
   bubbles: [],
   missions: [],
@@ -185,6 +190,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const seed = hashString(`${Date.now()}-${Math.random()}`);
     set({
       phase: 'playing',
+      paused: false,
       stats: { ...defaultStats(), timeLeft: 60 },
       bubbles: [],
       stormAt: STORM_INTERVAL_MS,
@@ -200,11 +206,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     get().spawnBubbles(MAX_BUBBLES / 2);
   },
   endRun: () => {
-    set({ phase: 'summary' });
+    set({ phase: 'summary', paused: false });
   },
   resetToStart: () => {
     set({
       phase: 'start',
+      paused: false,
       stats: defaultStats(),
       bubbles: [],
       now: 0,
@@ -214,8 +221,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
       currentStreak: 0,
     });
   },
+  pause: () => {
+    const state = get();
+    if (state.paused) return;
+    if (state.phase === 'playing' || state.phase === 'storm') {
+      set({ paused: true });
+    }
+  },
+  resume: () => {
+    if (!get().paused) return;
+    set({ paused: false });
+  },
   tick: (dt) => {
     const state = get();
+    if (state.paused) {
+      return;
+    }
     if (state.phase !== 'playing' && state.phase !== 'storm') {
       return;
     }
@@ -303,6 +324,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
   tap: (x, y) => {
     const state = get();
+    if (state.paused) {
+      return { hit: false };
+    }
     let hitIndex = -1;
     for (let index = state.bubbles.length - 1; index >= 0; index -= 1) {
       const bubble = state.bubbles[index];
@@ -350,6 +374,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       if (isEnergyOrb(target)) {
         stats.score += ENERGY_POINTS;
+        stats.energyOrbs += 1;
         energy = true;
       } else {
         const multiplier = Math.min(1 + 0.25 * Math.max(chainLen - 2, 0), 4);

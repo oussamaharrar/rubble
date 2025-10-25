@@ -47,6 +47,8 @@ interface PayButtonProps {
   disabled?: boolean;
   label?: string;
   icon?: ReactNode;
+  onSuccess?: () => void;
+  onBeforeOpenWallet?: () => void;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -228,6 +230,8 @@ export default function PayButton({
   disabled = false,
   label,
   icon,
+  onSuccess,
+  onBeforeOpenWallet,
 }: PayButtonProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -289,8 +293,9 @@ export default function PayButton({
       dispatchBooster(boosterType, durationMs);
       showToast({ type: 'success', message: 'Boost activated on Base!' });
       setInfoMessage(null);
+      onSuccess?.();
     },
-    [boosterType, durationMs, showToast]
+    [boosterType, durationMs, onSuccess, showToast]
   );
 
   const handleCommerceSession = useCallback(
@@ -298,6 +303,7 @@ export default function PayButton({
       if (readBooleanField(session, 'mock')) {
         dispatchBooster(boosterType, durationMs);
         showToast({ type: 'success', message: 'Mock payment confirmed. Boost active!' });
+        onSuccess?.();
         return;
       }
 
@@ -323,8 +329,9 @@ export default function PayButton({
 
       dispatchBooster(boosterType, durationMs);
       showToast({ type: 'success', message: 'Payment confirmed! Time Freeze engaged.' });
+      onSuccess?.();
     },
-    [boosterType, durationMs, isMounted, showToast]
+    [boosterType, durationMs, isMounted, onSuccess, showToast]
   );
 
   const handlePay = useCallback(async () => {
@@ -335,6 +342,8 @@ export default function PayButton({
     try {
       setIsSubmitting(true);
       setInfoMessage('Preparing Base boost…');
+
+      onBeforeOpenWallet?.();
 
       const account = await ensureBaseNetwork();
       setWallet(account, BASE_CHAIN_ID_HEX);
@@ -374,6 +383,7 @@ export default function PayButton({
     handleCommerceSession,
     handleNativeIntent,
     isSubmitting,
+    onBeforeOpenWallet,
     setWallet,
     showToast,
     sku,
