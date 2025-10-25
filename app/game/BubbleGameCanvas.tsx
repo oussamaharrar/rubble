@@ -192,10 +192,30 @@ export default function BubbleGameCanvas() {
       setBoosterRemaining(duration);
     };
 
+    const resetGame = () => {
+      if (!canvasRef.current) return;
+      if (comboTimeoutRef.current !== null) {
+        window.clearTimeout(comboTimeoutRef.current);
+        comboTimeoutRef.current = null;
+      }
+      speedRef.current = 1;
+      boosterRef.current = null;
+      boosterUpdateRef.current = 0;
+      setScore(0);
+      setCombo(1);
+      comboRef.current = 1;
+      setStreak(0);
+      setBoosterRemaining(0);
+      bubblesRef.current = Array.from({ length: BASE_BUBBLE_COUNT }, () =>
+        spawnBubble(canvasRef.current as HTMLCanvasElement, speedRef.current)
+      );
+    };
+
     canvas.addEventListener('pointerdown', pointerDown, { passive: true });
     canvas.addEventListener('touchstart', touchStart, { passive: true });
     window.addEventListener('resize', resize);
     window.addEventListener('rubble:booster', handleBooster as EventListener);
+    window.addEventListener('rubble:reset-game', resetGame);
 
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -204,6 +224,7 @@ export default function BubbleGameCanvas() {
       canvas.removeEventListener('touchstart', touchStart);
       window.removeEventListener('resize', resize);
       window.removeEventListener('rubble:booster', handleBooster as EventListener);
+      window.removeEventListener('rubble:reset-game', resetGame);
     };
   }, []);
 

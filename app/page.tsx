@@ -1,7 +1,5 @@
 import type { Metadata } from 'next';
-import MiniAppShell from '@/components/MiniAppShell';
-import BubbleGameCanvas from './game/BubbleGameCanvas';
-import PayButton from '@/components/PayButton';
+import HomeContent from '@/components/HomeContent';
 
 const description =
   'Tap bubbles, rack combos, and trigger Base Pay boosters in this Base mini arcade.';
@@ -32,10 +30,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return (
-    <MiniAppShell>
-      <BubbleGameCanvas />
-      <PayButton />
-    </MiniAppShell>
-  );
+  return <HomeContent />;
 }

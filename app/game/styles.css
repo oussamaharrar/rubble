@@ -43,48 +43,6 @@
   background: rgba(148, 163, 184, 0.6);
 }
 
-.pay-button-container {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-}
-
-.pay-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(56, 189, 248, 0.25);
-  color: #f8fafc;
-  font-weight: 600;
-  font-size: 0.9rem;
-  padding: 0.65rem 1.2rem;
-  letter-spacing: 0.01em;
-  backdrop-filter: blur(10px);
-  transition: background 0.2s ease, transform 0.2s ease;
-  cursor: pointer;
-}
-
-.pay-button:hover:not(:disabled) {
-  background: rgba(56, 189, 248, 0.4);
-  transform: translateY(-1px);
-}
-
-.pay-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
-.pay-message {
-  margin-top: 0.75rem;
-  max-width: 14rem;
-  font-size: 0.75rem;
-  line-height: 1.2;
-  color: rgba(226, 232, 240, 0.85);
-}
-
 .booster-overlay {
   position: absolute;
   inset: 0;

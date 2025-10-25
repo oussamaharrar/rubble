@@ -1,21 +1,21 @@
 import crypto from 'node:crypto';
 import { ENV } from './env';
 
-const BASE_PAY_API_BASE = 'https://api.pay.base.org';
-const BASE_PAY_API_VERSION = 'v1';
-const BASE_PAY_SESSIONS_ENDPOINT = `${BASE_PAY_API_BASE}/api/${BASE_PAY_API_VERSION}/sessions`;
-
 export type BasePaySession = {
   id: string;
-  status: string;
+  status?: string;
   checkoutUrl?: string;
   hostedCheckoutUrl?: string;
-  amount: {
+  redirectUrl?: string;
+  url?: string;
+  mock?: boolean;
+  amount?: {
     value: string;
     currency: string;
   };
-  chainId: string;
+  chainId?: string;
   metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export interface CreateBasePaySessionOptions {
@@ -24,22 +24,67 @@ export interface CreateBasePaySessionOptions {
   buyerAddress?: string;
 }
 
-function getBasicAuthHeader() {
-  if (!ENV.BASE_PAY_API_KEY_ID || !ENV.BASE_PAY_API_SECRET) {
-    throw new Error('Missing Base Pay credentials');
+export type CreateBasePaySessionResult =
+  | { ok: true; session: BasePaySession }
+  | {
+      ok: false;
+      code: 'NO_API_BASE' | 'NO_API_KEYS' | 'API_NON_2XX' | 'FETCH_ERROR';
+      status?: number;
+      detail?: string;
+    };
+
+function getNormalisedApiBase() {
+  const explicitBase = process.env.BASE_PAY_API_BASE ?? ENV.BASE_PAY_API_BASE;
+  if (!explicitBase) {
+    return null;
   }
-  const credentials = Buffer.from(
-    `${ENV.BASE_PAY_API_KEY_ID}:${ENV.BASE_PAY_API_SECRET}`,
-    'utf8'
-  ).toString('base64');
+  return explicitBase.replace(/\/$/, '');
+}
+
+function getBasicAuthHeader() {
+  const apiKey = process.env.BASE_PAY_API_KEY_ID ?? ENV.BASE_PAY_API_KEY_ID;
+  const apiSecret = process.env.BASE_PAY_API_SECRET ?? ENV.BASE_PAY_API_SECRET;
+  if (!apiKey || !apiSecret) {
+    return null;
+  }
+  const credentials = Buffer.from(`${apiKey}:${apiSecret}`, 'utf8').toString('base64');
   return `Basic ${credentials}`;
+}
+
+function createMockSession(amountWei: bigint, sku: string, buyerAddress?: string) {
+  return {
+    id: `mock_${Date.now()}`,
+    mock: true,
+    amount: {
+      currency: 'wei',
+      value: amountWei.toString(),
+    },
+    metadata: {
+      buyerAddress,
+      sku,
+    },
+  } satisfies BasePaySession & { mock: true };
 }
 
 export async function createBasePaySession({
   sku = 'booster_time_freeze',
   amountWei = ENV.MIN_PRICE_WEI,
   buyerAddress,
-}: CreateBasePaySessionOptions = {}): Promise<BasePaySession> {
+}: CreateBasePaySessionOptions = {}): Promise<CreateBasePaySessionResult> {
+  if (ENV.BASE_PAY_MOCK === '1') {
+    return { ok: true, session: createMockSession(amountWei, sku, buyerAddress) };
+  }
+
+  const apiBase = getNormalisedApiBase();
+  if (!apiBase) {
+    return { ok: false, code: 'NO_API_BASE' };
+  }
+
+  const authHeader = getBasicAuthHeader();
+  if (!authHeader) {
+    return { ok: false, code: 'NO_API_KEYS' };
+  }
+
   const payload = {
     sku,
     chainId: 'base-mainnet',
@@ -53,24 +98,42 @@ export async function createBasePaySession({
     },
   };
 
-  const response = await fetch(BASE_PAY_SESSIONS_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      authorization: getBasicAuthHeader(),
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify(payload),
-    cache: 'no-store',
-  });
+  const endpoint = `${apiBase}/sessions`;
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Base Pay session failed (${response.status}): ${errorText}`);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        authorization: authHeader,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Unknown error';
+    return { ok: false, code: 'FETCH_ERROR', detail };
   }
 
-  const session = (await response.json()) as BasePaySession;
-  return session;
+  if (!response.ok) {
+    let detail: string | undefined;
+    try {
+      detail = await response.text();
+    } catch {
+      detail = undefined;
+    }
+    return { ok: false, code: 'API_NON_2XX', status: response.status, detail };
+  }
+
+  try {
+    const session = (await response.json()) as BasePaySession;
+    return { ok: true, session };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Failed to parse session';
+    return { ok: false, code: 'FETCH_ERROR', detail };
+  }
 }
 
 function safeEqual(first: Buffer, second: Buffer) {
