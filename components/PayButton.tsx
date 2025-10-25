@@ -5,6 +5,7 @@ import { formatEther } from 'viem';
 import { ensureBaseNetwork } from '@/lib/base';
 
 const PAY_TO_ADDRESS = process.env.NEXT_PUBLIC_PAY_TO_ADDRESS ?? '';
+const SESSION_SKU = 'booster_time_freeze';
 
 const MIN_PRICE_WEI = (() => {
   try {
@@ -114,10 +115,11 @@ export default function PayButton() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          sku: 'bubble-hunt-booster',
+          sku: SESSION_SKU,
           amountWei: MIN_PRICE_WEI.toString(),
           buyerAddress: address,
         }),
+        cache: 'no-store',
       });
 
       const payload = (await response.json()) as SessionResponse;

@@ -19,12 +19,15 @@ export type BasePaySession = {
 };
 
 export interface CreateBasePaySessionOptions {
-  sku: string;
-  amountWei: bigint;
+  sku?: string;
+  amountWei?: bigint;
   buyerAddress?: string;
 }
 
 function getBasicAuthHeader() {
+  if (!ENV.BASE_PAY_API_KEY_ID || !ENV.BASE_PAY_API_SECRET) {
+    throw new Error('Missing Base Pay credentials');
+  }
   const credentials = Buffer.from(
     `${ENV.BASE_PAY_API_KEY_ID}:${ENV.BASE_PAY_API_SECRET}`,
     'utf8'
@@ -33,10 +36,10 @@ function getBasicAuthHeader() {
 }
 
 export async function createBasePaySession({
-  sku,
-  amountWei,
+  sku = 'booster_time_freeze',
+  amountWei = ENV.MIN_PRICE_WEI,
   buyerAddress,
-}: CreateBasePaySessionOptions): Promise<BasePaySession> {
+}: CreateBasePaySessionOptions = {}): Promise<BasePaySession> {
   const payload = {
     sku,
     chainId: 'base-mainnet',
@@ -77,17 +80,30 @@ function safeEqual(first: Buffer, second: Buffer) {
   return crypto.timingSafeEqual(first, second);
 }
 
-export function verifyBasePayWebhook(rawBody: string | Buffer, signature: string | null | undefined) {
-  if (!signature) return false;
+function decodeSignature(signature: string) {
+  const trimmed = signature.trim();
+  if (/^[0-9a-fA-F]+$/u.test(trimmed) && trimmed.length % 2 === 0) {
+    return Buffer.from(trimmed, 'hex');
+  }
+  try {
+    return Buffer.from(trimmed, 'base64');
+  } catch {
+    return null;
+  }
+}
+
+export function verifyBasePayWebhook(
+  rawBody: string | Buffer,
+  signature: string | null | undefined
+) {
+  if (!signature || !ENV.BASE_PAY_API_SECRET) return false;
 
   const message = typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody;
-  const secret = Buffer.from(ENV.BASE_PAY_API_SECRET, 'base64');
+  const secret = Buffer.from(ENV.BASE_PAY_API_SECRET, 'utf8');
   const expected = crypto.createHmac('sha256', secret).update(message).digest();
 
-  let provided: Buffer;
-  try {
-    provided = Buffer.from(signature, 'base64');
-  } catch {
+  const provided = decodeSignature(signature);
+  if (!provided) {
     return false;
   }
 
