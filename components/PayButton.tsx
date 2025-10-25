@@ -2,10 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { formatUnits } from 'viem';
-import type { BoosterType } from '@/lib/game/types';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
+import type { BoosterType } from '@/lib/game/types';
 import { useWalletStore } from '@/lib/wallet-store';
+import { useGameStore } from '@/lib/store';
+import {
+  PaySessionResponse,
+  PayIntent,
+  hasIntent,
+  hasSession,
+  mapErrorMessage,
+  dispatchBooster,
+  decimalToHex,
+  extractCheckoutUrl,
+  extractSessionId,
+  pollForGrant,
+  formatCompactWei,
+} from '@/lib/payments';
 
 const MIN_PRICE_WEI = (() => {
   const fallback = process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '1';
@@ -20,25 +33,6 @@ const BOOSTER_DURATION_MS = 5000;
 
 type Toast = { type: 'success' | 'error' | 'info'; message: string };
 
-type PayIntent = {
-  to: string;
-  value: string;
-  valueHex?: string;
-  chainId: number;
-  chainIdHex?: string;
-  type?: string;
-  maxFeePerGas?: string;
-  maxPriorityFeePerGas?: string;
-  memo?: string;
-};
-
-type PaySessionResponse =
-  | { ok: true; intent: PayIntent }
-  | { ok: true; session: unknown }
-  | { ok: false; reason?: string; error?: string };
-
-type PayStatusResponse = { granted?: boolean };
-
 interface PayButtonProps {
   sku?: string;
   amountWei?: bigint;
@@ -49,175 +43,14 @@ interface PayButtonProps {
   icon?: ReactNode;
 }
 
-type UnknownRecord = Record<string, unknown>;
-
 type EthereumProvider = {
   request<T = unknown>(args: { method: string; params?: unknown[] }): Promise<T>;
 };
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isPayIntent(value: unknown): value is PayIntent {
-  if (!isRecord(value)) return false;
-  if (typeof value.to !== 'string' || typeof value.value !== 'string') return false;
-  if (typeof value.chainId !== 'number') return false;
-  if (value.valueHex && typeof value.valueHex !== 'string') return false;
-  if (value.chainIdHex && typeof value.chainIdHex !== 'string') return false;
-  if (value.type && typeof value.type !== 'string') return false;
-  if (value.maxFeePerGas && typeof value.maxFeePerGas !== 'string') return false;
-  if (value.maxPriorityFeePerGas && typeof value.maxPriorityFeePerGas !== 'string') return false;
-  if (value.memo && typeof value.memo !== 'string') return false;
-  return true;
-}
-
-function hasIntent(response: PaySessionResponse): response is { ok: true; intent: PayIntent } {
-  return response.ok === true && 'intent' in response && isPayIntent(response.intent);
-}
-
-function hasSession(response: PaySessionResponse): response is { ok: true; session: UnknownRecord } {
-  return response.ok === true && 'session' in response && isRecord(response.session);
-}
-
-function formatCompactWei(amount: bigint) {
-  if (amount <= 0n) {
-    return 'Free';
-  }
-  const threshold = 1_000_000_000_000n; // 0.000001 ETH
-  if (amount < threshold) {
-    return `${amount.toString()} wei`;
-  }
-  const eth = formatUnits(amount, 18);
-  const [whole, fraction = ''] = eth.split('.');
-  const trimmedFraction = fraction.slice(0, 6).replace(/0+$/u, '');
-  return trimmedFraction.length > 0 ? `${whole}.${trimmedFraction} ETH` : `${whole} ETH`;
-}
-
-function decimalToHex(value: string) {
-  const trimmed = value.trim();
-  const numeric = trimmed.startsWith('0x') || trimmed.startsWith('0X') ? BigInt(trimmed) : BigInt(trimmed);
-  return `0x${numeric.toString(16)}`;
-}
-
-function dispatchBooster(type: BoosterType, duration: number) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.dispatchEvent(
-    new CustomEvent('rubble:booster', {
-      detail: { type, duration },
-    })
-  );
-}
-
-function readStringField(record: UnknownRecord, key: string) {
-  const value = record[key];
-  if (typeof value === 'string' && value.trim().length > 0) {
-    return value.trim();
-  }
-  return null;
-}
-
-function readBooleanField(record: UnknownRecord, key: string) {
-  return record[key] === true;
-}
-
-const SESSION_ID_KEYS: readonly string[] = ['sessionId', 'id', 'referenceId', 'paymentIntentId', 'checkoutId'];
-
-function extractSessionId(record: UnknownRecord) {
-  for (const key of SESSION_ID_KEYS) {
-    const value = readStringField(record, key);
-    if (value) {
-      return value;
-    }
-  }
-  if (isRecord(record.metadata)) {
-    for (const key of SESSION_ID_KEYS) {
-      const nested = readStringField(record.metadata, key);
-      if (nested) {
-        return nested;
-      }
-    }
-  }
-  return null;
-}
-
-const CHECKOUT_URL_KEYS: readonly string[] = ['redirectUrl', 'hostedCheckoutUrl', 'checkoutUrl', 'url'];
-
-function extractCheckoutUrl(record: UnknownRecord) {
-  for (const key of CHECKOUT_URL_KEYS) {
-    const value = readStringField(record, key);
-    if (value) {
-      return value;
-    }
-  }
-  if (isRecord(record.links)) {
-    for (const key of CHECKOUT_URL_KEYS) {
-      const value = readStringField(record.links, key);
-      if (value) {
-        return value;
-      }
-    }
-  }
-  return null;
-}
-
-function mapErrorMessage(payload: PaySessionResponse, status: number) {
-  if (payload.ok) {
-    return null;
-  }
-  const detail = payload.error ?? undefined;
-  switch (payload.reason) {
-    case 'MODE_B_DISABLED':
-      return 'Payments mode B is not available. Please try again later.';
-    case 'API_NON_2XX':
-      return detail ? `Payments API error: ${detail}` : `Payments API returned status ${status}.`;
-    case 'FETCH_ERROR':
-      return detail ? `Network error: ${detail}` : 'Unable to reach payments API.';
-    case 'BAD_REQUEST':
-      return detail ?? 'Payment request was invalid. Please try again.';
-    default:
-      return detail ?? 'Unable to prepare the Base payment session.';
-  }
-}
-
 function getProvider(): EthereumProvider {
   if (typeof window === 'undefined' || !window.ethereum) {
     throw new Error('No wallet provider detected.');
   }
   return window.ethereum as unknown as EthereumProvider;
-}
-
-async function pollForGrant(sessionId: string, isMounted: () => boolean) {
-  const maxAttempts = 15;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (!isMounted()) {
-      return false;
-    }
-    if (attempt > 0) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, 2000);
-      });
-    }
-    try {
-      const response = await fetch(`/api/pay/status?sessionId=${encodeURIComponent(sessionId)}`, {
-        method: 'GET',
-        headers: { accept: 'application/json' },
-        cache: 'no-store',
-      });
-      if (!response.ok) {
-        continue;
-      }
-      const payload = (await response.json()) as PayStatusResponse;
-      if (payload.granted) {
-        return true;
-      }
-    } catch {
-      // swallow network errors and continue polling
-    }
-  }
-  return false;
 }
 
 export default function PayButton({
@@ -235,6 +68,7 @@ export default function PayButton({
   const mountedRef = useRef(true);
 
   const setWallet = useWalletStore((state) => state.setWallet);
+  const pauseRun = useGameStore((state) => state.pauseRun);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -294,8 +128,8 @@ export default function PayButton({
   );
 
   const handleCommerceSession = useCallback(
-    async (session: UnknownRecord) => {
-      if (readBooleanField(session, 'mock')) {
+    async (session: Record<string, unknown>) => {
+      if (session.mock === true) {
         dispatchBooster(boosterType, durationMs);
         showToast({ type: 'success', message: 'Mock payment confirmed. Boost active!' });
         return;
@@ -336,6 +170,7 @@ export default function PayButton({
       setIsSubmitting(true);
       setInfoMessage('Preparing Base boost…');
 
+      pauseRun('Completing Base payment');
       const account = await ensureBaseNetwork();
       setWallet(account, BASE_CHAIN_ID_HEX);
 
@@ -374,6 +209,7 @@ export default function PayButton({
     handleCommerceSession,
     handleNativeIntent,
     isSubmitting,
+    pauseRun,
     setWallet,
     showToast,
     sku,
