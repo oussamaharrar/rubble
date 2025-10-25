@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { PrimaryButton, GhostButton } from './Buttons';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { useWalletStore } from '@/lib/wallet-store';
+import { useGameStore } from '@/lib/store';
 
 const STATUS_VARIANTS = {
   initial: { opacity: 0, y: -4 },
@@ -26,6 +27,7 @@ export default function WalletBar() {
   const setWallet = useWalletStore((state) => state.setWallet);
   const setChainId = useWalletStore((state) => state.setChainId);
   const resetWallet = useWalletStore((state) => state.reset);
+  const pauseRun = useGameStore((state) => state.pauseRun);
 
   const [connecting, setConnecting] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -112,6 +114,7 @@ export default function WalletBar() {
     try {
       setConnecting(true);
       const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
+      pauseRun('Wallet action required');
       const [primary] = accounts;
       const currentChain = await window.ethereum
         .request<string>({ method: 'eth_chainId' })
@@ -126,12 +129,13 @@ export default function WalletBar() {
     } finally {
       setConnecting(false);
     }
-  }, [connecting, switching, setWallet]);
+  }, [connecting, pauseRun, setWallet, switching]);
 
   const handleSwitchNetwork = useCallback(async () => {
     if (switching) return;
     try {
       setSwitching(true);
+      pauseRun('Wallet action required');
       const nextAddress = await ensureBaseNetwork();
       setWallet(nextAddress, BASE_CHAIN_ID_HEX);
       setStatusMessage('Switched to Base Mainnet.');
@@ -143,7 +147,7 @@ export default function WalletBar() {
     } finally {
       setSwitching(false);
     }
-  }, [setWallet, switching]);
+  }, [pauseRun, setWallet, switching]);
 
   const statusLabel = useMemo(() => {
     if (!hasProvider) {

@@ -45,6 +45,7 @@ function defaultStats(): RunStats {
     timeLeft: 60,
     lastColor: undefined,
     chainLen: 0,
+    energyCollected: 0,
   };
 }
 
@@ -145,9 +146,13 @@ type GameStore = {
   dailyKey: string;
   survivalAccumulator: number;
   currentStreak: number;
+  resumePhase: Exclude<GamePhase, 'start' | 'paused' | 'summary'> | null;
+  pauseReason: string | null;
   startRun: () => void;
   endRun: () => void;
   resetToStart: () => void;
+  pauseRun: (reason?: string) => void;
+  resumeRun: () => void;
   tick: (dt: number) => void;
   spawnBubbles: (count?: number) => void;
   spawnStormOrbs: () => void;
@@ -181,6 +186,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   dailyKey: '',
   survivalAccumulator: 0,
   currentStreak: 0,
+  resumePhase: null,
+  pauseReason: null,
   startRun: () => {
     const seed = hashString(`${Date.now()}-${Math.random()}`);
     set({
@@ -196,11 +203,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
       startedAt: performance.now(),
       survivalAccumulator: 0,
       currentStreak: 0,
+      resumePhase: null,
+      pauseReason: null,
     });
     get().spawnBubbles(MAX_BUBBLES / 2);
   },
   endRun: () => {
-    set({ phase: 'summary' });
+    set({ phase: 'summary', resumePhase: null, pauseReason: null });
   },
   resetToStart: () => {
     set({
@@ -212,7 +221,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
       slowTimeUntil: 0,
       survivalAccumulator: 0,
       currentStreak: 0,
+      resumePhase: null,
+      pauseReason: null,
     });
+  },
+  pauseRun: (reason) => {
+    const state = get();
+    if (state.phase !== 'playing' && state.phase !== 'storm') {
+      return;
+    }
+    set({ phase: 'paused', resumePhase: state.phase, pauseReason: reason ?? null });
+  },
+  resumeRun: () => {
+    const state = get();
+    if (state.phase !== 'paused') {
+      return;
+    }
+    set({ phase: state.resumePhase ?? 'playing', resumePhase: null, pauseReason: null });
   },
   tick: (dt) => {
     const state = get();
@@ -264,12 +289,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({ stormAt: now + STORM_INTERVAL_MS });
     }
 
-    set({
+    const nextState: Partial<GameStore> = {
       bubbles: updatedBubbles,
       stats,
       now,
       phase,
-    });
+    };
+    if (phase === 'summary') {
+      nextState.resumePhase = null;
+      nextState.pauseReason = null;
+    }
+    set(nextState);
 
     const desiredCount = phase === 'storm' ? MAX_BUBBLES + MAX_STORM_ORBS : MAX_BUBBLES;
     if (updatedBubbles.length < desiredCount) {
@@ -365,6 +395,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     if (stats.timeLeft < 0) stats.timeLeft = 0;
+    if (energy) {
+      stats.energyCollected += 1;
+    }
     set({ stats, bubbles: remaining, comboWindowUntil, currentStreak });
 
     if (energy) {
