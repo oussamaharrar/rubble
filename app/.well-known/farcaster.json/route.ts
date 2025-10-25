@@ -1,24 +1,12 @@
 import { NextResponse } from 'next/server';
-import { ENV } from '@/lib/env';
+import { buildMiniAppManifest } from '@/lib/manifest';
 
-export const dynamic = 'force-static';
+export const runtime = 'nodejs';
 
 export async function GET() {
-  const baseUrl = ENV.NEXT_PUBLIC_URL.replace(/\/$/, '');
-  const body = {
-    miniapp: {
-      name: 'Rubble (Bubble Hunt)',
-      url: baseUrl,
-      iconUrl: `${baseUrl}/game-icons/icon.png`,
-      splashImageUrl: `${baseUrl}/game-icons/splash.png`,
-      ogImageUrl: `${baseUrl}/game-icons/og.png`,
-      description: 'Tap bubbles, chain combos, pay to boost on Base.',
-      tags: ['game', 'arcade', 'bubbles', 'base'],
-    },
-    accountAssociation: {},
-  };
+  const manifest = buildMiniAppManifest();
 
-  return NextResponse.json(body, {
+  return NextResponse.json(manifest, {
     headers: {
       'Cache-Control': 'public, max-age=600',
     },
