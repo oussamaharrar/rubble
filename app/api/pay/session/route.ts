@@ -25,37 +25,48 @@ type SessionRequestBody = {
 };
 
 export async function POST(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
+  const sku = body.sku ?? 'booster_time_freeze';
+  const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
+
+  let amount: bigint;
   try {
-    const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
-    const sku = body.sku ?? 'booster_time_freeze';
-    const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
-    const amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
-
-    if (amount < ENV.MIN_PRICE_WEI) {
-      return NextResponse.json(
-        { ok: false, reason: 'UNDER_MINIMUM_AMOUNT' },
-        { status: 400, headers: RESPONSE_HEADERS }
-      );
-    }
-
-    const session = await createBasePaySession({
-      sku,
-      amountWei: amount,
-      buyerAddress: body.buyerAddress,
-    });
-
+    amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
+  } catch {
     return NextResponse.json(
-      {
-        ok: true,
-        session,
-      },
-      { headers: RESPONSE_HEADERS }
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json(
-      { ok: false, reason: 'SESSION_CREATION_FAILED', message },
-      { status: 500, headers: RESPONSE_HEADERS }
+      { ok: false, reason: 'INVALID_AMOUNT' },
+      { status: 400, headers: RESPONSE_HEADERS }
     );
   }
+
+  if (amount < ENV.MIN_PRICE_WEI) {
+    return NextResponse.json(
+      { ok: false, reason: 'UNDER_MINIMUM_AMOUNT' },
+      { status: 400, headers: RESPONSE_HEADERS }
+    );
+  }
+
+  const result = await createBasePaySession({
+    sku,
+    amountWei: amount,
+    buyerAddress: body.buyerAddress,
+  });
+
+  if (result.ok) {
+    return NextResponse.json(
+      { ok: true, session: result.session },
+      { headers: RESPONSE_HEADERS }
+    );
+  }
+
+  const status = result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+  return NextResponse.json(
+    {
+      ok: false,
+      reason: result.code,
+      error: result.detail,
+      status: result.status,
+    },
+    { status, headers: RESPONSE_HEADERS }
+  );
 }

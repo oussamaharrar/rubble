@@ -4,11 +4,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 
-const previewFromEnv = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined;
+const preview = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined;
 
 function getPreviewBaseUrl() {
-  if (previewFromEnv) {
-    return previewFromEnv;
+  if (preview) {
+    return preview;
   }
   return process.argv[2] ?? process.env.VERCEL_PREVIEW_URL ?? process.env.NEXT_PUBLIC_URL;
 }
@@ -73,7 +73,10 @@ async function loadFromPreview(baseUrl) {
   const normalisedBase = normaliseBase(baseUrl);
   const manifestUrl = `${normalisedBase}/.well-known/farcaster.json`;
   const response = await fetch(manifestUrl, {
-    headers: { accept: 'application/json' },
+    headers: {
+      accept: 'application/json',
+      'user-agent': 'rubble-manifest-verifier/1.0',
+    },
     cache: 'no-store',
   });
   if (response.status === 401 || response.status === 403) {
@@ -133,12 +136,13 @@ try {
 
   const manifestOrigin = normaliseBase(manifestHomeUrl.origin);
 
-  if (previewFromEnv && fetchedFromPreview) {
-    const previewUrl = new URL(previewFromEnv);
+  if (preview && fetchedFromPreview) {
+    const previewUrl = new URL(preview);
     if (manifestHomeUrl.host !== previewUrl.host) {
-      throw new Error(
-        `miniapp.homeUrl host mismatch: expected ${previewUrl.host}, received ${manifestHomeUrl.host}`
+      console.warn(
+        `⚠️ miniapp.homeUrl host mismatch: expected ${previewUrl.host}, received ${manifestHomeUrl.host}`
       );
+      throw new Error('miniapp.homeUrl must use the preview deployment host');
     }
     const expectedPreviewBase = normaliseBase(previewUrl.origin);
     assert(
@@ -164,12 +168,13 @@ try {
     throw new Error('miniapp.webhookUrl must be a valid absolute URL');
   }
 
-  if (previewFromEnv && fetchedFromPreview) {
-    const previewHost = new URL(previewFromEnv).host;
+  if (preview && fetchedFromPreview) {
+    const previewHost = new URL(preview).host;
     if (webhookUrl.host !== previewHost) {
-      throw new Error(
-        `miniapp.webhookUrl host mismatch: expected ${previewHost}, received ${webhookUrl.host}`
+      console.warn(
+        `⚠️ miniapp.webhookUrl host mismatch: expected ${previewHost}, received ${webhookUrl.host}`
       );
+      throw new Error('miniapp.webhookUrl must use the preview deployment host');
     }
   }
   assert(
@@ -178,7 +183,9 @@ try {
   );
 
   assert(Array.isArray(miniapp?.tags) && miniapp.tags.length > 0, 'miniapp.tags must be populated');
-  assert(Boolean(baseBuilder?.ownerAddress), 'baseBuilder.ownerAddress missing');
+  if (baseBuilder) {
+    assert(Boolean(baseBuilder.ownerAddress), 'baseBuilder.ownerAddress missing');
+  }
 
   console.log('✅ Manifest verified at', manifestUrl);
 } catch (error) {

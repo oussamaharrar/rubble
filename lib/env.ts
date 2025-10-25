@@ -5,7 +5,6 @@ const address = z
   .string()
   .regex(/^0x[a-fA-F0-9]{40}$/u, 'Expected a valid 0x-prefixed EVM address');
 const digits = z.string().regex(/^\d+$/u, 'Expected an integer string');
-const optionalString = z.string().min(1).optional();
 
 const relativeOrUrl = z
   .string()
@@ -20,6 +19,10 @@ const relativeOrUrl = z
     }
   }, 'Expected a relative path (starting with /) or an absolute URL');
 
+const optionalNonEmpty = z.string().min(1).optional();
+
+const booleanFlag = z.enum(['0', '1']).optional();
+
 const EnvSchema = z
   .object({
     NEXT_PUBLIC_URL: url,
@@ -28,11 +31,13 @@ const EnvSchema = z
     BASE_RPC_URL: url,
     PAY_TO_ADDRESS: address,
     MIN_PRICE_WEI: digits,
-    FARCASTER_ACCOUNT_HEADER: optionalString,
-    FARCASTER_ACCOUNT_PAYLOAD: optionalString,
-    FARCASTER_ACCOUNT_SIGNATURE: optionalString,
-    BASE_PAY_API_KEY_ID: z.string().min(1).optional(),
-    BASE_PAY_API_SECRET: z.string().min(1).optional(),
+    FARCASTER_ACCOUNT_HEADER: optionalNonEmpty,
+    FARCASTER_ACCOUNT_PAYLOAD: optionalNonEmpty,
+    FARCASTER_ACCOUNT_SIGNATURE: optionalNonEmpty,
+    BASE_PAY_API_KEY_ID: optionalNonEmpty,
+    BASE_PAY_API_SECRET: optionalNonEmpty,
+    BASE_PAY_API_BASE: url.optional(),
+    BASE_PAY_MOCK: booleanFlag,
     BASE_BUILDER_OWNER_ADDRESS: address.optional(),
   })
   .superRefine((value, ctx) => {
@@ -50,31 +55,33 @@ const EnvSchema = z
       });
     }
 
-    const credentialsProvided = Boolean(
+    const usingMock = value.BASE_PAY_MOCK === '1';
+    const haveCredentials = Boolean(
       value.BASE_PAY_API_KEY_ID && value.BASE_PAY_API_SECRET
     );
-    if (credentialsProvided === false) {
-      const inProduction =
-        process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
-      if (inProduction) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'BASE_PAY_API_KEY_ID and BASE_PAY_API_SECRET are required in production',
-          path: ['BASE_PAY_API_KEY_ID'],
-        });
-      }
-    } else if (!value.BASE_PAY_API_KEY_ID || !value.BASE_PAY_API_SECRET) {
+    if (!usingMock && !haveCredentials) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'BASE_PAY_API_KEY_ID and BASE_PAY_API_SECRET must both be set',
+        message: 'BASE_PAY_API_KEY_ID and BASE_PAY_API_SECRET must be configured',
         path: ['BASE_PAY_API_KEY_ID'],
+      });
+    }
+
+    const inProduction =
+      process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
+    if (!usingMock && inProduction && !value.BASE_PAY_API_BASE) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'BASE_PAY_API_BASE is required in production deployments',
+        path: ['BASE_PAY_API_BASE'],
       });
     }
   });
 
 const parsed = EnvSchema.parse({
   NEXT_PUBLIC_URL: process.env.NEXT_PUBLIC_URL,
-  NEXT_PUBLIC_WEBHOOK_URL: process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/webhook',
+  NEXT_PUBLIC_WEBHOOK_URL:
+    process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/webhook',
   NEXT_PUBLIC_BASE_RPC_URL:
     process.env.NEXT_PUBLIC_BASE_RPC_URL ?? process.env.BASE_RPC_URL,
   BASE_RPC_URL: process.env.BASE_RPC_URL ?? process.env.NEXT_PUBLIC_BASE_RPC_URL,
@@ -85,6 +92,8 @@ const parsed = EnvSchema.parse({
   FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE,
   BASE_PAY_API_KEY_ID: process.env.BASE_PAY_API_KEY_ID,
   BASE_PAY_API_SECRET: process.env.BASE_PAY_API_SECRET,
+  BASE_PAY_API_BASE: process.env.BASE_PAY_API_BASE,
+  BASE_PAY_MOCK: process.env.BASE_PAY_MOCK,
   BASE_BUILDER_OWNER_ADDRESS: process.env.BASE_BUILDER_OWNER_ADDRESS,
 });
 

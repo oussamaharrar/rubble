@@ -10,25 +10,22 @@ function getOriginFromRequest(req: Request) {
   return `${proto}://${host}`;
 }
 
+function resolveWebhookUrl(origin: string) {
+  const webhookPath = ENV.NEXT_PUBLIC_WEBHOOK_URL || '/api/pay/webhook';
+  if (webhookPath.startsWith('http://') || webhookPath.startsWith('https://')) {
+    return webhookPath;
+  }
+  const normalised = webhookPath.startsWith('/') ? webhookPath : `/${webhookPath}`;
+  return `${origin}${normalised}`;
+}
+
 export async function GET(request: Request) {
   const origin = getOriginFromRequest(request);
-
+  const homeUrl = origin;
   const iconUrl = `${origin}/game-icons/icon.png`;
   const splashUrl = `${origin}/game-icons/splash.png`;
   const ogUrl = `${origin}/game-icons/og.png`;
-  const homeUrl = origin;
-
-  const webhookOrigin = (() => {
-    if (!ENV.NEXT_PUBLIC_WEBHOOK_URL) return origin;
-    try {
-      return new URL(ENV.NEXT_PUBLIC_WEBHOOK_URL, origin).origin;
-    } catch {
-      return origin;
-    }
-  })();
-  const webhookUrl = `${webhookOrigin}/api/pay/webhook`;
-
-  const baseBuilderAddress = ENV.BASE_BUILDER_OWNER_ADDRESS ?? ENV.PAY_TO_ADDRESS;
+  const webhookUrl = resolveWebhookUrl(origin);
 
   const body: Record<string, unknown> = {
     version: '1',
@@ -48,7 +45,6 @@ export async function GET(request: Request) {
       screenshotUrls: [`${origin}/screenshot-portrait.png`],
       buttonTitle: 'Play',
     },
-    baseBuilder: { ownerAddress: baseBuilderAddress },
   };
 
   if (
@@ -61,6 +57,10 @@ export async function GET(request: Request) {
       payload: ENV.FARCASTER_ACCOUNT_PAYLOAD,
       signature: ENV.FARCASTER_ACCOUNT_SIGNATURE,
     };
+  }
+
+  if (ENV.BASE_BUILDER_OWNER_ADDRESS) {
+    body.baseBuilder = { ownerAddress: ENV.BASE_BUILDER_OWNER_ADDRESS };
   }
 
   return NextResponse.json(body, {
