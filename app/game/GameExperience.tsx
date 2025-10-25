@@ -1,256 +1,201 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import MainMenu from '@/components/game/MainMenu';
-import BoosterStore from '@/components/game/BoosterStore';
-import GameHud from '@/components/game/GameHud';
-import GameOverScreen from '@/components/game/GameOverScreen';
-import { BOOSTERS } from '@/lib/game/boosters';
-import { ensureBaseNetwork } from '@/lib/base';
-import { GameState, type ActiveBooster } from '@/lib/game/types';
+import { AnimatePresence, motion } from 'framer-motion';
+import StartScreen from '@/components/game/StartScreen';
+import HUD from '@/components/game/HUD';
+import MissionsModal from '@/components/game/MissionsModal';
+import SummaryModal from '@/components/game/SummaryModal';
+import ShopModal from '@/components/game/ShopModal';
+import HowToPlayModal from '@/components/game/HowToPlayModal';
+import StatsModal, { type LifetimeStats } from '@/components/game/StatsModal';
+import { useBoosterBank, useGameStore, useMissions } from '@/lib/store';
 
 const GameCanvas = dynamic(() => import('./GameCanvas'), { ssr: false });
 
-const COUNTDOWN_START = 3;
+const LIFETIME_KEY = 'rubble-rush-lifetime-stats';
 
-interface Snapshot {
-  score: number;
-  combo: number;
-  streak: number;
-  colorChain: number;
-  fever: boolean;
-  rush: boolean;
-  lives: number;
+const defaultLifetime: LifetimeStats = {
+  totalRuns: 0,
+  bestScore: 0,
+  bestCombo: 0,
+  longestStreak: 0,
+  totalTime: 0,
+};
+
+function readLifetimeStats(): LifetimeStats {
+  if (typeof window === 'undefined') return defaultLifetime;
+  try {
+    const raw = window.localStorage.getItem(LIFETIME_KEY);
+    if (!raw) return defaultLifetime;
+    const parsed = JSON.parse(raw) as LifetimeStats;
+    return {
+      totalRuns: parsed.totalRuns ?? 0,
+      bestScore: parsed.bestScore ?? 0,
+      bestCombo: parsed.bestCombo ?? 0,
+      longestStreak: parsed.longestStreak ?? 0,
+      totalTime: parsed.totalTime ?? 0,
+    } satisfies LifetimeStats;
+  } catch {
+    return defaultLifetime;
+  }
+}
+
+function writeLifetimeStats(stats: LifetimeStats) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(LIFETIME_KEY, JSON.stringify(stats));
 }
 
 export default function GameExperience() {
-  const [gameState, setGameState] = useState<GameState>(GameState.SPLASH);
-  const [countdown, setCountdown] = useState(COUNTDOWN_START);
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [soundEnabled, setSoundEnabled] = useState(false);
-  const [snapshot, setSnapshot] = useState<Snapshot>({
-    score: 0,
-    combo: 1,
-    streak: 0,
-    colorChain: 1,
-    fever: false,
-    rush: false,
-    lives: 3,
-  });
-  const [highestCombo, setHighestCombo] = useState(1);
-  const [bestChain, setBestChain] = useState(1);
-  const [activeBoosters, setActiveBoosters] = useState<ActiveBooster[]>([]);
-  const [runId, setRunId] = useState(0);
+  const phase = useGameStore((state) => state.phase);
+  const stats = useGameStore((state) => state.stats);
+  const timeLeft = stats.timeLeft;
+  const missions = useMissions();
+  const boosterBank = useBoosterBank();
+  const startRun = useGameStore((state) => state.startRun);
+  const consumeBooster = useGameStore((state) => state.consumeBooster);
+  const claimMission = useGameStore((state) => state.claimMission);
+  const refreshDailyMissions = useGameStore((state) => state.refreshDailyMissions);
+  const runStartedAt = useGameStore((state) => state.runStartedAt);
+  const now = useGameStore((state) => state.now);
+  const slowTimeUntil = useGameStore((state) => state.slowTimeUntil);
+
+  const [showMissions, setShowMissions] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [showShop, setShowShop] = useState(false);
+  const [showHowTo, setShowHowTo] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [runSummary, setRunSummary] = useState({ score: 0, bestCombo: 0, streak: 0, timeSurvived: 0 });
+  const [lifetimeStats, setLifetimeStats] = useState<LifetimeStats>(() => readLifetimeStats());
+  const summaryCapturedRef = useRef(false);
 
   useEffect(() => {
-    if (gameState !== GameState.SPLASH) return;
-    const timer = window.setTimeout(() => setGameState(GameState.MENU), 2000);
-    return () => window.clearTimeout(timer);
-  }, [gameState]);
+    refreshDailyMissions();
+  }, [refreshDailyMissions]);
 
   useEffect(() => {
-    if (gameState !== GameState.COUNTDOWN) return;
-    setCountdown(COUNTDOWN_START);
-    const interval = window.setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          window.clearInterval(interval);
-          setGameState(GameState.PLAYING);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [gameState]);
+    writeLifetimeStats(lifetimeStats);
+  }, [lifetimeStats]);
 
-  const resetForNewRun = useCallback(() => {
-    setRunId((value) => value + 1);
-    setSnapshot({ score: 0, combo: 1, streak: 0, colorChain: 1, fever: false, rush: false, lives: 3 });
-    setHighestCombo(1);
-    setBestChain(1);
-    setActiveBoosters([]);
+  useEffect(() => {
+    const handleBooster = (event: Event) => {
+      const detail = (event as CustomEvent<{ type: string; duration: number }>).detail;
+      if (!detail || detail.type !== 'time-freeze') return;
+      const expires = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + detail.duration;
+      useGameStore.setState({ slowTimeUntil: expires });
+    };
+    window.addEventListener('rubble:booster', handleBooster as EventListener);
+    return () => window.removeEventListener('rubble:booster', handleBooster as EventListener);
   }, []);
+
+  useEffect(() => {
+    if (phase === 'summary') {
+      if (summaryCapturedRef.current) {
+        setShowSummary(true);
+        return;
+      }
+      const timeSurvived = runStartedAt ? Math.max(0, (now - runStartedAt) / 1000) : 0;
+      const snapshot = {
+        score: stats.score,
+        bestCombo: stats.bestCombo,
+        streak: stats.streak,
+        timeSurvived,
+      };
+      setRunSummary(snapshot);
+      setLifetimeStats((prev) => ({
+        totalRuns: prev.totalRuns + 1,
+        bestScore: Math.max(prev.bestScore, snapshot.score),
+        bestCombo: Math.max(prev.bestCombo, snapshot.bestCombo),
+        longestStreak: Math.max(prev.longestStreak, snapshot.streak),
+        totalTime: prev.totalTime + timeSurvived,
+      }));
+      summaryCapturedRef.current = true;
+      setShowSummary(true);
+    } else if (phase === 'playing' || phase === 'storm') {
+      summaryCapturedRef.current = false;
+      setShowSummary(false);
+    }
+  }, [now, phase, runStartedAt, stats.bestCombo, stats.score, stats.streak]);
+
+  const handleUseFreeOrb = useCallback(() => {
+    consumeBooster();
+  }, [consumeBooster]);
+
+  const handleReplay = useCallback(() => {
+    setShowSummary(false);
+    startRun();
+  }, [setShowSummary, startRun]);
 
   const handlePlay = useCallback(() => {
-    resetForNewRun();
-    setGameState(GameState.COUNTDOWN);
-  }, [resetForNewRun]);
+    setShowSummary(false);
+    startRun();
+  }, [setShowSummary, startRun]);
 
-  const handleConnectWallet = useCallback(async () => {
-    const address = await ensureBaseNetwork();
-    setWalletAddress(address);
-  }, []);
+  const handleCloseSummary = useCallback(() => {
+    setShowSummary(false);
+    useGameStore.setState({ phase: 'start' });
+  }, [setShowSummary]);
 
-  const handleSnapshot = useCallback((value: Snapshot) => {
-    setSnapshot(value);
-    setHighestCombo((prev) => Math.max(prev, value.combo));
-    setBestChain((prev) => Math.max(prev, value.colorChain));
-  }, []);
-
-  const handleGameOver = useCallback(() => {
-    setGameState(GameState.GAME_OVER);
-  }, []);
-
-  const handlePause = useCallback(() => {
-    setGameState((current) => (current === GameState.PLAYING ? GameState.PAUSED : current));
-  }, []);
-
-  const handleResume = useCallback(() => {
-    setGameState(GameState.PLAYING);
-  }, []);
-
-  const boosters = useMemo(() => BOOSTERS, []);
-
-  const handleBoosterUpdate = useCallback((boosterList: ActiveBooster[]) => {
-    setActiveBoosters(boosterList);
-  }, []);
-
-  const boosterStore = (
-    <BoosterStore
-      boosters={boosters}
-      walletConnected={Boolean(walletAddress)}
-      onBoosterTriggered={(type) => {
-        console.log('[Rubble] Booster triggered from store', type);
-      }}
-    />
-  );
-
-  const canvasKey = useMemo(() => `run-${runId}`, [runId]);
+  useEffect(() => {
+    if (!showSummary) return undefined;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === ' ') {
+        event.preventDefault();
+        handleReplay();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleReplay, showSummary]);
 
   return (
-    <div className="relative flex h-full flex-col bg-gradient-to-b from-midnight via-slate-950 to-midnight">
+    <div className="relative flex h-full flex-col overflow-hidden rounded-3xl bg-slate-950">
       <AnimatePresence mode="wait">
-        {gameState === GameState.SPLASH && (
-          <motion.div
-            key="splash"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex h-full flex-col items-center justify-center gap-6"
-          >
-            <motion.div
-              initial={{ scale: 0.8, rotate: -6 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: 'spring', stiffness: 160, damping: 16 }}
-              className="flex flex-col items-center"
-            >
-              <div className="neon-chip mb-2">Base Mini</div>
-              <motion.img
-                src="/game-icons/icon.png"
-                alt="Rubble logo"
-                className="h-28 w-28 drop-shadow-glow"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.2, duration: 0.6 }}
-              />
-            </motion.div>
-            <motion.p
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="text-center text-sm text-sky-100/80"
-            >
-              Loading Rubble: Bubble Hunt Evolution…
-            </motion.p>
+        {phase === 'start' && (
+          <motion.div key="start" className="absolute inset-0">
+            <StartScreen
+              missions={missions}
+              freeOrbs={boosterBank.freeOrbs}
+              onPlay={handlePlay}
+              onOpenShop={() => setShowShop(true)}
+              onOpenHowTo={() => setShowHowTo(true)}
+              onOpenStats={() => setShowStats(true)}
+            />
           </motion.div>
         )}
       </AnimatePresence>
-
-      {gameState === GameState.MENU && (
-        <MainMenu
-          onPlay={handlePlay}
-          onConnectWallet={handleConnectWallet}
-          walletAddress={walletAddress}
-          boosterStore={boosterStore}
-        />
-      )}
-
-      <AnimatePresence>
-        {(gameState === GameState.PLAYING || gameState === GameState.PAUSED || gameState === GameState.COUNTDOWN) && (
-          <motion.div
-            key="playfield"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="relative h-full"
-          >
-            <GameCanvas
-              key={canvasKey}
-              state={gameState}
-              soundEnabled={soundEnabled}
-              onSnapshot={handleSnapshot}
-              onGameOver={handleGameOver}
-              onActiveBoostersChange={handleBoosterUpdate}
-            />
-            <GameHud
-              score={snapshot.score}
-              combo={snapshot.combo}
-              streak={snapshot.streak}
-              colorChain={snapshot.colorChain}
-              fever={snapshot.fever}
-              rush={snapshot.rush}
-              lives={snapshot.lives}
-              boosters={activeBoosters}
-              onPause={handlePause}
-              soundEnabled={soundEnabled}
-              onToggleSound={() => setSoundEnabled((value) => !value)}
-            />
-            <AnimatePresence>
-              {gameState === GameState.COUNTDOWN && countdown > 0 && (
-                <motion.div
-                  key="countdown"
-                  className="absolute inset-0 flex items-center justify-center bg-slate-950/70 backdrop-blur-xl"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <motion.span
-                    key={countdown}
-                    initial={{ scale: 0.5, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.3, opacity: 0 }}
-                    transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-                    className="text-6xl font-bold text-sky-100 drop-shadow-[0_0_38px_rgba(56,189,248,0.75)]"
-                  >
-                    {countdown}
-                  </motion.span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {gameState === GameState.PAUSED && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-slate-950/80 backdrop-blur-xl">
-          <p className="text-lg font-semibold text-sky-50">Game Paused</p>
-          <button type="button" onClick={handleResume} className="neon-button px-6 py-3">
-            Resume
-          </button>
-          <button
-            type="button"
-            onClick={() => setGameState(GameState.MENU)}
-            className="rounded-2xl border border-slate-500/40 bg-slate-900/70 px-5 py-3 text-sm font-semibold text-slate-200/90"
-          >
-            Exit to Menu
-          </button>
-        </div>
-      )}
-
-      {gameState === GameState.GAME_OVER && (
-        <div className="absolute inset-0 z-40">
-          <GameOverScreen
-            score={snapshot.score}
-            highestCombo={highestCombo}
-            colorChain={bestChain}
-            onRetry={handlePlay}
-            onMenu={() => setGameState(GameState.MENU)}
+      <div className="relative z-0 flex-1">
+        <GameCanvas />
+        {(phase === 'playing' || phase === 'storm') && (
+          <HUD
+            score={stats.score}
+            combo={Math.max(1, stats.chainLen)}
+            streak={stats.streak}
+            timeLeft={timeLeft}
+            phase={phase}
+            boosterOrbs={boosterBank.freeOrbs}
+            onUseFreeOrb={handleUseFreeOrb}
+            onOpenMissions={() => setShowMissions(true)}
+            onOpenShop={() => setShowShop(true)}
+            slowTimeActive={(typeof performance !== 'undefined' ? performance.now() : Date.now()) < slowTimeUntil}
           />
-        </div>
-      )}
+        )}
+      </div>
+      <MissionsModal open={showMissions} missions={missions} onClose={() => setShowMissions(false)} onClaim={claimMission} />
+      <ShopModal open={showShop} freeOrbs={boosterBank.freeOrbs} onUseFreeOrb={handleUseFreeOrb} onClose={() => setShowShop(false)} />
+      <HowToPlayModal open={showHowTo} onClose={() => setShowHowTo(false)} />
+      <StatsModal open={showStats} onClose={() => setShowStats(false)} stats={lifetimeStats} />
+      <SummaryModal
+        open={showSummary}
+        score={runSummary.score}
+        bestCombo={runSummary.bestCombo}
+        streak={runSummary.streak}
+        timeSurvived={runSummary.timeSurvived}
+        missions={missions}
+        onReplay={handleReplay}
+        onClose={handleCloseSummary}
+      />
     </div>
   );
 }
