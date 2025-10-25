@@ -15,6 +15,8 @@ interface Bubble {
 
 const COLORS = [188, 320, 220, 160, 40];
 const BASE_BUBBLE_COUNT = 14;
+const BOOSTER_DEFAULT_DURATION = 5000;
+const BOOSTER_SLOW_FACTOR = 0.45;
 
 function spawnBubble(canvas: HTMLCanvasElement, speedMultiplier: number): Bubble {
   const radius = 16 + Math.random() * 20;
@@ -29,6 +31,10 @@ function spawnBubble(canvas: HTMLCanvasElement, speedMultiplier: number): Bubble
   };
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 export default function BubbleGameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -36,9 +42,12 @@ export default function BubbleGameCanvas() {
   const speedRef = useRef(1);
   const comboTimeoutRef = useRef<number | null>(null);
   const comboRef = useRef(1);
+  const boosterRef = useRef<{ until: number; slowFactor: number } | null>(null);
+  const boosterUpdateRef = useRef(0);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(1);
   const [streak, setStreak] = useState(0);
+  const [boosterRemaining, setBoosterRemaining] = useState(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -54,20 +63,40 @@ export default function BubbleGameCanvas() {
     };
     resize();
 
-    bubblesRef.current = Array.from({ length: BASE_BUBBLE_COUNT }, () => spawnBubble(canvas, speedRef.current));
+    bubblesRef.current = Array.from({ length: BASE_BUBBLE_COUNT }, () =>
+      spawnBubble(canvas, speedRef.current)
+    );
 
     let last = performance.now();
 
     const loop = (now: number) => {
       const dt = Math.min(32, now - last);
       last = now;
+
+      const booster = boosterRef.current;
+      let slowFactor = 1;
+      if (booster) {
+        if (now >= booster.until) {
+          boosterRef.current = null;
+          setBoosterRemaining(0);
+        } else {
+          slowFactor = booster.slowFactor;
+          if (now - boosterUpdateRef.current > 80) {
+            boosterUpdateRef.current = now;
+            setBoosterRemaining(Math.ceil(booster.until - now));
+          }
+        }
+      }
+
       const ctx = context;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      const motionScale = 0.6 * slowFactor;
+
       for (const bubble of bubblesRef.current) {
         if (!bubble.alive) continue;
-        bubble.x += bubble.vx * dt * 0.6;
-        bubble.y += bubble.vy * dt * 0.6;
+        bubble.x += bubble.vx * dt * motionScale;
+        bubble.y += bubble.vy * dt * motionScale;
 
         const gradient = ctx.createRadialGradient(
           bubble.x - bubble.radius * 0.35,
@@ -114,7 +143,8 @@ export default function BubbleGameCanvas() {
         if (dx * dx + dy * dy <= bubble.radius * bubble.radius) {
           bubble.alive = false;
           hits += 1;
-          setScore((prev) => prev + 15 * comboRef.current);
+          const baseScore = boosterRef.current ? 25 : 15;
+          setScore((prev) => prev + baseScore * comboRef.current);
           window.setTimeout(() => {
             Object.assign(bubble, spawnBubble(canvas, speedRef.current), { alive: true });
           }, 240);
@@ -122,8 +152,9 @@ export default function BubbleGameCanvas() {
       }
 
       if (hits > 0) {
-        speedRef.current = Math.min(2.75, speedRef.current + 0.03 * hits);
-        const nextCombo = Math.min(10, comboRef.current + hits);
+        const slowBonus = boosterRef.current ? 0.5 : 1;
+        speedRef.current = clamp(speedRef.current + 0.03 * hits * slowBonus, 1, 2.75);
+        const nextCombo = clamp(comboRef.current + hits, 1, 12);
         updateCombo(nextCombo);
         setStreak((prev) => prev + hits);
         if (comboTimeoutRef.current !== null) {
@@ -151,9 +182,20 @@ export default function BubbleGameCanvas() {
       }
     };
 
+    const handleBooster = (event: Event) => {
+      const detail = (event as CustomEvent<{ duration?: number; slowFactor?: number }>).detail ?? {};
+      const duration = clamp(detail.duration ?? BOOSTER_DEFAULT_DURATION, 1500, 12000);
+      const slowFactor = clamp(detail.slowFactor ?? BOOSTER_SLOW_FACTOR, 0.25, 1);
+      const now = performance.now();
+      boosterRef.current = { until: now + duration, slowFactor };
+      boosterUpdateRef.current = now;
+      setBoosterRemaining(duration);
+    };
+
     canvas.addEventListener('pointerdown', pointerDown, { passive: true });
     canvas.addEventListener('touchstart', touchStart, { passive: true });
     window.addEventListener('resize', resize);
+    window.addEventListener('rubble:booster', handleBooster as EventListener);
 
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -161,8 +203,11 @@ export default function BubbleGameCanvas() {
       canvas.removeEventListener('pointerdown', pointerDown);
       canvas.removeEventListener('touchstart', touchStart);
       window.removeEventListener('resize', resize);
+      window.removeEventListener('rubble:booster', handleBooster as EventListener);
     };
   }, []);
+
+  const boosterSeconds = boosterRemaining > 0 ? Math.ceil(boosterRemaining / 1000) : 0;
 
   return (
     <div className="game-root">
@@ -172,6 +217,12 @@ export default function BubbleGameCanvas() {
         <span>Combo ×{combo}</span>
         <span>Streak {streak}</span>
       </div>
+      {boosterSeconds > 0 && (
+        <div className="booster-overlay" aria-live="assertive">
+          <div className="booster-ring" />
+          <p className="booster-text">Slow motion {boosterSeconds}s</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,8 +9,10 @@ interface MiniAppShellProps {
 
 export default function MiniAppShell({ children }: MiniAppShellProps) {
   return (
-    <div className="miniapp-shell">
-      <div className="miniapp-shell__inner">{children}</div>
+    <div className="miniapp-shell" role="application">
+      <div className="miniapp-shell__frame">
+        <div className="miniapp-shell__inner">{children}</div>
+      </div>
       <SpeedInsights />
     </div>
   );

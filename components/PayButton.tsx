@@ -1,102 +1,175 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatEther } from 'viem';
+import { ensureBaseNetwork } from '@/lib/base';
 
 const PAY_TO_ADDRESS = process.env.NEXT_PUBLIC_PAY_TO_ADDRESS ?? '';
-const MIN_PRICE_WEI = process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '';
 
-interface EthereumRequestArgs<TParams = unknown[]> {
-  method: string;
-  params?: TParams;
+const MIN_PRICE_WEI = (() => {
+  try {
+    return BigInt(process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '0');
+  } catch {
+    return 0n;
+  }
+})();
+
+const BOOSTER_DURATION_MS = 5000;
+
+function formatMinPrice() {
+  if (MIN_PRICE_WEI === 0n) return '0 ETH';
+  return `${formatEther(MIN_PRICE_WEI)} ETH`;
 }
 
-type EthereumProvider = {
-  request<TResponse = unknown, TParams = unknown[]>(args: EthereumRequestArgs<TParams>): Promise<TResponse>;
+function dispatchBooster(duration: number) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('rubble:booster', {
+      detail: { duration },
+    })
+  );
+}
+
+type SessionResponse = {
+  ok?: boolean;
+  session?: {
+    id?: string;
+    hostedCheckoutUrl?: string;
+    checkoutUrl?: string;
+    url?: string;
+  };
+  reason?: string;
+  message?: string;
 };
 
-type SendTransactionParams = Array<{
-  from: string;
-  to: string;
-  value: string;
-}>;
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
-
-function toHexWei(value: string) {
-  try {
-    const numeric = BigInt(value);
-    return `0x${numeric.toString(16)}`;
-  } catch {
-    return '0x0';
-  }
-}
+type Status = 'idle' | 'pending' | 'success' | 'error';
 
 export default function PayButton() {
-  const [status, setStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string>('');
+  const timeoutRef = useRef<number | undefined>(undefined);
+  const mountedRef = useRef(true);
 
-  const disabled = !PAY_TO_ADDRESS || status === 'pending';
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
-  async function handlePay() {
-    if (typeof window === 'undefined' || !window.ethereum) {
+  const wait = useCallback((ms: number) => {
+    return new Promise<void>((resolve) => {
+      timeoutRef.current = window.setTimeout(() => {
+        timeoutRef.current = undefined;
+        resolve();
+      }, ms);
+    });
+  }, []);
+
+  const pollForGrant = useCallback(
+    async (sessionId: string) => {
+      const maxAttempts = 40;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (!mountedRef.current) {
+          return false;
+        }
+        try {
+          const response = await fetch(`/api/pay/status?sessionId=${encodeURIComponent(sessionId)}`, {
+            cache: 'no-store',
+          });
+          if (response.ok) {
+            const payload = (await response.json()) as { granted?: boolean };
+            if (payload.granted) {
+              return true;
+            }
+          }
+        } catch (error) {
+          console.error('Status polling failed', error);
+        }
+        await wait(1500);
+      }
+      return false;
+    },
+    [wait]
+  );
+
+  const handlePay = useCallback(async () => {
+    if (status === 'pending') return;
+    if (!PAY_TO_ADDRESS) {
       setStatus('error');
-      setMessage('Wallet not detected');
+      setMessage('Missing payment configuration.');
       return;
     }
 
-    const provider = window.ethereum;
-
     try {
       setStatus('pending');
-      setMessage('Confirm the transaction in your wallet');
-      const [account] = await provider.request<string[]>({
-        method: 'eth_requestAccounts',
-      });
-      const txHash = await provider.request<string, SendTransactionParams>({
-        method: 'eth_sendTransaction',
-        params: [
-          {
-            from: account,
-            to: PAY_TO_ADDRESS,
-            value: toHexWei(MIN_PRICE_WEI || '0'),
-          },
-        ],
-      });
+      setMessage('Connecting wallet…');
 
-      const response = await fetch(process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/verify', {
+      const address = await ensureBaseNetwork();
+
+      setMessage('Creating Base Pay session…');
+      const response = await fetch('/api/pay/session', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ txHash }),
+        body: JSON.stringify({
+          sku: 'bubble-hunt-booster',
+          amountWei: MIN_PRICE_WEI.toString(),
+          buyerAddress: address,
+        }),
       });
-      const payload = (await response.json()) as { ok?: boolean; reason?: string };
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.reason ?? 'Verification failed');
+
+      const payload = (await response.json()) as SessionResponse;
+      if (!response.ok || !payload.ok || !payload.session?.id) {
+        throw new Error(payload.message ?? payload.reason ?? 'Failed to start Base Pay session');
       }
+
+      const session = payload.session;
+      const redirectUrl = session.hostedCheckoutUrl ?? session.checkoutUrl ?? session.url;
+
+      if (redirectUrl) {
+        const popup = window.open(
+          redirectUrl,
+          '_blank',
+          'noopener,width=428,height=780,left=100,top=100'
+        );
+        if (!popup) {
+          window.location.href = redirectUrl;
+        }
+      }
+
+      setMessage('Complete the payment in Base Pay…');
+      const granted = await pollForGrant(session.id as string);
+      if (!granted) {
+        throw new Error('Payment timed out. Try again.');
+      }
+
       setStatus('success');
-      setMessage('Boost active! 🎉');
-    } catch (error: unknown) {
+      setMessage('Booster activated! 🎉');
+      dispatchBooster(BOOSTER_DURATION_MS);
+    } catch (error) {
       const reason = error instanceof Error ? error.message : 'Payment failed';
       setStatus('error');
       setMessage(reason);
+      console.error(error);
     }
-  }
+  }, [pollForGrant, status]);
+
+  const disabled = status === 'pending';
 
   return (
     <div className="pay-button-container">
       <button
         type="button"
-        className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+        className="pay-button"
         onClick={handlePay}
         disabled={disabled}
       >
-        {status === 'pending' ? 'Waiting…' : 'Boost (Base)'}
+        {status === 'pending' ? 'Waiting…' : `Boost on Base (${formatMinPrice()})`}
       </button>
       {message && (
-        <p className="mt-2 max-w-xs text-xs text-slate-200" role="status">
+        <p className="pay-message" role="status">
           {message}
         </p>
       )}
