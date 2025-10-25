@@ -1,8 +1,8 @@
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
 import { createBasePaySession } from '@/lib/pay';
-
-export const runtime = 'nodejs';
 
 const RESPONSE_HEADERS = {
   'Cache-Control': 'no-store',
@@ -27,7 +27,7 @@ type SessionRequestBody = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
-    const sku = body.sku ?? 'bubble-hunt-booster';
+    const sku = body.sku ?? 'booster_time_freeze';
     const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
     const amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
 

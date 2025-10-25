@@ -1,9 +1,9 @@
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
 import { verifyBasePayWebhook } from '@/lib/pay';
-import { markSessionPaid } from '@/lib/pay-session-store';
-
-export const runtime = 'nodejs';
+import { markSessionGranted } from '@/lib/pay-session-store';
 
 const RESPONSE_HEADERS = {
   'Cache-Control': 'no-store',
@@ -63,12 +63,7 @@ function extractAmount(payload: WebhookPayload) {
   return 0n;
 }
 
-function normaliseChain(value?: string | null) {
-  if (!value) return '';
-  return value.toLowerCase();
-}
-
-function normaliseRecipient(value?: string | null) {
+function normalise(value?: string | null) {
   return value?.toLowerCase() ?? '';
 }
 
@@ -104,7 +99,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const chain = normaliseChain(data.chain ?? data.chainId);
+  const chain = normalise(data.chain ?? data.chainId);
   if (chain !== 'base-mainnet' && chain !== '0x2105' && chain !== '8453') {
     return NextResponse.json(
       { ok: false, reason: 'UNSUPPORTED_CHAIN', chain },
@@ -112,7 +107,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const recipient = normaliseRecipient(data.recipient ?? data.recipientAddress);
+  const recipient = normalise(data.recipient ?? data.recipientAddress);
   if (!recipient || recipient !== ENV.PAY_TO_ADDRESS.toLowerCase()) {
     return NextResponse.json(
       { ok: false, reason: 'INVALID_RECIPIENT', recipient },
@@ -128,7 +123,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const status = (data.status ?? '').toLowerCase();
+  const status = normalise(data.status);
   if (status !== 'paid' && status !== 'confirmed') {
     return NextResponse.json(
       { ok: true, pending: true },
@@ -136,7 +131,7 @@ export async function POST(request: Request) {
     );
   }
 
-  markSessionPaid(sessionId, amountWei);
+  markSessionGranted(sessionId);
 
   return NextResponse.json({ ok: true }, { headers: RESPONSE_HEADERS });
 }

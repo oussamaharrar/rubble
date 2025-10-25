@@ -1,13 +1,4 @@
-import { createPublicClient, http } from 'viem';
-import { base } from 'viem/chains';
-import { ENV } from './env';
-
 export const BASE_CHAIN_ID_HEX = '0x2105';
-
-export const basePublicClient = createPublicClient({
-  chain: base,
-  transport: http(ENV.BASE_RPC_URL),
-});
 
 type EthereumRequestArgs<TParams = unknown[]> = {
   method: string;
@@ -30,6 +21,14 @@ function isProvider(value: unknown): value is EthereumProvider {
   return Boolean(value && typeof (value as EthereumProvider).request === 'function');
 }
 
+function getFallbackRpcUrls() {
+  const publicRpc = process.env.NEXT_PUBLIC_BASE_RPC_URL;
+  if (publicRpc && publicRpc.length > 0) {
+    return [publicRpc];
+  }
+  return ['https://mainnet.base.org'];
+}
+
 export async function ensureBaseNetwork(): Promise<string> {
   if (typeof window === 'undefined' || !isProvider(window.ethereum)) {
     throw new Error('No wallet detected. Install a compatible Base wallet.');
@@ -49,7 +48,8 @@ export async function ensureBaseNetwork(): Promise<string> {
       params: [{ chainId: BASE_CHAIN_ID_HEX }],
     });
   } catch (error) {
-    const code = typeof error === 'object' && error !== null ? (error as { code?: number }).code : undefined;
+    const code =
+      typeof error === 'object' && error !== null ? (error as { code?: number }).code : undefined;
     if (code === 4902) {
       await provider.request({
         method: 'wallet_addEthereumChain',
@@ -57,7 +57,7 @@ export async function ensureBaseNetwork(): Promise<string> {
           {
             chainId: BASE_CHAIN_ID_HEX,
             chainName: 'Base Mainnet',
-            rpcUrls: [ENV.BASE_RPC_URL],
+            rpcUrls: getFallbackRpcUrls(),
             nativeCurrency: {
               name: 'Ether',
               symbol: 'ETH',

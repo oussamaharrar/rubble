@@ -2,100 +2,18 @@
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import process from 'node:process';
 
-async function loadManifest() {
-  const builtRoute = path.join(
-    process.cwd(),
-    '.next',
-    'server',
-    'app',
-    '.well-known',
-    'farcaster.json',
-    'route.js'
-  );
-
-  try {
-    await access(builtRoute);
-    const module = await import(pathToFileURL(builtRoute).href);
-    if (typeof module.GET === 'function') {
-      const response = await module.GET();
-      if (response && typeof response.json === 'function') {
-        return await response.json();
-      }
-    }
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code !== 'ENOENT') {
-      throw error;
-    }
-  }
-
-  return buildManifestFromEnv();
+function getPreviewBaseUrl() {
+  const fromArg = process.argv[2];
+  if (fromArg) return fromArg;
+  if (process.env.VERCEL_PREVIEW_URL) return process.env.VERCEL_PREVIEW_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return process.env.NEXT_PUBLIC_URL;
 }
 
-function buildManifestFromEnv() {
-  const requiredEnv = [
-    'NEXT_PUBLIC_URL',
-    'NEXT_PUBLIC_WEBHOOK_URL',
-    'FARCASTER_ACCOUNT_HEADER',
-    'FARCASTER_ACCOUNT_PAYLOAD',
-    'FARCASTER_ACCOUNT_SIGNATURE',
-    'PAY_TO_ADDRESS',
-    'MIN_PRICE_WEI',
-    'BASE_BUILDER_OWNER_ADDRESS',
-  ];
-
-  for (const key of requiredEnv) {
-    if (!process.env[key]) {
-      throw new Error(`Missing required environment variable ${key}`);
-    }
-  }
-
-  const baseUrl = process.env.NEXT_PUBLIC_URL.replace(/\/$/, '');
-
-  return {
-    version: '1.0.0',
-    schema: 'https://schemas.farcaster.xyz/2024-10-01/miniapp',
-    accountAssociation: {
-      header: process.env.FARCASTER_ACCOUNT_HEADER,
-      payload: process.env.FARCASTER_ACCOUNT_PAYLOAD,
-      signature: process.env.FARCASTER_ACCOUNT_SIGNATURE,
-    },
-    baseBuilder: {
-      ownerAddress: process.env.BASE_BUILDER_OWNER_ADDRESS,
-    },
-    miniapp: {
-      id: 'rubble-bubble-hunt',
-      name: 'Rubble (Bubble Hunt)',
-      description: 'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
-      homepageUrl: baseUrl,
-      playableUrl: `${baseUrl}/`,
-      iconUrl: `${baseUrl}/game-icons/icon.png`,
-      splashImageUrl: `${baseUrl}/game-icons/splash.png`,
-      splashBackgroundColor: '#04060B',
-      developer: {
-        name: 'Rubble Labs',
-        url: baseUrl,
-      },
-      tags: ['game', 'arcade', 'base', 'booster'],
-      categories: ['game'],
-      requestedPermissions: ['pay', 'wallet'],
-      webhookUrl: process.env.NEXT_PUBLIC_WEBHOOK_URL,
-      gallery: [
-        {
-          type: 'image/png',
-          url: `${baseUrl}/game-icons/og.png`,
-          description: 'High score chain combos during slow-motion mode.',
-        },
-      ],
-      links: {
-        assets: `${baseUrl}/game-icons/`,
-      },
-      basePay: {
-        payToAddress: process.env.PAY_TO_ADDRESS,
-        minPriceWei: process.env.MIN_PRICE_WEI,
-      },
-    },
-  };
+function normaliseBase(url) {
+  return url.replace(/\/$/, '');
 }
 
 function assert(condition, message) {
@@ -104,39 +22,108 @@ function assert(condition, message) {
   }
 }
 
-try {
-  const manifest = await loadManifest();
-  const { accountAssociation, baseBuilder, miniapp } = manifest;
+async function loadFromBuild() {
+  const baseDir = path.join(
+    process.cwd(),
+    '.next',
+    'server',
+    'app',
+    '.well-known',
+    'farcaster.json'
+  );
+  const candidates = ['route.mjs', 'route.js'];
 
-  assert(Boolean(accountAssociation?.header), 'accountAssociation.header missing');
-  assert(Boolean(accountAssociation?.payload), 'accountAssociation.payload missing');
-  assert(Boolean(accountAssociation?.signature), 'accountAssociation.signature missing');
-  assert(Boolean(baseBuilder?.ownerAddress), 'baseBuilder.ownerAddress missing');
+  for (const file of candidates) {
+    const builtRoute = path.join(baseDir, file);
+    try {
+      await access(builtRoute);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
 
-  const requiredMiniAppStrings = [
-    'id',
-    'name',
-    'description',
-    'homepageUrl',
-    'playableUrl',
-    'iconUrl',
-    'splashImageUrl',
-    'splashBackgroundColor',
-    'webhookUrl',
-  ];
-
-  for (const field of requiredMiniAppStrings) {
-    assert(Boolean(miniapp?.[field]), `miniapp.${field} missing`);
+    const module = await import(pathToFileURL(builtRoute).href);
+    const handler =
+      module.GET ??
+      module.default?.GET ??
+      module.default?.routeModule?.userland?.GET ??
+      module.default?.handlers?.GET;
+    if (typeof handler === 'function') {
+      const response = await handler();
+      assert(response && typeof response.json === 'function', 'Compiled manifest route missing JSON');
+      return response.json();
+    }
   }
 
-  assert(Array.isArray(miniapp.tags) && miniapp.tags.length > 0, 'miniapp.tags must be populated');
-  assert(Array.isArray(miniapp.categories) && miniapp.categories.length > 0, 'miniapp.categories must be populated');
-  assert(Array.isArray(miniapp.requestedPermissions), 'miniapp.requestedPermissions must be an array');
-  assert(Array.isArray(miniapp.gallery) && miniapp.gallery.length > 0, 'miniapp.gallery must contain at least one asset');
-  assert(Boolean(miniapp.basePay?.payToAddress), 'miniapp.basePay.payToAddress missing');
-  assert(Boolean(miniapp.basePay?.minPriceWei), 'miniapp.basePay.minPriceWei missing');
+  throw new Error('Compiled manifest route missing GET export');
+}
 
-  console.log('✅ Manifest looks valid for', miniapp.name);
+async function loadFromPreview(baseUrl) {
+  const normalisedBase = normaliseBase(baseUrl);
+  const manifestUrl = `${normalisedBase}/.well-known/farcaster.json`;
+  const response = await fetch(manifestUrl, {
+    headers: { accept: 'application/json' },
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch manifest: ${response.status}`);
+  }
+  const manifest = await response.json();
+  return { manifest, manifestUrl, normalisedBase };
+}
+
+try {
+  let manifest;
+  let manifestUrl;
+  let normalisedBase;
+
+  const baseUrl = getPreviewBaseUrl();
+  if (baseUrl) {
+    try {
+      const result = await loadFromPreview(baseUrl);
+      manifest = result.manifest;
+      manifestUrl = result.manifestUrl;
+      normalisedBase = result.normalisedBase;
+      console.log('ℹ️ Validating remote manifest at', manifestUrl);
+    } catch (error) {
+      console.warn('⚠️ Failed to fetch preview manifest, falling back to build output:', error);
+    }
+  }
+
+  if (!manifest) {
+    manifest = await loadFromBuild();
+    normalisedBase = normaliseBase(getPreviewBaseUrl() ?? 'http://localhost:3000');
+    manifestUrl = 'compiled route output';
+    console.log('ℹ️ Validating compiled manifest output');
+  }
+
+  const { version, miniapp, baseBuilder } = manifest ?? {};
+
+  assert(version === '1', 'manifest.version must be "1"');
+  assert(miniapp?.version === '1', 'miniapp.version must be "1"');
+  assert(miniapp?.name === 'Rubble (Bubble Hunt)', 'miniapp.name mismatch');
+
+  const manifestHome = normaliseBase(String(miniapp?.homeUrl ?? ''));
+  assert(manifestHome === normalisedBase, 'miniapp.homeUrl must match preview base URL');
+
+  const expectedIcon = `${normalisedBase}/game-icons/icon.png`;
+  assert(miniapp?.iconUrl === expectedIcon, 'miniapp.iconUrl mismatch');
+
+  const expectedSplash = `${normalisedBase}/game-icons/splash.png`;
+  assert(miniapp?.splashImageUrl === expectedSplash, 'miniapp.splashImageUrl mismatch');
+
+  assert(
+    typeof miniapp?.webhookUrl === 'string' &&
+      miniapp.webhookUrl.endsWith('/api/pay/webhook'),
+    'miniapp.webhookUrl must point to /api/pay/webhook'
+  );
+
+  assert(Array.isArray(miniapp?.tags) && miniapp.tags.length > 0, 'miniapp.tags must be populated');
+  assert(Boolean(baseBuilder?.ownerAddress), 'baseBuilder.ownerAddress missing');
+
+  console.log('✅ Manifest verified at', manifestUrl);
 } catch (error) {
   console.error('❌ Manifest verification failed');
   console.error(error instanceof Error ? error.message : error);

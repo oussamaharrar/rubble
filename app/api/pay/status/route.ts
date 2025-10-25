@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
-import { isSessionPaid } from '@/lib/pay-session-store';
-
 export const runtime = 'nodejs';
+
+import { NextResponse } from 'next/server';
+import { isSessionGranted } from '@/lib/pay-session-store';
 
 const RESPONSE_HEADERS = {
   'Cache-Control': 'no-store',
@@ -28,6 +28,6 @@ export async function GET(request: Request) {
     );
   }
 
-  const granted = isSessionPaid(sessionId);
+  const granted = isSessionGranted(sessionId);
   return NextResponse.json({ granted }, { headers: RESPONSE_HEADERS });
 }
