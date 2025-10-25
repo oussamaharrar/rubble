@@ -1,138 +1,56 @@
 import crypto from 'node:crypto';
 import { ENV } from './env';
 
-export type BasePaySession = {
-  id: string;
-  status?: string;
-  checkoutUrl?: string;
-  hostedCheckoutUrl?: string;
-  redirectUrl?: string;
-  url?: string;
-  mock?: boolean;
-  amount?: {
-    value: string;
-    currency: string;
-  };
-  chainId?: string;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
-};
+type CreateSessionInput = { sku?: string; amountWei?: string };
+type SessionOk = { ok: true; session: unknown };
+type SessionErr = { ok: false; code: string; status?: number; detail?: string };
+export type CreateSessionResult = SessionOk | SessionErr;
 
-export interface CreateBasePaySessionOptions {
-  sku?: string;
-  amountWei?: bigint;
-  buyerAddress?: string;
-}
-
-export type CreateBasePaySessionResult =
-  | { ok: true; session: BasePaySession }
-  | {
-      ok: false;
-      code: 'NO_API_BASE' | 'NO_API_KEYS' | 'API_NON_2XX' | 'FETCH_ERROR';
-      status?: number;
-      detail?: string;
-    };
-
-function getNormalisedApiBase() {
-  const explicitBase = process.env.BASE_PAY_API_BASE ?? ENV.BASE_PAY_API_BASE;
-  if (!explicitBase) {
-    return null;
-  }
-  return explicitBase.replace(/\/$/, '');
-}
-
-function getBasicAuthHeader() {
-  const apiKey = process.env.BASE_PAY_API_KEY_ID ?? ENV.BASE_PAY_API_KEY_ID;
-  const apiSecret = process.env.BASE_PAY_API_SECRET ?? ENV.BASE_PAY_API_SECRET;
-  if (!apiKey || !apiSecret) {
-    return null;
-  }
-  const credentials = Buffer.from(`${apiKey}:${apiSecret}`, 'utf8').toString('base64');
-  return `Basic ${credentials}`;
-}
-
-function createMockSession(amountWei: bigint, sku: string, buyerAddress?: string) {
-  return {
-    id: `mock_${Date.now()}`,
-    mock: true,
-    amount: {
-      currency: 'wei',
-      value: amountWei.toString(),
-    },
-    metadata: {
-      buyerAddress,
-      sku,
-    },
-  } satisfies BasePaySession & { mock: true };
-}
-
-export async function createBasePaySession({
-  sku = 'booster_time_freeze',
-  amountWei = ENV.MIN_PRICE_WEI,
-  buyerAddress,
-}: CreateBasePaySessionOptions = {}): Promise<CreateBasePaySessionResult> {
-  if (ENV.BASE_PAY_MOCK === '1') {
-    return { ok: true, session: createMockSession(amountWei, sku, buyerAddress) };
+export async function createBasePaySession(input: CreateSessionInput): Promise<CreateSessionResult> {
+  const isMock = (process.env.BASE_PAY_MOCK ?? ENV.BASE_PAY_MOCK) === '1';
+  if (isMock) {
+    return { ok: true, session: { id: `mock_${Date.now()}` } };
   }
 
-  const apiBase = getNormalisedApiBase();
-  if (!apiBase) {
-    return { ok: false, code: 'NO_API_BASE' };
+  const base = (process.env.BASE_PAY_API_BASE ?? ENV.BASE_PAY_API_BASE)?.replace(/\/$/, '');
+  if (!base) return { ok: false, code: 'NO_API_BASE', detail: 'BASE_PAY_API_BASE not set' };
+  if (!ENV.BASE_PAY_API_KEY_ID || !ENV.BASE_PAY_API_SECRET) {
+    return { ok: false, code: 'NO_API_KEYS', detail: 'Missing Base Pay API credentials' };
   }
 
-  const authHeader = getBasicAuthHeader();
-  if (!authHeader) {
-    return { ok: false, code: 'NO_API_KEYS' };
-  }
+  const sku = input.sku ?? 'booster_time_freeze';
+  const amountWeiValue = input.amountWei ?? ENV.MIN_PRICE_WEI.toString();
 
-  const payload = {
-    sku,
-    chainId: 'base-mainnet',
-    amount: {
-      currency: 'wei',
-      value: amountWei.toString(),
-    },
-    payToAddress: ENV.PAY_TO_ADDRESS,
-    metadata: {
-      buyerAddress,
-    },
-  };
-
-  const endpoint = `${apiBase}/sessions`;
-
-  let response: Response;
   try {
-    response = await fetch(endpoint, {
+    const res = await fetch(`${base}/sessions`, {
       method: 'POST',
       headers: {
-        authorization: authHeader,
         'content-type': 'application/json',
-        accept: 'application/json',
+        'x-api-key-id': ENV.BASE_PAY_API_KEY_ID,
+        'x-api-key-secret': ENV.BASE_PAY_API_SECRET,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        chain: 'base-mainnet',
+        sku,
+        amountWei: amountWeiValue,
+        recipient: ENV.PAY_TO_ADDRESS,
+      }),
       cache: 'no-store',
     });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Unknown error';
-    return { ok: false, code: 'FETCH_ERROR', detail };
-  }
-
-  if (!response.ok) {
-    let detail: string | undefined;
-    try {
-      detail = await response.text();
-    } catch {
-      detail = undefined;
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return {
+        ok: false,
+        code: 'API_NON_2XX',
+        status: res.status,
+        detail: text.slice(0, 500),
+      };
     }
-    return { ok: false, code: 'API_NON_2XX', status: response.status, detail };
-  }
-
-  try {
-    const session = (await response.json()) as BasePaySession;
-    return { ok: true, session };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Failed to parse session';
-    return { ok: false, code: 'FETCH_ERROR', detail };
+    const json = await res.json().catch(() => ({}));
+    return { ok: true, session: json };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    return { ok: false, code: 'FETCH_ERROR', detail: m };
   }
 }
 

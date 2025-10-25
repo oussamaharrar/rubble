@@ -28,6 +28,7 @@ const EnvSchema = z
     NEXT_PUBLIC_URL: url,
     NEXT_PUBLIC_WEBHOOK_URL: relativeOrUrl,
     NEXT_PUBLIC_BASE_RPC_URL: url,
+    NEXT_PUBLIC_MIN_PRICE_WEI: digits.optional(),
     BASE_RPC_URL: url,
     PAY_TO_ADDRESS: address,
     MIN_PRICE_WEI: digits,
@@ -84,6 +85,7 @@ const parsed = EnvSchema.parse({
     process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/webhook',
   NEXT_PUBLIC_BASE_RPC_URL:
     process.env.NEXT_PUBLIC_BASE_RPC_URL ?? process.env.BASE_RPC_URL,
+  NEXT_PUBLIC_MIN_PRICE_WEI: process.env.NEXT_PUBLIC_MIN_PRICE_WEI,
   BASE_RPC_URL: process.env.BASE_RPC_URL ?? process.env.NEXT_PUBLIC_BASE_RPC_URL,
   PAY_TO_ADDRESS: process.env.PAY_TO_ADDRESS,
   MIN_PRICE_WEI: process.env.MIN_PRICE_WEI ?? '0',
@@ -98,6 +100,7 @@ const parsed = EnvSchema.parse({
 });
 
 const minPriceWeiString = parsed.MIN_PRICE_WEI;
+const publicMinPriceWei = parsed.NEXT_PUBLIC_MIN_PRICE_WEI ?? minPriceWeiString;
 
 export const ENV = {
   ...parsed,
@@ -111,7 +114,7 @@ export const PUBLIC_ENV = {
   NEXT_PUBLIC_PAY_TO_ADDRESS:
     process.env.NEXT_PUBLIC_PAY_TO_ADDRESS ?? parsed.PAY_TO_ADDRESS,
   NEXT_PUBLIC_MIN_PRICE_WEI:
-    process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? minPriceWeiString,
+    process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? publicMinPriceWei,
 } as const;
 
 export type Env = typeof ENV;
