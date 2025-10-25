@@ -1,53 +1,98 @@
 import { z } from 'zod';
 
 const url = z.string().url();
-const address = z
+const evmAddress = z
   .string()
   .regex(/^0x[a-fA-F0-9]{40}$/u, 'Expected a valid 0x-prefixed EVM address');
-const digits = z.string().regex(/^\d+$/u, 'Expected an integer string');
-
-const relativeOrUrl = z
+const integerString = z
+  .string()
+  .regex(/^\d+$/u, 'Expected a non-negative integer string');
+const relativeOrAbsolute = z
   .string()
   .min(1)
   .refine((value) => {
-    if (value.startsWith('/')) return true;
+    if (value.startsWith('/')) {
+      return true;
+    }
     try {
-      const candidate = new URL(value);
-      return Boolean(candidate.origin);
+      new URL(value);
+      return true;
     } catch {
       return false;
     }
-  }, 'Expected a relative path (starting with /) or an absolute URL');
+  }, 'Expected a relative path beginning with / or an absolute URL');
+const optionalString = z.string().min(1).optional();
+const booleanFlag = z.enum(['0', '1']);
 
-const optionalNonEmpty = z.string().min(1).optional();
+const DEFAULT_BASE_PAY_API_BASE = 'https://api.basepay.coinbase.com/v1';
+const isProductionDeployment =
+  process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
 
-const booleanFlag = z.enum(['0', '1']).optional();
+const inferredMockFlag = (() => {
+  const explicit = process.env.BASE_PAY_MOCK;
+  if (explicit === '0' || explicit === '1') {
+    return explicit;
+  }
+  const haveCredentials = Boolean(
+    process.env.BASE_PAY_API_KEY_ID && process.env.BASE_PAY_API_SECRET
+  );
+  return haveCredentials ? '0' : '1';
+})();
+
+const rawEnv = {
+  NEXT_PUBLIC_URL: process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000',
+  NEXT_PUBLIC_WEBHOOK_URL:
+    process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/webhook',
+  NEXT_PUBLIC_BASE_RPC_URL:
+    process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.org',
+  NEXT_PUBLIC_MIN_PRICE_WEI:
+    process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? process.env.MIN_PRICE_WEI ?? '1',
+  BASE_RPC_URL:
+    process.env.BASE_RPC_URL ??
+    process.env.NEXT_PUBLIC_BASE_RPC_URL ??
+    'https://mainnet.base.org',
+  PAY_TO_ADDRESS:
+    process.env.PAY_TO_ADDRESS ?? '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
+  MIN_PRICE_WEI: process.env.MIN_PRICE_WEI ?? process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '1',
+  FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER,
+  FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD,
+  FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE,
+  BASE_PAY_API_KEY_ID: process.env.BASE_PAY_API_KEY_ID,
+  BASE_PAY_API_SECRET: process.env.BASE_PAY_API_SECRET,
+  BASE_PAY_API_BASE:
+    process.env.BASE_PAY_API_BASE ??
+    (isProductionDeployment ? DEFAULT_BASE_PAY_API_BASE : undefined),
+  BASE_PAY_MOCK: inferredMockFlag,
+  BASE_BUILDER_OWNER_ADDRESS:
+    process.env.BASE_BUILDER_OWNER_ADDRESS ?? '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
+} as const;
 
 const EnvSchema = z
   .object({
     NEXT_PUBLIC_URL: url,
-    NEXT_PUBLIC_WEBHOOK_URL: relativeOrUrl,
+    NEXT_PUBLIC_WEBHOOK_URL: relativeOrAbsolute,
     NEXT_PUBLIC_BASE_RPC_URL: url,
+    NEXT_PUBLIC_MIN_PRICE_WEI: integerString,
     BASE_RPC_URL: url,
-    PAY_TO_ADDRESS: address,
-    MIN_PRICE_WEI: digits,
-    FARCASTER_ACCOUNT_HEADER: optionalNonEmpty,
-    FARCASTER_ACCOUNT_PAYLOAD: optionalNonEmpty,
-    FARCASTER_ACCOUNT_SIGNATURE: optionalNonEmpty,
-    BASE_PAY_API_KEY_ID: optionalNonEmpty,
-    BASE_PAY_API_SECRET: optionalNonEmpty,
+    PAY_TO_ADDRESS: evmAddress,
+    MIN_PRICE_WEI: integerString,
+    FARCASTER_ACCOUNT_HEADER: optionalString,
+    FARCASTER_ACCOUNT_PAYLOAD: optionalString,
+    FARCASTER_ACCOUNT_SIGNATURE: optionalString,
+    BASE_PAY_API_KEY_ID: optionalString,
+    BASE_PAY_API_SECRET: optionalString,
     BASE_PAY_API_BASE: url.optional(),
     BASE_PAY_MOCK: booleanFlag,
-    BASE_BUILDER_OWNER_ADDRESS: address.optional(),
+    BASE_BUILDER_OWNER_ADDRESS: evmAddress.optional(),
   })
   .superRefine((value, ctx) => {
-    const accountValues = [
+    const accountFields = [
       value.FARCASTER_ACCOUNT_HEADER,
       value.FARCASTER_ACCOUNT_PAYLOAD,
       value.FARCASTER_ACCOUNT_SIGNATURE,
     ];
-    const providedCount = accountValues.filter(Boolean).length;
-    if (providedCount > 0 && providedCount < accountValues.length) {
+    const providedAccountFields = accountFields.filter(Boolean).length;
+    if (providedAccountFields > 0 && providedAccountFields < accountFields.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'All FARCASTER_ACCOUNT_* variables must be provided together',
@@ -56,62 +101,54 @@ const EnvSchema = z
     }
 
     const usingMock = value.BASE_PAY_MOCK === '1';
-    const haveCredentials = Boolean(
+    const haveKeys = Boolean(
       value.BASE_PAY_API_KEY_ID && value.BASE_PAY_API_SECRET
     );
-    if (!usingMock && !haveCredentials) {
+    if (!usingMock && !haveKeys) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'BASE_PAY_API_KEY_ID and BASE_PAY_API_SECRET must be configured',
+        message: 'BASE_PAY_API_KEY_ID and BASE_PAY_API_SECRET are required',
         path: ['BASE_PAY_API_KEY_ID'],
       });
     }
 
-    const inProduction =
-      process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
-    if (!usingMock && inProduction && !value.BASE_PAY_API_BASE) {
+    if (!usingMock && !value.BASE_PAY_API_BASE) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'BASE_PAY_API_BASE is required in production deployments',
+        message: 'BASE_PAY_API_BASE must be configured when not mocking Base Pay',
         path: ['BASE_PAY_API_BASE'],
       });
     }
   });
 
-const parsed = EnvSchema.parse({
-  NEXT_PUBLIC_URL: process.env.NEXT_PUBLIC_URL,
-  NEXT_PUBLIC_WEBHOOK_URL:
-    process.env.NEXT_PUBLIC_WEBHOOK_URL ?? '/api/pay/webhook',
-  NEXT_PUBLIC_BASE_RPC_URL:
-    process.env.NEXT_PUBLIC_BASE_RPC_URL ?? process.env.BASE_RPC_URL,
-  BASE_RPC_URL: process.env.BASE_RPC_URL ?? process.env.NEXT_PUBLIC_BASE_RPC_URL,
-  PAY_TO_ADDRESS: process.env.PAY_TO_ADDRESS,
-  MIN_PRICE_WEI: process.env.MIN_PRICE_WEI ?? '0',
-  FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER,
-  FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD,
-  FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE,
-  BASE_PAY_API_KEY_ID: process.env.BASE_PAY_API_KEY_ID,
-  BASE_PAY_API_SECRET: process.env.BASE_PAY_API_SECRET,
-  BASE_PAY_API_BASE: process.env.BASE_PAY_API_BASE,
-  BASE_PAY_MOCK: process.env.BASE_PAY_MOCK,
-  BASE_BUILDER_OWNER_ADDRESS: process.env.BASE_BUILDER_OWNER_ADDRESS,
-});
+const parsed = EnvSchema.parse(rawEnv);
 
-const minPriceWeiString = parsed.MIN_PRICE_WEI;
+const MIN_PRICE_WEI = BigInt(parsed.MIN_PRICE_WEI);
+const NEXT_PUBLIC_MIN_PRICE_WEI = parsed.NEXT_PUBLIC_MIN_PRICE_WEI ?? parsed.MIN_PRICE_WEI;
 
 export const ENV = {
-  ...parsed,
-  MIN_PRICE_WEI: BigInt(parsed.MIN_PRICE_WEI),
+  BASE_RPC_URL: parsed.BASE_RPC_URL,
+  PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
+  MIN_PRICE_WEI,
+  FARCASTER_ACCOUNT_HEADER: parsed.FARCASTER_ACCOUNT_HEADER,
+  FARCASTER_ACCOUNT_PAYLOAD: parsed.FARCASTER_ACCOUNT_PAYLOAD,
+  FARCASTER_ACCOUNT_SIGNATURE: parsed.FARCASTER_ACCOUNT_SIGNATURE,
+  BASE_PAY_API_KEY_ID: parsed.BASE_PAY_API_KEY_ID,
+  BASE_PAY_API_SECRET: parsed.BASE_PAY_API_SECRET,
+  BASE_PAY_API_BASE: parsed.BASE_PAY_API_BASE?.replace(/\/$/, ''),
+  BASE_PAY_MOCK: parsed.BASE_PAY_MOCK,
+  BASE_BUILDER_OWNER_ADDRESS: parsed.BASE_BUILDER_OWNER_ADDRESS,
+  NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
+  NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
+  NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
+  NEXT_PUBLIC_MIN_PRICE_WEI,
 } as const;
 
 export const PUBLIC_ENV = {
   NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
-  NEXT_PUBLIC_PAY_TO_ADDRESS:
-    process.env.NEXT_PUBLIC_PAY_TO_ADDRESS ?? parsed.PAY_TO_ADDRESS,
-  NEXT_PUBLIC_MIN_PRICE_WEI:
-    process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? minPriceWeiString,
+  NEXT_PUBLIC_MIN_PRICE_WEI,
 } as const;
 
 export type Env = typeof ENV;
