@@ -70,48 +70,61 @@ async function loadFromBuild() {
 }
 
 async function loadFromPreview(baseUrl) {
+  if (!baseUrl) return null;
   const normalisedBase = normaliseBase(baseUrl);
   const manifestUrl = `${normalisedBase}/.well-known/farcaster.json`;
-  const response = await fetch(manifestUrl, {
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'rubble-manifest-verifier/1.0',
-    },
-    cache: 'no-store',
-  });
-  if (response.status === 401 || response.status === 403) {
-    return { manifest: undefined, manifestUrl, normalisedBase, status: response.status };
+  try {
+    const response = await fetch(manifestUrl, {
+      headers: {
+        'user-agent': 'rubble-postbuild/1.0',
+      },
+      cache: 'no-store',
+    });
+    if ([401, 403, 404].includes(response.status)) {
+      console.log(`ℹ️ Preview manifest not publicly available (${response.status}); using compiled output.`);
+      return null;
+    }
+    if (!response.ok) {
+      console.log(`ℹ️ Failed to fetch preview manifest (${response.status}); using compiled output.`);
+      return null;
+    }
+    const manifest = await response.json();
+    return { manifest, manifestUrl, previewBase: normalisedBase };
+  } catch (error) {
+    const message = error && typeof error === 'object' && 'message' in error ? error.message : String(error);
+    console.log(`ℹ️ Preview fetch error: ${message}; using compiled output.`);
+    return null;
   }
-  if (!response.ok) {
-    throw new Error(`Failed to fetch manifest: ${response.status}`);
+}
+
+function assertHomeUrl(manifest, previewBase) {
+  if (!previewBase) return true;
+  const manifestHomeUrl = new URL(manifest?.miniapp?.homeUrl || '');
+  const previewUrl = new URL(previewBase);
+  if (manifestHomeUrl.host !== previewUrl.host) {
+    throw new Error(`miniapp.homeUrl host (${manifestHomeUrl.host}) != preview host (${previewUrl.host})`);
   }
-  const manifest = await response.json();
-  return { manifest, manifestUrl, normalisedBase, status: response.status };
+  const expectedPreviewBase = normaliseBase(previewUrl.origin);
+  const manifestOrigin = normaliseBase(manifestHomeUrl.origin);
+  if (manifestOrigin !== expectedPreviewBase) {
+    throw new Error(`miniapp.homeUrl mismatch: expected ${expectedPreviewBase}, received ${manifestHomeUrl.href}`);
+  }
+  return true;
 }
 
 try {
   let manifest;
   let manifestUrl;
   let fetchedFromPreview = false;
+  let previewInfo;
 
   const baseUrl = getPreviewBaseUrl();
-  if (baseUrl) {
-    try {
-      const result = await loadFromPreview(baseUrl);
-      if (result.manifest) {
-        manifest = result.manifest;
-        manifestUrl = result.manifestUrl;
-        fetchedFromPreview = true;
-        console.log('ℹ️ Validating remote manifest at', manifestUrl);
-      } else {
-        console.warn(
-          `⚠️ Preview manifest returned ${result.status}. Falling back to compiled output.`,
-          result.manifestUrl
-        );
-      }
-    } catch (error) {
-      console.warn('⚠️ Failed to fetch preview manifest, falling back to build output:', error);
-    }
+  previewInfo = await loadFromPreview(baseUrl);
+  if (previewInfo?.manifest) {
+    manifest = previewInfo.manifest;
+    manifestUrl = previewInfo.manifestUrl;
+    fetchedFromPreview = true;
+    console.log('ℹ️ Validating remote manifest at', manifestUrl);
   }
 
   if (!manifest) {
@@ -136,20 +149,7 @@ try {
 
   const manifestOrigin = normaliseBase(manifestHomeUrl.origin);
 
-  if (preview && fetchedFromPreview) {
-    const previewUrl = new URL(preview);
-    if (manifestHomeUrl.host !== previewUrl.host) {
-      console.warn(
-        `⚠️ miniapp.homeUrl host mismatch: expected ${previewUrl.host}, received ${manifestHomeUrl.host}`
-      );
-      throw new Error('miniapp.homeUrl must use the preview deployment host');
-    }
-    const expectedPreviewBase = normaliseBase(previewUrl.origin);
-    assert(
-      manifestOrigin === expectedPreviewBase,
-      `miniapp.homeUrl mismatch: expected ${expectedPreviewBase}, received ${manifestHomeRaw}`
-    );
-  }
+  assertHomeUrl(manifest, fetchedFromPreview ? previewInfo?.previewBase ?? preview : undefined);
 
   const expectedIcon = `${manifestOrigin}/game-icons/icon.png`;
   assert(miniapp?.iconUrl === expectedIcon, 'miniapp.iconUrl mismatch');
