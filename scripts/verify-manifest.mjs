@@ -79,7 +79,7 @@ async function loadFromPreview(baseUrl) {
     },
     cache: 'no-store',
   });
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401 || response.status === 403 || response.status === 404) {
     return { manifest: undefined, manifestUrl, normalisedBase, status: response.status };
   }
   if (!response.ok) {
@@ -104,8 +104,8 @@ try {
         fetchedFromPreview = true;
         console.log('ℹ️ Validating remote manifest at', manifestUrl);
       } else {
-        console.warn(
-          `⚠️ Preview manifest returned ${result.status}. Falling back to compiled output.`,
+        console.log(
+          `Preview manifest not publicly available (${result.status}) — falling back to compiled output.`,
           result.manifestUrl
         );
       }

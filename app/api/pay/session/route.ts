@@ -4,69 +4,83 @@ import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
 import { createBasePaySession } from '@/lib/pay';
 
-const RESPONSE_HEADERS = {
-  'Cache-Control': 'no-store',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST,OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type',
-};
-
-export function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: RESPONSE_HEADERS,
-  });
-}
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
 
 type SessionRequestBody = {
-  sku?: string;
-  amountWei?: string | number | bigint;
-  buyerAddress?: string;
+  sku?: unknown;
+  amountWei?: unknown;
+  buyerAddress?: unknown;
 };
 
-export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
-  const sku = body.sku ?? 'booster_time_freeze';
-  const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
+function parseAmount(value: unknown): bigint | null {
+  if (typeof value === 'bigint') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return BigInt(value);
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    try {
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
-  let amount: bigint;
+export async function POST(request: Request) {
+  let body: SessionRequestBody = {};
   try {
-    amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
+    body = (await request.json()) as SessionRequestBody;
   } catch {
+    body = {};
+  }
+
+  const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
+  const parsedAmount = parseAmount(rawAmount);
+  if (parsedAmount === null) {
     return NextResponse.json(
       { ok: false, reason: 'INVALID_AMOUNT' },
-      { status: 400, headers: RESPONSE_HEADERS }
+      { status: 400, headers: NO_STORE_HEADERS }
     );
   }
 
-  if (amount < ENV.MIN_PRICE_WEI) {
+  if (parsedAmount < ENV.MIN_PRICE_WEI) {
     return NextResponse.json(
       { ok: false, reason: 'UNDER_MINIMUM_AMOUNT' },
-      { status: 400, headers: RESPONSE_HEADERS }
+      { status: 400, headers: NO_STORE_HEADERS }
     );
   }
+
+  const sku =
+    typeof body.sku === 'string' && body.sku.trim().length > 0
+      ? body.sku
+      : 'booster_time_freeze';
+
+  const buyerAddress =
+    typeof body.buyerAddress === 'string' && body.buyerAddress.length > 0
+      ? body.buyerAddress
+      : undefined;
 
   const result = await createBasePaySession({
     sku,
-    amountWei: amount,
-    buyerAddress: body.buyerAddress,
+    amountWei: parsedAmount,
+    buyerAddress,
   });
 
   if (result.ok) {
     return NextResponse.json(
       { ok: true, session: result.session },
-      { headers: RESPONSE_HEADERS }
+      { headers: NO_STORE_HEADERS }
     );
   }
 
-  const status = result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+  const status =
+    result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+
   return NextResponse.json(
-    {
-      ok: false,
-      reason: result.code,
-      error: result.detail,
-      status: result.status,
-    },
-    { status, headers: RESPONSE_HEADERS }
+    { ok: false, reason: result.code, error: result.detail },
+    { status, headers: NO_STORE_HEADERS }
   );
 }

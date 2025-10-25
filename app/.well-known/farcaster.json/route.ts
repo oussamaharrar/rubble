@@ -3,48 +3,61 @@ import { ENV } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
-function getOriginFromRequest(req: Request) {
-  const url = new URL(req.url);
-  const proto = req.headers.get('x-forwarded-proto') || url.protocol.replace(':', '');
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || url.host;
+function resolveOrigin(request: Request) {
+  const url = new URL(request.url);
+  const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(/:$/u, '');
+  const host =
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    url.host;
   return `${proto}://${host}`;
 }
 
 function resolveWebhookUrl(origin: string) {
-  const webhookPath = ENV.NEXT_PUBLIC_WEBHOOK_URL || '/api/pay/webhook';
-  if (webhookPath.startsWith('http://') || webhookPath.startsWith('https://')) {
-    return webhookPath;
+  const value = ENV.NEXT_PUBLIC_WEBHOOK_URL;
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    try {
+      const parsed = new URL(value);
+      if (parsed.pathname.endsWith('/api/pay/webhook')) {
+        return parsed.toString();
+      }
+    } catch {
+      // fall through to default handling
+    }
+  } else {
+    const normalised = value.startsWith('/') ? value : `/${value}`;
+    if (normalised.endsWith('/api/pay/webhook')) {
+      return `${origin}${normalised}`;
+    }
   }
-  const normalised = webhookPath.startsWith('/') ? webhookPath : `/${webhookPath}`;
-  return `${origin}${normalised}`;
+  return `${origin}/api/pay/webhook`;
 }
 
 export async function GET(request: Request) {
-  const origin = getOriginFromRequest(request);
-  const homeUrl = origin;
-  const iconUrl = `${origin}/game-icons/icon.png`;
-  const splashUrl = `${origin}/game-icons/splash.png`;
-  const ogUrl = `${origin}/game-icons/og.png`;
+  const origin = resolveOrigin(request);
   const webhookUrl = resolveWebhookUrl(origin);
+
+  const miniapp = {
+    version: '1',
+    name: 'Rubble (Bubble Hunt)',
+    subtitle: 'Tap • Combo • Boost on Base',
+    description:
+      'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
+    homeUrl: origin,
+    iconUrl: `${origin}/game-icons/icon.png`,
+    splashImageUrl: `${origin}/game-icons/splash.png`,
+    splashBackgroundColor: '#04060B',
+    ogImageUrl: `${origin}/game-icons/og.png`,
+    webhookUrl,
+    primaryCategory: 'games',
+    tags: ['game', 'arcade', 'base', 'booster'],
+    screenshotUrls: [`${origin}/screenshot-portrait.png`],
+    buttonTitle: 'Play',
+  } as const;
 
   const body: Record<string, unknown> = {
     version: '1',
-    miniapp: {
-      version: '1',
-      name: 'Rubble (Bubble Hunt)',
-      subtitle: 'Tap • Combo • Boost on Base',
-      description: 'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
-      homeUrl,
-      iconUrl,
-      splashImageUrl: splashUrl,
-      splashBackgroundColor: '#04060B',
-      ogImageUrl: ogUrl,
-      webhookUrl,
-      primaryCategory: 'games',
-      tags: ['game', 'arcade', 'base', 'booster'],
-      screenshotUrls: [`${origin}/screenshot-portrait.png`],
-      buttonTitle: 'Play',
-    },
+    miniapp,
   };
 
   if (
@@ -56,14 +69,16 @@ export async function GET(request: Request) {
       header: ENV.FARCASTER_ACCOUNT_HEADER,
       payload: ENV.FARCASTER_ACCOUNT_PAYLOAD,
       signature: ENV.FARCASTER_ACCOUNT_SIGNATURE,
-    };
+    } as const;
   }
 
   if (ENV.BASE_BUILDER_OWNER_ADDRESS) {
-    body.baseBuilder = { ownerAddress: ENV.BASE_BUILDER_OWNER_ADDRESS };
+    body.baseBuilder = { ownerAddress: ENV.BASE_BUILDER_OWNER_ADDRESS } as const;
   }
 
   return NextResponse.json(body, {
-    headers: { 'Cache-Control': 'public, max-age=600' },
+    headers: {
+      'Cache-Control': 'public, max-age=600',
+    },
   });
 }
