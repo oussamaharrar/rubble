@@ -19,7 +19,7 @@ export default function BoosterStore({ boosters, walletConnected, onBoosterTrigg
   useEffect(() => {
     if (!boosters.length) return;
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ type?: string }>).detail;
+      const detail = (event as CustomEvent<{ type?: string; duration?: number }>).detail;
       if (!detail?.type) return;
       setCooldowns((prev) => ({
         ...prev,

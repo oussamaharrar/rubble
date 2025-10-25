@@ -202,6 +202,106 @@ export default function GameCanvas({ state, soundEnabled, onSnapshot, onGameOver
     gameStateRef.current = state;
   }, [state]);
 
+  const createParticles = useCallback((x: number, y: number, hue: number) => {
+    for (let i = 0; i < PARTICLE_COUNT; i += 1) {
+      particlesRef.current.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 2.2,
+        vy: (Math.random() - 0.5) * 2.2,
+        alpha: 1,
+        hue: hue + Math.random() * 20 - 10,
+        size: 2 + Math.random() * 3,
+      });
+    }
+  }, []);
+
+  const getSpeedMultiplier = useCallback((now: number) => {
+    let speed = 1;
+    if (now < rushUntilRef.current) speed *= 1.6;
+    if (now < slowMotionUntilRef.current) speed *= 0.35;
+    return speed;
+  }, []);
+
+  const handleBubblePop = useCallback(
+    (bubble: Bubble, now: number) => {
+      bubble.alive = false;
+      const colorIndex = bubble.colorIndex;
+      const sameColor = lastColorRef.current === colorIndex;
+      colorChainRef.current = sameColor ? colorChainRef.current + 1 : 1;
+      lastColorRef.current = colorIndex;
+      comboRef.current = clamp(comboRef.current + 1, 1, 99);
+      streakRef.current += 1;
+
+      const baseScore = 40;
+      const comboMultiplier = 1 + (comboRef.current - 1) * 0.18;
+      const colorMultiplier = 1 + (colorChainRef.current - 1) * 0.3;
+      const rushBoost = now < rushUntilRef.current ? 1.2 : 1;
+      const feverActive = now < feverUntilRef.current;
+      const boosterMultiplier = now < scoreDoublerUntilRef.current ? 2 : 1;
+      const feverMultiplier = feverActive ? 3 : 1;
+      const total = Math.round(baseScore * comboMultiplier * colorMultiplier * rushBoost * boosterMultiplier * feverMultiplier);
+      scoreRef.current += total;
+      playTone(420 + comboRef.current * 6, 0.12);
+
+      if (!crownUnlockedRef.current && scoreRef.current >= SCORE_CROWN_THRESHOLD) {
+        crownUnlockedRef.current = true;
+        setShowCrown(true);
+        window.setTimeout(() => setShowCrown(false), 2800);
+      }
+
+      if (comboRef.current >= FEVER_THRESHOLD) {
+        feverUntilRef.current = now + FEVER_DURATION;
+      }
+
+      createParticles(bubble.x, bubble.y, bubble.hue);
+
+      window.setTimeout(() => {
+        Object.assign(bubble, spawnBubble(canvasRef.current as HTMLCanvasElement, getSpeedMultiplier(now)));
+        bubble.alive = true;
+      }, 220);
+    },
+    [createParticles, getSpeedMultiplier, playTone]
+  );
+
+  const performTap = useCallback(
+    (x: number, y: number, isAuto: boolean) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      let hits = 0;
+      const now = performance.now();
+      for (const bubble of bubblesRef.current) {
+        if (!bubble.alive) continue;
+        const dx = bubble.x - x;
+        const dy = bubble.y - y;
+        if (dx * dx + dy * dy <= bubble.radius * bubble.radius) {
+          hits += 1;
+          handleBubblePop(bubble, now);
+        }
+      }
+      if (hits === 0 && !isAuto) {
+        comboRef.current = 1;
+        colorChainRef.current = 1;
+        streakRef.current = 0;
+        livesRef.current = Math.max(0, livesRef.current - 1);
+        playTone(160, 0.2);
+        if (livesRef.current <= 0) {
+          onSnapshot({
+            score: scoreRef.current,
+            combo: comboRef.current,
+            streak: streakRef.current,
+            colorChain: colorChainRef.current,
+            fever: now < feverUntilRef.current,
+            rush: now < rushUntilRef.current,
+            lives: livesRef.current,
+          });
+          onGameOver();
+        }
+      }
+    },
+    [handleBubblePop, onGameOver, onSnapshot, playTone]
+  );
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -256,107 +356,6 @@ export default function GameCanvas({ state, soundEnabled, onSnapshot, onGameOver
       window.removeEventListener('rubble:booster', boosterHandler as EventListener);
     };
   }, [activateBooster, performTap, updateActiveBoosters]);
-
-  const performTap = useCallback(
-    (x: number, y: number, isAuto: boolean) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      let hits = 0;
-      const now = performance.now();
-      for (const bubble of bubblesRef.current) {
-        if (!bubble.alive) continue;
-        const dx = bubble.x - x;
-        const dy = bubble.y - y;
-        if (dx * dx + dy * dy <= bubble.radius * bubble.radius) {
-          hits += 1;
-          handleBubblePop(bubble, now);
-        }
-      }
-      if (hits === 0 && !isAuto) {
-        comboRef.current = 1;
-        colorChainRef.current = 1;
-        streakRef.current = 0;
-        livesRef.current = Math.max(0, livesRef.current - 1);
-        playTone(160, 0.2);
-        if (livesRef.current <= 0) {
-          onSnapshot({
-            score: scoreRef.current,
-            combo: comboRef.current,
-            streak: streakRef.current,
-            colorChain: colorChainRef.current,
-            fever: now < feverUntilRef.current,
-            rush: now < rushUntilRef.current,
-            lives: livesRef.current,
-          });
-          onGameOver();
-        }
-      }
-    },
-    [handleBubblePop, onGameOver, onSnapshot, playTone]
-  );
-
-  const createParticles = useCallback((x: number, y: number, hue: number) => {
-    for (let i = 0; i < PARTICLE_COUNT; i += 1) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 2.2,
-        vy: (Math.random() - 0.5) * 2.2,
-        alpha: 1,
-        hue: hue + Math.random() * 20 - 10,
-        size: 2 + Math.random() * 3,
-      });
-    }
-  }, []);
-
-  const handleBubblePop = useCallback(
-    (bubble: Bubble, now: number) => {
-      bubble.alive = false;
-      const colorIndex = bubble.colorIndex;
-      const sameColor = lastColorRef.current === colorIndex;
-      colorChainRef.current = sameColor ? colorChainRef.current + 1 : 1;
-      lastColorRef.current = colorIndex;
-      comboRef.current = clamp(comboRef.current + 1, 1, 99);
-      streakRef.current += 1;
-
-      const baseScore = 40;
-      const comboMultiplier = 1 + (comboRef.current - 1) * 0.18;
-      const colorMultiplier = 1 + (colorChainRef.current - 1) * 0.3;
-      const rushBoost = now < rushUntilRef.current ? 1.2 : 1;
-      const feverActive = now < feverUntilRef.current;
-      const boosterMultiplier = now < scoreDoublerUntilRef.current ? 2 : 1;
-      const feverMultiplier = feverActive ? 3 : 1;
-      const total = Math.round(baseScore * comboMultiplier * colorMultiplier * rushBoost * boosterMultiplier * feverMultiplier);
-      scoreRef.current += total;
-      playTone(420 + comboRef.current * 6, 0.12);
-
-      if (!crownUnlockedRef.current && scoreRef.current >= SCORE_CROWN_THRESHOLD) {
-        crownUnlockedRef.current = true;
-        setShowCrown(true);
-        window.setTimeout(() => setShowCrown(false), 2800);
-      }
-
-      if (comboRef.current >= FEVER_THRESHOLD) {
-        feverUntilRef.current = now + FEVER_DURATION;
-      }
-
-      createParticles(bubble.x, bubble.y, bubble.hue);
-
-      window.setTimeout(() => {
-        Object.assign(bubble, spawnBubble(canvasRef.current as HTMLCanvasElement, getSpeedMultiplier(now)));
-        bubble.alive = true;
-      }, 220);
-    },
-    [createParticles, getSpeedMultiplier, playTone]
-  );
-
-  const getSpeedMultiplier = useCallback((now: number) => {
-    let speed = 1;
-    if (now < rushUntilRef.current) speed *= 1.6;
-    if (now < slowMotionUntilRef.current) speed *= 0.35;
-    return speed;
-  }, []);
-
 
   const renderScene = useCallback(
     (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, now: number, magnetActive: boolean) => {
