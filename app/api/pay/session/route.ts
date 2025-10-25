@@ -4,35 +4,51 @@ import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
 import { createBasePaySession } from '@/lib/pay';
 
-const RESPONSE_HEADERS = {
+const BASE_HEADERS = {
   'Cache-Control': 'no-store',
+};
+
+const RESPONSE_HEADERS = {
+  ...BASE_HEADERS,
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST,OPTIONS',
   'Access-Control-Allow-Headers': 'content-type',
-};
+} as const;
 
-export function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: RESPONSE_HEADERS,
-  });
-}
-
-type SessionRequestBody = {
+type RequestBody = {
   sku?: string;
   amountWei?: string | number | bigint;
   buyerAddress?: string;
 };
 
-export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as SessionRequestBody;
-  const sku = body.sku ?? 'booster_time_freeze';
-  const rawAmount = body.amountWei ?? ENV.MIN_PRICE_WEI;
-
-  let amount: bigint;
+function parseAmount(value: RequestBody['amountWei']) {
+  if (typeof value === 'undefined') {
+    return ENV.MIN_PRICE_WEI;
+  }
+  if (typeof value === 'bigint') {
+    return value;
+  }
   try {
-    amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
+    return BigInt(value);
   } catch {
+    return null;
+  }
+}
+
+export function OPTIONS() {
+  return new Response(null, { status: 204, headers: RESPONSE_HEADERS });
+}
+
+export async function POST(request: Request) {
+  let body: RequestBody = {};
+  try {
+    body = (await request.json()) as RequestBody;
+  } catch {
+    body = {};
+  }
+
+  const amount = parseAmount(body.amountWei);
+  if (amount === null) {
     return NextResponse.json(
       { ok: false, reason: 'INVALID_AMOUNT' },
       { status: 400, headers: RESPONSE_HEADERS }
@@ -47,7 +63,7 @@ export async function POST(request: Request) {
   }
 
   const result = await createBasePaySession({
-    sku,
+    sku: body.sku,
     amountWei: amount,
     buyerAddress: body.buyerAddress,
   });
@@ -55,11 +71,13 @@ export async function POST(request: Request) {
   if (result.ok) {
     return NextResponse.json(
       { ok: true, session: result.session },
-      { headers: RESPONSE_HEADERS }
+      { status: 200, headers: RESPONSE_HEADERS }
     );
   }
 
-  const status = result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+  const status =
+    result.code === 'NO_API_BASE' || result.code === 'NO_API_KEYS' ? 500 : 502;
+
   return NextResponse.json(
     {
       ok: false,

@@ -79,7 +79,7 @@ async function loadFromPreview(baseUrl) {
     },
     cache: 'no-store',
   });
-  if (response.status === 401 || response.status === 403) {
+  if ([401, 403, 404].includes(response.status)) {
     return { manifest: undefined, manifestUrl, normalisedBase, status: response.status };
   }
   if (!response.ok) {
@@ -104,13 +104,12 @@ try {
         fetchedFromPreview = true;
         console.log('ℹ️ Validating remote manifest at', manifestUrl);
       } else {
-        console.warn(
-          `⚠️ Preview manifest returned ${result.status}. Falling back to compiled output.`,
-          result.manifestUrl
+        console.info(
+          `Preview manifest not publicly available (${result.status}) — falling back to compiled output.`
         );
       }
     } catch (error) {
-      console.warn('⚠️ Failed to fetch preview manifest, falling back to build output:', error);
+      console.warn('Failed to fetch preview manifest, falling back to build output:', error);
     }
   }
 

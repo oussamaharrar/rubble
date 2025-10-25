@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { formatEther } from 'viem';
 import { PrimaryButton, GhostButton } from './Buttons';
@@ -11,9 +18,9 @@ import { useWalletStore } from '@/lib/wallet-store';
 
 const MIN_PRICE_WEI = (() => {
   try {
-    return BigInt(process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '0');
+    return BigInt(process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '1');
   } catch {
-    return 0n;
+    return 1n;
   }
 })();
 
@@ -29,13 +36,9 @@ type BasePaySession = {
   [key: string]: unknown;
 };
 
-type SessionResponse = {
-  ok: boolean;
-  session?: BasePaySession;
-  reason?: string;
-  error?: string;
-  status?: number;
-};
+type PaySessionResponse =
+  | { ok: true; session: BasePaySession }
+  | { ok: false; reason?: string; error?: string };
 
 type Toast = {
   type: 'success' | 'error' | 'info';
@@ -61,18 +64,22 @@ function dispatchBooster(type: BoosterType, duration: number) {
   );
 }
 
-function formatPrice(amount: bigint) {
+function formatCompactPrice(amount: bigint) {
   if (amount === 0n) return 'Free';
-  try {
-    return `${formatEther(amount)} ETH`;
-  } catch {
-    return `${amount.toString()} wei`;
-  }
+  if (amount === 1n) return '1 wei';
+
+  const ether = formatEther(amount);
+  const [whole, fractional = ''] = ether.split('.');
+  const trimmedFractional = fractional.slice(0, 6).replace(/0+$/u, '');
+  const value = trimmedFractional ? `${whole}.${trimmedFractional}` : whole;
+  return `${value} ETH`;
 }
 
-function mapErrorMessage(payload: SessionResponse, responseStatus: number): string {
+function mapErrorMessage(payload: PaySessionResponse, status: number) {
+  if (payload.ok) return '';
   const { reason, error } = payload;
   const detail = error ?? undefined;
+
   switch (reason) {
     case 'NO_API_BASE':
       return 'Base Pay API base URL is not configured. Contact the operator.';
@@ -81,7 +88,7 @@ function mapErrorMessage(payload: SessionResponse, responseStatus: number): stri
     case 'API_NON_2XX':
       return detail
         ? `Base Pay API error: ${detail}`
-        : `Base Pay API returned status ${payload.status ?? responseStatus}.`;
+        : `Base Pay API returned status ${status}.`;
     case 'FETCH_ERROR':
       return detail ? `Network error: ${detail}` : 'Network error talking to Base Pay.';
     case 'UNDER_MINIMUM_AMOUNT':
@@ -95,7 +102,7 @@ function mapErrorMessage(payload: SessionResponse, responseStatus: number): stri
 
 export default function PayButton({
   sku = 'booster_time_freeze',
-  label,
+  label = 'Boost on Base',
   amountWei = MIN_PRICE_WEI,
   boosterType = 'time-freeze',
   durationMs = BOOSTER_DURATION_MS,
@@ -148,7 +155,7 @@ export default function PayButton({
             return true;
           }
         }
-      } catch (error) {
+      } catch (error: unknown) {
         console.debug('Polling error', error);
       }
       await new Promise<void>((resolve) => {
@@ -164,36 +171,44 @@ export default function PayButton({
   const isConnected = Boolean(address);
   const isOnBase = (chainId ?? '').toLowerCase() === BASE_CHAIN_ID_HEX;
 
-  const buttonLabel = useMemo(() => {
-    const price = formatPrice(amountWei);
-    return label ?? `Boost on Base (${price})`;
-  }, [amountWei, label]);
+  const priceLabel = useMemo(() => formatCompactPrice(amountWei), [amountWei]);
+  const buttonLabel = useMemo(() => `${label} · ${priceLabel}`, [label, priceLabel]);
 
-  const disabled = disabledProp || isSubmitting || !isConnected || !isOnBase;
+  const disabled = disabledProp || isSubmitting;
+
+  const ensureWalletOnBase = useCallback(async () => {
+    const walletAddress = await ensureBaseNetwork();
+    setWallet(walletAddress, BASE_CHAIN_ID_HEX);
+    return walletAddress;
+  }, [setWallet]);
 
   const handlePay = useCallback(async () => {
     if (isSubmitting) return;
-    if (!isConnected) {
-      showToast({ type: 'error', message: 'Connect your wallet to activate boosters.' });
-      return;
+
+    let buyerAddress = useWalletStore.getState().address ?? undefined;
+
+    if (!isConnected || !isOnBase) {
+      try {
+        setInfoMessage('Confirming wallet and network…');
+        buyerAddress = await ensureWalletOnBase();
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
+        showToast({ type: 'error', message });
+        setInfoMessage(null);
+        return;
+      }
     }
 
-    setIsSubmitting(true);
-    setInfoMessage('Confirming wallet and network…');
-
-    let buyerAddress: string;
-    try {
-      buyerAddress = await ensureBaseNetwork();
-      setWallet(buyerAddress, BASE_CHAIN_ID_HEX);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
-      showToast({ type: 'error', message });
-      setIsSubmitting(false);
+    buyerAddress = buyerAddress ?? useWalletStore.getState().address ?? undefined;
+    if (!buyerAddress) {
+      showToast({ type: 'error', message: 'Wallet address is required to create a session.' });
       setInfoMessage(null);
       return;
     }
 
+    setIsSubmitting(true);
     setInfoMessage('Creating Base Pay session…');
+
     let response: Response;
     try {
       response = await fetch('/api/pay/session', {
@@ -206,7 +221,7 @@ export default function PayButton({
         }),
         cache: 'no-store',
       });
-    } catch (error) {
+    } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Network error calling Base Pay.';
       showToast({ type: 'error', message });
       setIsSubmitting(false);
@@ -214,11 +229,13 @@ export default function PayButton({
       return;
     }
 
-    let payload: SessionResponse;
+    let payload: PaySessionResponse;
     try {
-      payload = (await response.json()) as SessionResponse;
-    } catch {
-      showToast({ type: 'error', message: 'Unexpected response from Base Pay session API.' });
+      payload = (await response.json()) as PaySessionResponse;
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unexpected response from Base Pay session API.';
+      showToast({ type: 'error', message });
       setIsSubmitting(false);
       setInfoMessage(null);
       return;
@@ -267,10 +284,11 @@ export default function PayButton({
     amountWei,
     boosterType,
     durationMs,
+    ensureWalletOnBase,
     isConnected,
+    isOnBase,
     isSubmitting,
     pollForGrant,
-    setWallet,
     showToast,
     sku,
   ]);
@@ -293,17 +311,25 @@ export default function PayButton({
 
   return (
     <div className="space-y-3">
-      <PrimaryButton onClick={handlePay} disabled={disabled}>
+      <PrimaryButton
+        onClick={handlePay}
+        disabled={disabled}
+        className="w-full whitespace-nowrap px-4 py-2 text-sm"
+      >
         {isSubmitting ? (
           'Processing…'
         ) : (
-          <span className="flex items-center justify-center gap-2">
-            {icon}
-            <span>{buttonLabel}</span>
+          <span className="flex min-w-0 items-center justify-center gap-2 text-center">
+            {icon ? <span className="shrink-0 text-base">{icon}</span> : null}
+            <span className="truncate font-semibold">{buttonLabel}</span>
           </span>
         )}
       </PrimaryButton>
-      {infoMessage ? <p className="text-xs text-slate-300">{infoMessage}</p> : null}
+      {infoMessage ? (
+        <p className="text-xs text-slate-300" role="status" aria-live="polite">
+          {infoMessage}
+        </p>
+      ) : null}
       <AnimatePresence>
         {toast ? (
           <motion.div
@@ -339,8 +365,8 @@ export default function PayButton({
               Session <span className="font-mono text-xs text-slate-200">{sessionModal.id}</span>
             </p>
             <p>
-              Complete the checkout in the Base Pay window. This dialog is temporary and will
-              close automatically when payment is confirmed.
+              Complete the checkout in the Base Pay window. This dialog closes automatically when
+              payment is confirmed.
             </p>
             {!modalFooter?.length ? (
               <p className="text-xs text-slate-300">

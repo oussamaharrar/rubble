@@ -1,119 +1,117 @@
-import crypto from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ENV } from './env';
 
-export type BasePaySession = {
-  id: string;
-  status?: string;
-  checkoutUrl?: string;
-  hostedCheckoutUrl?: string;
-  redirectUrl?: string;
-  url?: string;
-  mock?: boolean;
-  amount?: {
-    value: string;
-    currency: string;
-  };
-  chainId?: string;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
+export type CreateBasePaySessionInput = {
+  sku?: string;
+  amountWei?: bigint | number | string;
+  buyerAddress?: string;
 };
 
-export interface CreateBasePaySessionOptions {
-  sku?: string;
-  amountWei?: bigint;
-  buyerAddress?: string;
-}
+export type CreateBasePaySessionSuccess = {
+  ok: true;
+  session: unknown;
+};
+
+export type CreateBasePaySessionFailure = {
+  ok: false;
+  code: 'NO_API_BASE' | 'NO_API_KEYS' | 'API_NON_2XX' | 'FETCH_ERROR';
+  status?: number;
+  detail?: string;
+};
 
 export type CreateBasePaySessionResult =
-  | { ok: true; session: BasePaySession }
-  | {
-      ok: false;
-      code: 'NO_API_BASE' | 'NO_API_KEYS' | 'API_NON_2XX' | 'FETCH_ERROR';
-      status?: number;
-      detail?: string;
-    };
+  | CreateBasePaySessionSuccess
+  | CreateBasePaySessionFailure;
 
-function getNormalisedApiBase() {
-  const explicitBase = process.env.BASE_PAY_API_BASE ?? ENV.BASE_PAY_API_BASE;
-  if (!explicitBase) {
-    return null;
+const BASE_PAY_ENDPOINT = 'sessions';
+
+function normaliseAmount(amount?: bigint | number | string): bigint {
+  if (typeof amount === 'bigint') {
+    return amount;
   }
-  return explicitBase.replace(/\/$/, '');
+  if (typeof amount === 'number') {
+    return BigInt(Math.trunc(amount));
+  }
+  if (typeof amount === 'string') {
+    return BigInt(amount);
+  }
+  return ENV.MIN_PRICE_WEI;
 }
 
-function getBasicAuthHeader() {
-  const apiKey = process.env.BASE_PAY_API_KEY_ID ?? ENV.BASE_PAY_API_KEY_ID;
-  const apiSecret = process.env.BASE_PAY_API_SECRET ?? ENV.BASE_PAY_API_SECRET;
-  if (!apiKey || !apiSecret) {
-    return null;
-  }
-  const credentials = Buffer.from(`${apiKey}:${apiSecret}`, 'utf8').toString('base64');
-  return `Basic ${credentials}`;
+function normaliseBaseUrl(value: string) {
+  return value.replace(/\/$/, '');
 }
 
-function createMockSession(amountWei: bigint, sku: string, buyerAddress?: string) {
+function readApiCredentials() {
+  const keyId = ENV.BASE_PAY_API_KEY_ID;
+  const secret = ENV.BASE_PAY_API_SECRET;
+  if (!keyId || !secret) {
+    return null;
+  }
+  return { keyId, secret } as const;
+}
+
+function createMockSession(input: CreateBasePaySessionInput & { amountWei: bigint }) {
   return {
     id: `mock_${Date.now()}`,
     mock: true,
+    sku: input.sku ?? 'booster_time_freeze',
     amount: {
       currency: 'wei',
-      value: amountWei.toString(),
+      value: input.amountWei.toString(),
     },
     metadata: {
-      buyerAddress,
-      sku,
+      buyerAddress: input.buyerAddress,
     },
-  } satisfies BasePaySession & { mock: true };
+  };
 }
 
-export async function createBasePaySession({
-  sku = 'booster_time_freeze',
-  amountWei = ENV.MIN_PRICE_WEI,
-  buyerAddress,
-}: CreateBasePaySessionOptions = {}): Promise<CreateBasePaySessionResult> {
+export async function createBasePaySession(
+  input: CreateBasePaySessionInput = {}
+): Promise<CreateBasePaySessionResult> {
+  const amountWei = normaliseAmount(input.amountWei);
+
   if (ENV.BASE_PAY_MOCK === '1') {
-    return { ok: true, session: createMockSession(amountWei, sku, buyerAddress) };
+    return { ok: true, session: createMockSession({ ...input, amountWei }) };
   }
 
-  const apiBase = getNormalisedApiBase();
+  const apiBase = ENV.BASE_PAY_API_BASE;
   if (!apiBase) {
     return { ok: false, code: 'NO_API_BASE' };
   }
 
-  const authHeader = getBasicAuthHeader();
-  if (!authHeader) {
+  const credentials = readApiCredentials();
+  if (!credentials) {
     return { ok: false, code: 'NO_API_KEYS' };
   }
 
+  const endpoint = `${normaliseBaseUrl(apiBase)}/${BASE_PAY_ENDPOINT}`;
   const payload = {
-    sku,
+    sku: input.sku ?? 'booster_time_freeze',
     chainId: 'base-mainnet',
     amount: {
       currency: 'wei',
       value: amountWei.toString(),
     },
     payToAddress: ENV.PAY_TO_ADDRESS,
-    metadata: {
-      buyerAddress,
-    },
+    metadata: input.buyerAddress ? { buyerAddress: input.buyerAddress } : undefined,
   };
-
-  const endpoint = `${apiBase}/sessions`;
 
   let response: Response;
   try {
     response = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        authorization: authHeader,
-        'content-type': 'application/json',
         accept: 'application/json',
+        'content-type': 'application/json',
+        'x-api-key-id': credentials.keyId,
+        'x-api-key-secret': credentials.secret,
       },
       body: JSON.stringify(payload),
       cache: 'no-store',
     });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Unknown error';
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : 'Network request failed';
     return { ok: false, code: 'FETCH_ERROR', detail };
   }
 
@@ -121,26 +119,23 @@ export async function createBasePaySession({
     let detail: string | undefined;
     try {
       detail = await response.text();
-    } catch {
-      detail = undefined;
+    } catch (error: unknown) {
+      detail = error instanceof Error ? error.message : undefined;
     }
     return { ok: false, code: 'API_NON_2XX', status: response.status, detail };
   }
 
   try {
-    const session = (await response.json()) as BasePaySession;
+    const session = (await response.json()) as unknown;
     return { ok: true, session };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Failed to parse session';
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : 'Failed to parse Base Pay response';
     return { ok: false, code: 'FETCH_ERROR', detail };
   }
 }
 
-function safeEqual(first: Buffer, second: Buffer) {
-  if (first.length !== second.length) {
-    return false;
-  }
-  return crypto.timingSafeEqual(first, second);
+function toBuffer(value: string | Buffer) {
+  return typeof value === 'string' ? Buffer.from(value, 'utf8') : value;
 }
 
 function decodeSignature(signature: string) {
@@ -155,20 +150,32 @@ function decodeSignature(signature: string) {
   }
 }
 
-export function verifyBasePayWebhook(
-  rawBody: string | Buffer,
-  signature: string | null | undefined
-) {
-  if (!signature || !ENV.BASE_PAY_API_SECRET) return false;
+export function verifyBasePayWebhook(rawBody: string, signature: string | null | undefined) {
+  if (!signature) {
+    return false;
+  }
 
-  const message = typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody;
-  const secret = Buffer.from(ENV.BASE_PAY_API_SECRET, 'utf8');
-  const expected = crypto.createHmac('sha256', secret).update(message).digest();
+  const secret = ENV.BASE_PAY_API_SECRET;
+  if (!secret) {
+    return false;
+  }
+
+  const expected = createHmac('sha256', Buffer.from(secret, 'utf8'))
+    .update(toBuffer(rawBody))
+    .digest();
 
   const provided = decodeSignature(signature);
   if (!provided) {
     return false;
   }
 
-  return safeEqual(expected, provided);
+  if (expected.length !== provided.length) {
+    return false;
+  }
+
+  try {
+    return timingSafeEqual(expected, provided);
+  } catch {
+    return false;
+  }
 }
