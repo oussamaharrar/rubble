@@ -20,6 +20,7 @@ const GLOW_MAP = {
 } as const;
 
 const MAX_PARTICLES = 32;
+const MAX_RIPPLES = 12;
 
 interface Particle {
   x: number;
@@ -29,16 +30,25 @@ interface Particle {
   color: string;
 }
 
+interface Ripple {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+}
+
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
+  const ripplesRef = useRef<Ripple[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
   const settings = useGameStore((state) => state.settings);
+  const activePhase = phase === 'playing' || phase === 'storm';
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -172,6 +182,24 @@ export default function GameCanvas() {
       }
       particlesRef.current = remaining.slice(0, MAX_PARTICLES);
 
+      const ripples = ripplesRef.current;
+      const rippleNext: Ripple[] = [];
+      for (const ripple of ripples) {
+        const alpha = Math.max(0, ripple.life);
+        if (alpha <= 0) continue;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+        ctx.globalAlpha = alpha * 0.8;
+        ctx.lineWidth = Math.max(1.2, ratio * 0.9);
+        ctx.arc(ripple.x * ratio, ripple.y * ratio, ripple.radius * ratio, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ripple.radius += dt * 0.18;
+        ripple.life -= dt * 0.0035;
+        rippleNext.push(ripple);
+      }
+      ripplesRef.current = rippleNext.slice(0, MAX_RIPPLES);
+
       ctx.restore();
     };
 
@@ -229,6 +257,8 @@ export default function GameCanvas() {
       if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         if (result.drain) {
           navigator.vibrate(25);
+        } else if (result.perfect) {
+          navigator.vibrate(8);
         } else if (result.energy || (result.combo ?? 0) >= 3) {
           navigator.vibrate([5, 10, 5]);
         } else {
@@ -236,7 +266,12 @@ export default function GameCanvas() {
         }
       }
       if (result.hit) {
-        const color = result.energy ? 'rgba(56,189,248,0.6)' : result.drain ? 'rgba(248,113,113,0.6)' : 'rgba(255,255,255,0.35)';
+        const baseColor = result.energy
+          ? 'rgba(56,189,248,0.6)'
+          : result.drain
+          ? 'rgba(248,113,113,0.6)'
+          : 'rgba(255,255,255,0.35)';
+        const color = result.targetHit ? 'rgba(253,224,71,0.75)' : baseColor;
         particlesRef.current.unshift({
           x,
           y,
@@ -245,6 +280,10 @@ export default function GameCanvas() {
           color,
         });
         particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+        if (result.perfect) {
+          ripplesRef.current.unshift({ x, y, radius: 10, life: 1 });
+          ripplesRef.current = ripplesRef.current.slice(0, MAX_RIPPLES);
+        }
       }
     };
     const handleMove = (event: PointerEvent) => {
@@ -263,6 +302,13 @@ export default function GameCanvas() {
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
       <canvas ref={canvasRef} className="h-full w-full touch-none" />
+      <div
+        className="pointer-events-none absolute inset-0 transition-opacity duration-300"
+        style={{
+          opacity: activePhase ? 1 : 0,
+          background: 'radial-gradient(circle at center, rgba(4,7,14,0) 40%, rgba(2,6,14,0.78) 100%)',
+        }}
+      />
     </div>
   );
 }

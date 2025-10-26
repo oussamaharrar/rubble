@@ -1,0 +1,44 @@
+:root {
+  --header-h: 72px;
+  --footer-h: 44px;
+}
+
+@supports (padding: max(0px)) {
+  .safe-top {
+    padding-top: max(var(--header-h), env(safe-area-inset-top));
+  }
+
+  .safe-bottom {
+    padding-bottom: max(var(--footer-h), env(safe-area-inset-bottom));
+  }
+}
+
+.app-viewport {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #06080f;
+}
+
+.app-main {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+[data-playing="1"] header,
+[data-playing="1"] footer,
+[data-playing="1"] .home-chrome {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+[data-playing="0"] header,
+[data-playing="0"] footer,
+[data-playing="0"] .home-chrome {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}

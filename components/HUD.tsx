@@ -5,6 +5,14 @@ import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { useGameStore } from '@/lib/store';
 
+const TARGET_MARKERS = {
+  yellow: '🟡',
+  blue: '🔵',
+  green: '🟢',
+  pink: '🩷',
+  orange: '🟠',
+} as const;
+
 interface HudProps {
   onPause: () => void;
   onRequestShop: () => void;
@@ -18,10 +26,14 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const slowTimeUntil = useGameStore((state) => state.slowTimeUntil);
   const now = useGameStore((state) => state.now);
   const leftHanded = useGameStore((state) => state.settings.leftHanded);
+  const targetFlashAt = useGameStore((state) => state.targetFlashAt);
+  const targetState = useGameStore((state) => state.target);
 
   const comboActive = stats.chainLen >= 3;
   const timeCritical = stats.timeLeft <= 10 && (phase === 'playing' || phase === 'storm');
   const slowActive = slowTimeUntil > now;
+  const targetFlashActive = targetFlashAt > 0 && now - targetFlashAt < 900;
+  const targetFlashEmoji = targetState.color ? TARGET_MARKERS[targetState.color] : '🎯';
 
   const formattedTime = useMemo(() => {
     const seconds = Math.max(0, stats.timeLeft);
@@ -45,9 +57,11 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const layoutDirection = leftHanded ? 'flex-row-reverse text-right' : 'flex-row text-left';
   const infoAlign = leftHanded ? 'items-end' : 'items-start';
   const bottomAlign = leftHanded ? 'items-start' : 'items-end';
+  const buttonRow = leftHanded ? 'flex-row-reverse' : 'flex-row';
+  const slowAlign = leftHanded ? 'justify-start' : 'justify-end';
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between p-4">
+    <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between p-4 relative">
       <div className={clsx('flex justify-between gap-3', layoutDirection)}>
         <div className={clsx('pointer-events-auto flex flex-col gap-1.5', infoAlign)}>
           <motion.div
@@ -103,20 +117,45 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           </button>
         </div>
       </div>
+      <AnimatePresence>
+        {targetFlashActive ? (
+          <motion.div
+            key="target-flash"
+            initial={{ opacity: 0, scale: 0.92 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-amber-400/40 bg-amber-500/20 px-4 py-1 text-sm font-semibold text-amber-100 shadow-lg shadow-amber-500/30"
+          >
+            Target! {targetFlashEmoji}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       <div className={clsx('pointer-events-auto flex flex-col gap-2', bottomAlign)}>
-        <motion.button
-          type="button"
-          onClick={handleUseOrb}
-          className="inline-flex items-center justify-center rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
-          whileTap={{ scale: 0.95 }}
-        >
-          {boosterBank.freeOrbs > 0 ? 'Boost · Use Orb' : 'Boost · Shop'}
-        </motion.button>
-        <div className={clsx('flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-200', leftHanded ? 'justify-start' : 'justify-end')}>
-          <span className="rounded-full bg-sky-500/20 px-3 py-1 text-sky-100">Orbs {boosterBank.freeOrbs}</span>
-          {slowActive && <span className="rounded-full bg-sky-500/20 px-3 py-1 text-sky-100">Slow</span>}
+        <div className={clsx('flex items-center gap-2', buttonRow)}>
+          <motion.button
+            type="button"
+            onClick={handleUseOrb}
+            className="inline-flex min-h-[40px] items-center justify-center whitespace-nowrap rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+            whileTap={{ scale: 0.95 }}
+          >
+            {boosterBank.freeOrbs > 0 ? 'Boost · Use Orb' : 'Boost · Shop'}
+          </motion.button>
+          <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-sky-100 whitespace-nowrap">
+            Orbs {boosterBank.freeOrbs}
+          </span>
         </div>
+        {slowActive ? (
+          <div
+            className={clsx(
+              'flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-200',
+              slowAlign
+            )}
+          >
+            <span className="rounded-full bg-sky-500/20 px-3 py-1 text-sky-100">Slow</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
