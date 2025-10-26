@@ -2,12 +2,19 @@
 
 import { create } from 'zustand';
 import { persistMissions, readPersistedMissions, generateDailyMissions, bonusStorageKey } from '@/lib/missions';
-import type { Bubble, BoosterBank, BubbleColor, GamePhase, Mission, RunStats } from '@/types/game';
+import { deriveDailyTuning, getDailyKeyUTC, isDailyEligible, seedFromDailyKey, type DailyTuning } from '@/lib/daily';
+import type {
+  BoardKind,
+  Bubble,
+  BoosterBank,
+  BubbleColor,
+  EntryMode,
+  GamePhase,
+  GameSettings,
+  Mission,
+  RunStats,
+} from '@/types/game';
 
-const MAX_BUBBLES = 40;
-const MAX_STORM_ORBS = 10;
-const STORM_INTERVAL_MS = 30_000;
-const STORM_DURATION_MS = 7_000;
 const COMBO_WINDOW_MS = 5_000;
 const BASE_POINTS = 10;
 const BASE_TIME_REWARD = 0.5;
@@ -18,6 +25,83 @@ const ENERGY_POINTS = 20;
 const SLOW_TIME_DURATION_MS = 5_000;
 
 const BOOSTER_KEY = 'rubble:booster-bank';
+const SETTINGS_KEY = 'rubble_settings_v1';
+const DAILY_RUN_KEY_PREFIX = 'rubble:daily-runs';
+
+const BASE_MAX_BUBBLES = 40;
+const BASE_MAX_STORM_ORBS = 10;
+const BASE_STORM_INTERVAL_MS = 30_000;
+const BASE_STORM_DURATION_MS = 7_000;
+const BASE_SPEED_FACTOR = 1;
+
+const DEFAULT_PALETTE: BubbleColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
+
+function settingsDefaults(): GameSettings {
+  return {
+    haptics: true,
+    reducedMotion: false,
+    sfx: true,
+    leftHanded: false,
+  };
+}
+
+function readSettings(): GameSettings {
+  if (typeof window === 'undefined') {
+    return settingsDefaults();
+  }
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_KEY);
+    if (!raw) {
+      return settingsDefaults();
+    }
+    const parsed = JSON.parse(raw) as Partial<GameSettings>;
+    const defaults = settingsDefaults();
+    return {
+      haptics: typeof parsed.haptics === 'boolean' ? parsed.haptics : defaults.haptics,
+      reducedMotion: typeof parsed.reducedMotion === 'boolean' ? parsed.reducedMotion : defaults.reducedMotion,
+      sfx: typeof parsed.sfx === 'boolean' ? parsed.sfx : defaults.sfx,
+      leftHanded: typeof parsed.leftHanded === 'boolean' ? parsed.leftHanded : defaults.leftHanded,
+    };
+  } catch {
+    return settingsDefaults();
+  }
+}
+
+function persistSettings(settings: GameSettings) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // ignore persistence errors
+  }
+}
+
+function dailyRunKey(key: string) {
+  return `${DAILY_RUN_KEY_PREFIX}:${key}`;
+}
+
+function readDailyRunCount(key: string): number {
+  if (typeof window === 'undefined') {
+    return 0;
+  }
+  try {
+    const raw = window.localStorage.getItem(dailyRunKey(key));
+    if (!raw) return 0;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeDailyRunCount(key: string, count: number) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(dailyRunKey(key), `${Math.max(0, Math.floor(count))}`);
+  } catch {
+    // ignore persistence errors
+  }
+}
 
 function hashString(value: string) {
   let hash = 0;
@@ -86,8 +170,10 @@ function persistBooster(bank: BoosterBank) {
   );
 }
 
-function randomColor(rng: () => number): BubbleColor {
-  const palette: BubbleColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
+function randomColor(rng: () => number, palette: BubbleColor[]): BubbleColor {
+  if (palette.length === 0) {
+    return DEFAULT_PALETTE[Math.floor(rng() * DEFAULT_PALETTE.length) % DEFAULT_PALETTE.length];
+  }
   return palette[Math.floor(rng() * palette.length) % palette.length];
 }
 
@@ -96,18 +182,20 @@ function createBubble(
   width: number,
   height: number,
   now: number,
+  palette: BubbleColor[],
+  speedFactor: number,
   options?: { storm?: boolean; poison?: boolean; energy?: boolean }
 ): Bubble {
   const radius = 24 + rng() * 18;
   const x = radius + rng() * (Math.max(width - radius * 2, radius));
   const y = height + radius + rng() * height * 0.4;
-  const speedY = -((0.08 + rng() * 0.12) * height);
-  const speedX = (rng() - 0.5) * 0.12 * width;
+  const speedY = -((0.08 + rng() * 0.12) * height * speedFactor);
+  const speedX = (rng() - 0.5) * 0.12 * width * Math.max(0.6, Math.min(speedFactor, 1.4));
   const color = options?.storm
     ? options?.energy
       ? 'blue'
       : 'orange'
-    : randomColor(rng);
+    : randomColor(rng, palette);
   return {
     id: `${now}-${Math.floor(rng() * 1_000_000)}`,
     x,
@@ -132,11 +220,18 @@ function isDrainOrb(bubble: Bubble) {
 
 type GameStore = {
   phase: GamePhase;
+  boardKind: BoardKind;
   stats: RunStats;
+  entryMode: EntryMode | null;
   bubbles: Bubble[];
   missions: Mission[];
   boosterBank: BoosterBank;
   stormAt: number;
+  stormInterval: number;
+  stormDuration: number;
+  maxBubbles: number;
+  maxStormOrbs: number;
+  bubbleSpeedFactor: number;
   now: number;
   rngSeed: number;
   rng: () => number;
@@ -146,21 +241,38 @@ type GameStore = {
   slowTimeUntil: number;
   startedAt: number;
   dailyKey: string;
+  dailyRunCount: number;
+  officialDailyEligible: boolean;
+  dailyTuning: DailyTuning | null;
+  palette: BubbleColor[];
+  settings: GameSettings;
+  lastRunOfficialDaily: boolean;
   survivalAccumulator: number;
   currentStreak: number;
   resumePhase: 'playing' | 'storm' | null;
-  startRun: (mode?: 'trial' | 'paid') => void;
+  lastTapAt: number;
+  lastTapX: number;
+  lastTapY: number;
+  lastComboFrame: number;
+  timeGainWindowStart: number;
+  timeGainAccumulated: number;
+  startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
   pauseRun: () => void;
   resumeRun: () => void;
+  pause: () => void;
+  resume: () => void;
   tick: (dt: number) => void;
   spawnBubbles: (count?: number) => void;
   spawnStormOrbs: () => void;
   tap: (x: number, y: number) => { hit: boolean; energy?: boolean; drain?: boolean; combo?: number };
   grantBooster: (count: number, source?: 'energy' | 'paid' | 'mission' | 'other') => void;
+  grantOrbOnPaidEntry: () => void;
   consumeBooster: () => boolean;
   loadDaily: (seed?: string | number) => void;
+  setBoardKind: (board: BoardKind) => void;
+  setSettings: (patch: Partial<GameSettings>) => void;
   setStageSize: (width: number, height: number) => void;
   claimMission: (id: string) => void;
   progressColor: (color: BubbleColor) => void;
@@ -171,11 +283,18 @@ type GameStore = {
 
 export const useGameStore = create<GameStore>((set, get) => ({
   phase: 'start',
+  boardKind: 'normal',
   stats: defaultStats(),
+  entryMode: null,
   bubbles: [],
   missions: [],
   boosterBank: initialBoosterBank(),
-  stormAt: STORM_INTERVAL_MS,
+  stormAt: BASE_STORM_INTERVAL_MS,
+  stormInterval: BASE_STORM_INTERVAL_MS,
+  stormDuration: BASE_STORM_DURATION_MS,
+  maxBubbles: BASE_MAX_BUBBLES,
+  maxStormOrbs: BASE_MAX_STORM_ORBS,
+  bubbleSpeedFactor: BASE_SPEED_FACTOR,
   now: 0,
   rngSeed: hashString(`${Date.now()}`),
   rng: createRng(hashString(`${Date.now()}`)),
@@ -185,16 +304,67 @@ export const useGameStore = create<GameStore>((set, get) => ({
   slowTimeUntil: 0,
   startedAt: 0,
   dailyKey: '',
+  dailyRunCount: 0,
+  officialDailyEligible: false,
+  dailyTuning: null,
+  palette: DEFAULT_PALETTE,
+  settings: readSettings(),
+  lastRunOfficialDaily: false,
   survivalAccumulator: 0,
   currentStreak: 0,
   resumePhase: null,
+  lastTapAt: 0,
+  lastTapX: 0,
+  lastTapY: 0,
+  lastComboFrame: -Infinity,
+  timeGainWindowStart: 0,
+  timeGainAccumulated: 0,
   startRun: (mode = 'trial') => {
-    const seed = hashString(`${Date.now()}-${Math.random()}`);
+    const state = get();
+    const board = state.boardKind;
+    const defaultSeed = hashString(`${Date.now()}-${Math.random()}`);
+    let seed = defaultSeed;
+    let palette = DEFAULT_PALETTE;
+    let stormInterval = BASE_STORM_INTERVAL_MS;
+    let stormDuration = BASE_STORM_DURATION_MS;
+    let maxBubbles = BASE_MAX_BUBBLES;
+    let maxStormOrbs = BASE_MAX_STORM_ORBS;
+    let bubbleSpeedFactor = BASE_SPEED_FACTOR;
+    let dailyKey = state.dailyKey;
+    let dailyRunCount = state.dailyRunCount;
+    let officialDailyEligible = false;
+    let tuning: DailyTuning | null = state.dailyTuning;
+
+    if (!dailyKey) {
+      dailyKey = getDailyKeyUTC();
+    }
+
+    if (board === 'daily') {
+      if (!tuning) {
+        tuning = deriveDailyTuning(seedFromDailyKey(dailyKey));
+      }
+      seed = seedFromDailyKey(dailyKey);
+      palette = tuning.colors.length > 0 ? tuning.colors : DEFAULT_PALETTE;
+      stormInterval = tuning.stormEvery || BASE_STORM_INTERVAL_MS;
+      stormDuration = tuning.stormDuration || BASE_STORM_DURATION_MS;
+      maxBubbles = Math.max(24, Math.round(BASE_MAX_BUBBLES * tuning.spawn.density));
+      maxStormOrbs = Math.max(6, Math.round(BASE_MAX_STORM_ORBS * tuning.spawn.density));
+      bubbleSpeedFactor = tuning.spawn.speedFactor || BASE_SPEED_FACTOR;
+      dailyRunCount = readDailyRunCount(dailyKey);
+      officialDailyEligible = isDailyEligible(dailyRunCount);
+    }
+
     set({
       phase: 'playing',
       stats: { ...defaultStats(), timeLeft: 60, entryMode: mode },
+      entryMode: mode,
       bubbles: [],
-      stormAt: STORM_INTERVAL_MS,
+      stormAt: stormInterval,
+      stormInterval,
+      stormDuration,
+      maxBubbles,
+      maxStormOrbs,
+      bubbleSpeedFactor,
       now: 0,
       rngSeed: seed,
       rng: createRng(seed),
@@ -204,16 +374,59 @@ export const useGameStore = create<GameStore>((set, get) => ({
       survivalAccumulator: 0,
       currentStreak: 0,
       resumePhase: null,
+      dailyKey,
+      dailyRunCount,
+      officialDailyEligible,
+      dailyTuning: tuning,
+      palette,
+      lastRunOfficialDaily: false,
+      lastTapAt: 0,
+      lastTapX: 0,
+      lastTapY: 0,
+      lastComboFrame: -Infinity,
+      timeGainWindowStart: 0,
+      timeGainAccumulated: 0,
     });
-    get().spawnBubbles(MAX_BUBBLES / 2);
+    get().spawnBubbles(Math.floor(maxBubbles / 2));
   },
   endRun: () => {
-    set({ phase: 'summary', resumePhase: null });
+    const state = get();
+    if (state.boardKind === 'daily' && state.dailyKey) {
+      const nextCount = state.dailyRunCount + 1;
+      writeDailyRunCount(state.dailyKey, nextCount);
+      set({
+        phase: 'summary',
+        resumePhase: null,
+        dailyRunCount: nextCount,
+        lastRunOfficialDaily: state.officialDailyEligible,
+        officialDailyEligible: isDailyEligible(nextCount),
+      });
+      return;
+    }
+    set({ phase: 'summary', resumePhase: null, lastRunOfficialDaily: false });
   },
   resetToStart: () => {
+    const state = get();
+    let palette = DEFAULT_PALETTE;
+    let stormInterval = BASE_STORM_INTERVAL_MS;
+    let stormDuration = BASE_STORM_DURATION_MS;
+    let maxBubbles = BASE_MAX_BUBBLES;
+    let maxStormOrbs = BASE_MAX_STORM_ORBS;
+    let bubbleSpeedFactor = BASE_SPEED_FACTOR;
+    if (state.boardKind === 'daily') {
+      const key = state.dailyKey || getDailyKeyUTC();
+      const tuning = state.dailyTuning ?? deriveDailyTuning(seedFromDailyKey(key));
+      palette = tuning.colors.length > 0 ? tuning.colors : DEFAULT_PALETTE;
+      stormInterval = tuning.stormEvery || BASE_STORM_INTERVAL_MS;
+      stormDuration = tuning.stormDuration || BASE_STORM_DURATION_MS;
+      maxBubbles = Math.max(24, Math.round(BASE_MAX_BUBBLES * tuning.spawn.density));
+      maxStormOrbs = Math.max(6, Math.round(BASE_MAX_STORM_ORBS * tuning.spawn.density));
+      bubbleSpeedFactor = tuning.spawn.speedFactor || BASE_SPEED_FACTOR;
+    }
     set({
       phase: 'start',
       stats: defaultStats(),
+      entryMode: null,
       bubbles: [],
       now: 0,
       comboWindowUntil: 0,
@@ -221,6 +434,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
       survivalAccumulator: 0,
       currentStreak: 0,
       resumePhase: null,
+      palette,
+      stormInterval,
+      stormDuration,
+      maxBubbles,
+      maxStormOrbs,
+      bubbleSpeedFactor,
+      stormAt: stormInterval,
+      lastTapAt: 0,
+      lastTapX: 0,
+      lastTapY: 0,
+      lastComboFrame: -Infinity,
+      timeGainWindowStart: 0,
+      timeGainAccumulated: 0,
     });
   },
   pauseRun: () => {
@@ -238,33 +464,42 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const target = state.resumePhase ?? 'playing';
     set({ phase: target, resumePhase: null });
   },
+  pause: () => {
+    get().pauseRun();
+  },
+  resume: () => {
+    get().resumeRun();
+  },
   tick: (dt) => {
     const state = get();
     if (state.phase !== 'playing' && state.phase !== 'storm') {
       return;
     }
-    const now = state.now + dt;
+    const clampedDt = Math.min(Math.max(dt, 0), 48);
+    const now = state.now + clampedDt;
     let phase: GamePhase = state.phase;
     const slowTimeActive = now < state.slowTimeUntil;
     const factor = slowTimeActive ? 0.5 : 1;
     const width = state.width;
+    const height = state.height;
 
     const updatedBubbles: Bubble[] = [];
     for (const bubble of state.bubbles) {
-      const nextX = bubble.x + bubble.vx * (dt / 1000) * factor;
-      const nextY = bubble.y + bubble.vy * (dt / 1000) * factor;
+      const nextX = bubble.x + bubble.vx * (clampedDt / 1000) * factor;
+      const nextY = bubble.y + bubble.vy * (clampedDt / 1000) * factor;
       if (nextY < -bubble.r * 1.2) {
         continue;
       }
       let clampedX = nextX;
       if (clampedX < bubble.r) clampedX = bubble.r;
       if (clampedX > width - bubble.r) clampedX = width - bubble.r;
-      updatedBubbles.push({ ...bubble, x: clampedX, y: nextY });
+      const clampedY = Math.min(nextY, height + bubble.r * 2);
+      updatedBubbles.push({ ...bubble, x: clampedX, y: clampedY });
     }
 
     const stats = { ...state.stats };
     if (stats.timeLeft > 0) {
-      stats.timeLeft = Math.max(0, stats.timeLeft - dt / 1000);
+      stats.timeLeft = Math.max(0, stats.timeLeft - clampedDt / 1000);
     }
 
     const runSeconds = (now - state.now) / 1000;
@@ -283,9 +518,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }, 0);
     }
 
-    if (phase === 'storm' && now >= state.stormAt + STORM_DURATION_MS) {
+    if (phase === 'storm' && now >= state.stormAt + state.stormDuration) {
       phase = 'playing';
-      set({ stormAt: now + STORM_INTERVAL_MS });
+      set({ stormAt: now + state.stormInterval });
     }
 
     set({
@@ -295,7 +530,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       phase,
     });
 
-    const desiredCount = phase === 'storm' ? MAX_BUBBLES + MAX_STORM_ORBS : MAX_BUBBLES;
+    const desiredCount = phase === 'storm' ? state.maxBubbles + state.maxStormOrbs : state.maxBubbles;
     if (updatedBubbles.length < desiredCount) {
       get().spawnBubbles(desiredCount - updatedBubbles.length);
     }
@@ -303,30 +538,35 @@ export const useGameStore = create<GameStore>((set, get) => ({
   spawnBubbles: (count = 1) => {
     const state = get();
     if (state.phase === 'summary') return;
-    const { rng, width, height, now } = state;
+    const { rng, width, height, now, palette, bubbleSpeedFactor, maxBubbles, maxStormOrbs } = state;
     const next: Bubble[] = [];
     for (let index = 0; index < count; index += 1) {
-      next.push(createBubble(rng, width, height, now));
+      next.push(createBubble(rng, width, height, now, palette, bubbleSpeedFactor));
     }
-    set({ bubbles: [...state.bubbles, ...next].slice(0, MAX_BUBBLES + MAX_STORM_ORBS) });
+    set({ bubbles: [...state.bubbles, ...next].slice(0, maxBubbles + maxStormOrbs) });
   },
   spawnStormOrbs: () => {
     const state = get();
     if (state.phase !== 'storm') return;
-    const { rng, width, height, now } = state;
+    const { rng, width, height, now, bubbleSpeedFactor, maxBubbles, maxStormOrbs, palette } = state;
     const payload: Bubble[] = [];
     const energyCount = 3 + Math.floor(rng() * 3);
     const drainCount = 2 + Math.floor(rng() * 2);
     for (let i = 0; i < energyCount; i += 1) {
-      payload.push(createBubble(rng, width, height, now, { storm: true, energy: true }));
+      payload.push(createBubble(rng, width, height, now, palette, bubbleSpeedFactor, { storm: true, energy: true }));
     }
     for (let i = 0; i < drainCount; i += 1) {
-      payload.push(createBubble(rng, width, height, now, { storm: true, poison: true }));
+      payload.push(createBubble(rng, width, height, now, palette, bubbleSpeedFactor, { storm: true, poison: true }));
     }
-    set({ bubbles: [...state.bubbles, ...payload].slice(0, MAX_BUBBLES + MAX_STORM_ORBS) });
+    set({ bubbles: [...state.bubbles, ...payload].slice(0, maxBubbles + maxStormOrbs) });
   },
   tap: (x, y) => {
     const state = get();
+    const now = state.now;
+    if (now - state.lastTapAt < 10 && Math.abs(x - state.lastTapX) < 6 && Math.abs(y - state.lastTapY) < 6) {
+      return { hit: false };
+    }
+
     let hitIndex = -1;
     for (let index = state.bubbles.length - 1; index >= 0; index -= 1) {
       const bubble = state.bubbles[index];
@@ -342,7 +582,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const bestStreak = Math.max(state.stats.streak, state.currentStreak);
       const stats = { ...state.stats, chainLen: 0, lastColor: undefined, streak: bestStreak };
       stats.timeLeft = Math.max(0, stats.timeLeft - WRONG_TAP_PENALTY);
-      set({ stats, comboWindowUntil: 0, currentStreak: 0 });
+      set({
+        stats,
+        comboWindowUntil: 0,
+        currentStreak: 0,
+        lastTapAt: now,
+        lastTapX: x,
+        lastTapY: y,
+      });
       return { hit: false };
     }
 
@@ -353,6 +600,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     let energy = false;
     let drain = false;
     let currentStreak = state.currentStreak;
+    let lastComboFrame = state.lastComboFrame;
+    let timeGainWindowStart = state.timeGainWindowStart;
+    let timeGainAccumulated = state.timeGainAccumulated;
+
+    if (now - timeGainWindowStart >= 1000) {
+      timeGainWindowStart = now;
+      timeGainAccumulated = 0;
+    }
 
     if (isDrainOrb(target)) {
       stats.timeLeft = Math.max(0, stats.timeLeft - DRAIN_PENALTY_TIME);
@@ -366,11 +621,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     } else {
       currentStreak = state.currentStreak + 1;
       stats.streak = Math.max(stats.streak, currentStreak);
-      const sameColor = stats.lastColor === target.color && state.now <= state.comboWindowUntil;
+      const sameColor = stats.lastColor === target.color && now <= state.comboWindowUntil;
       const chainLen = sameColor ? stats.chainLen + 1 : 1;
       stats.chainLen = chainLen;
       stats.lastColor = target.color;
-      comboWindowUntil = state.now + COMBO_WINDOW_MS;
+      comboWindowUntil = now + COMBO_WINDOW_MS;
 
       if (isEnergyOrb(target)) {
         stats.score += ENERGY_POINTS;
@@ -379,17 +634,32 @@ export const useGameStore = create<GameStore>((set, get) => ({
         const multiplier = Math.min(1 + 0.25 * Math.max(chainLen - 2, 0), 4);
         const awarded = Math.round(BASE_POINTS * multiplier);
         stats.score += awarded;
-        stats.timeLeft += BASE_TIME_REWARD;
-        if (chainLen >= 3) {
+        const availableGain = Math.max(0, 1 - timeGainAccumulated);
+        const appliedGain = Math.min(BASE_TIME_REWARD, availableGain);
+        stats.timeLeft += appliedGain;
+        timeGainAccumulated += appliedGain;
+        if (chainLen >= 3 && now - lastComboFrame > 16) {
           stats.bestCombo = Math.max(stats.bestCombo, chainLen);
           get().progressCombo(chainLen);
+          lastComboFrame = now;
         }
         get().progressColor(target.color);
       }
     }
 
     if (stats.timeLeft < 0) stats.timeLeft = 0;
-    set({ stats, bubbles: remaining, comboWindowUntil, currentStreak });
+    set({
+      stats,
+      bubbles: remaining,
+      comboWindowUntil,
+      currentStreak,
+      lastTapAt: now,
+      lastTapX: x,
+      lastTapY: y,
+      lastComboFrame,
+      timeGainWindowStart,
+      timeGainAccumulated,
+    });
 
     if (energy) {
       get().grantBooster(1, 'energy');
@@ -417,6 +687,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({ boosterBank: bank });
     }
   },
+  grantOrbOnPaidEntry: () => {
+    get().grantBooster(1, 'paid');
+  },
   consumeBooster: () => {
     const state = get();
     if (state.boosterBank.freeOrbs <= 0) {
@@ -437,25 +710,93 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ slowTimeUntil: until });
   },
   loadDaily: (seed = 'rubble-daily') => {
-    const date = new Date();
-    const utcYear = date.getUTCFullYear();
-    const utcMonth = date.getUTCMonth() + 1;
-    const utcDay = date.getUTCDate();
-    const key = `${utcYear.toString().padStart(4, '0')}-${utcMonth.toString().padStart(2, '0')}-${utcDay
-      .toString()
-      .padStart(2, '0')}`;
+    const key = getDailyKeyUTC();
     let missions = readPersistedMissions(key);
     if (!missions) {
       missions = generateDailyMissions(seed, key);
       persistMissions(key, missions);
     }
-    set({ missions, dailyKey: key });
+    const computedSeed =
+      typeof seed === 'number'
+        ? seed
+        : typeof seed === 'string'
+        ? seedFromDailyKey(seed)
+        : seedFromDailyKey(key);
+    const tuning = deriveDailyTuning(computedSeed);
+    const runCount = readDailyRunCount(key);
+    const patch: Partial<GameStore> = {
+      missions,
+      dailyKey: key,
+      dailyRunCount: runCount,
+      dailyTuning: tuning,
+    };
+    if (get().boardKind === 'daily') {
+      patch.palette = tuning.colors.length > 0 ? tuning.colors : DEFAULT_PALETTE;
+      patch.stormInterval = tuning.stormEvery || BASE_STORM_INTERVAL_MS;
+      patch.stormDuration = tuning.stormDuration || BASE_STORM_DURATION_MS;
+      patch.maxBubbles = Math.max(24, Math.round(BASE_MAX_BUBBLES * tuning.spawn.density));
+      patch.maxStormOrbs = Math.max(6, Math.round(BASE_MAX_STORM_ORBS * tuning.spawn.density));
+      patch.bubbleSpeedFactor = tuning.spawn.speedFactor || BASE_SPEED_FACTOR;
+      patch.stormAt = patch.stormInterval;
+      patch.officialDailyEligible = isDailyEligible(runCount);
+    }
+    set(patch);
     const bank = get().boosterBank;
     if (bank.lastDailyKey !== key) {
       const refreshed = { ...bank, freeOrbs: bank.freeOrbs, lastDailyKey: key };
       persistBooster(refreshed);
       set({ boosterBank: refreshed });
     }
+  },
+  setBoardKind: (board) => {
+    const state = get();
+    if (state.boardKind === board) {
+      return;
+    }
+    let palette = DEFAULT_PALETTE;
+    let stormInterval = BASE_STORM_INTERVAL_MS;
+    let stormDuration = BASE_STORM_DURATION_MS;
+    let maxBubbles = BASE_MAX_BUBBLES;
+    let maxStormOrbs = BASE_MAX_STORM_ORBS;
+    let bubbleSpeedFactor = BASE_SPEED_FACTOR;
+    let officialDailyEligible = false;
+    let dailyRunCount = state.dailyRunCount;
+    if (board === 'daily') {
+      const key = state.dailyKey || getDailyKeyUTC();
+      const tuning = state.dailyTuning ?? deriveDailyTuning(seedFromDailyKey(key));
+      palette = tuning.colors.length > 0 ? tuning.colors : DEFAULT_PALETTE;
+      stormInterval = tuning.stormEvery || BASE_STORM_INTERVAL_MS;
+      stormDuration = tuning.stormDuration || BASE_STORM_DURATION_MS;
+      maxBubbles = Math.max(24, Math.round(BASE_MAX_BUBBLES * tuning.spawn.density));
+      maxStormOrbs = Math.max(6, Math.round(BASE_MAX_STORM_ORBS * tuning.spawn.density));
+      bubbleSpeedFactor = tuning.spawn.speedFactor || BASE_SPEED_FACTOR;
+      dailyRunCount = readDailyRunCount(key);
+      officialDailyEligible = isDailyEligible(dailyRunCount);
+    }
+    set({
+      boardKind: board,
+      palette,
+      stormInterval,
+      stormDuration,
+      maxBubbles,
+      maxStormOrbs,
+      bubbleSpeedFactor,
+      stormAt: stormInterval,
+      officialDailyEligible: board === 'daily' ? officialDailyEligible : false,
+      dailyRunCount,
+    });
+  },
+  setSettings: (patch) => {
+    set((state) => {
+      const next: GameSettings = {
+        haptics: patch.haptics ?? state.settings.haptics,
+        reducedMotion: patch.reducedMotion ?? state.settings.reducedMotion,
+        sfx: patch.sfx ?? state.settings.sfx,
+        leftHanded: patch.leftHanded ?? state.settings.leftHanded,
+      };
+      persistSettings(next);
+      return { settings: next };
+    });
   },
   setStageSize: (width, height) => {
     set({ width, height });

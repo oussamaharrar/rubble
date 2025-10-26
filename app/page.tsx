@@ -2,13 +2,13 @@ import type { Metadata } from 'next';
 import HomeContent from '@/components/HomeContent';
 
 const description =
-  'Race Base storms, build color combo chains, and bank booster orbs in the Rubble Rush time attack.';
+  'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
 
 export const metadata: Metadata = {
-  title: 'Rubble Rush — Storm & Combos',
+  title: 'Rubble Rush — Daily Storm Challenge',
   description,
   openGraph: {
-    title: 'Rubble Rush — Storm & Combos',
+    title: 'Rubble Rush — Daily Storm Challenge',
     description,
     url: '/',
     type: 'website',
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Rubble Rush — Storm & Combos',
+    title: 'Rubble Rush — Daily Storm Challenge',
     description,
     images: ['/game-icons/og.png'],
   },
@@ -29,6 +29,18 @@ export const metadata: Metadata = {
   },
 };
 
-export default function Page() {
-  return <HomeContent />;
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function Page({ searchParams }: PageProps) {
+  const resolvedParams: Record<string, string | string[] | undefined> = await (searchParams ?? {});
+  const rawScore = resolvedParams.score;
+  const parsedScore = Array.isArray(rawScore) ? parseInt(rawScore[0] ?? '', 10) : parseInt(rawScore ?? '', 10);
+  const shareScore = Number.isFinite(parsedScore) ? parsedScore : undefined;
+  const rawBoard = resolvedParams.board;
+  const boardParam = Array.isArray(rawBoard) ? rawBoard[0] : rawBoard;
+  const shareBoard = boardParam === 'daily' ? 'daily' : 'normal';
+
+  return <HomeContent shareScore={shareScore} shareBoard={shareBoard} />;
 }

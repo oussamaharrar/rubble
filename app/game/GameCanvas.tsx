@@ -38,11 +38,29 @@ export default function GameCanvas() {
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
+  const settings = useGameStore((state) => state.settings);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    prefersReducedMotion.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  }, []);
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => {
+      prefersReducedMotion.current = settings.reducedMotion || media.matches;
+    };
+    update();
+    const handler = () => update();
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', handler);
+    } else {
+      media.addListener(handler);
+    }
+    return () => {
+      if (typeof media.removeEventListener === 'function') {
+        media.removeEventListener('change', handler);
+      } else {
+        media.removeListener(handler);
+      }
+    };
+  }, [settings.reducedMotion]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -195,12 +213,28 @@ export default function GameCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const allowHaptics = settings.haptics && !settings.reducedMotion;
     const handlePointer = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
       const ratio = canvas.width / rect.width;
       const x = (event.clientX - rect.left) * ratio;
       const y = (event.clientY - rect.top) * ratio;
       const result = useGameStore.getState().tap(x, y);
+      if (!result.hit) {
+        if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(25);
+        }
+        return;
+      }
+      if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        if (result.drain) {
+          navigator.vibrate(25);
+        } else if (result.energy || (result.combo ?? 0) >= 3) {
+          navigator.vibrate([5, 10, 5]);
+        } else {
+          navigator.vibrate(8);
+        }
+      }
       if (result.hit) {
         const color = result.energy ? 'rgba(56,189,248,0.6)' : result.drain ? 'rgba(248,113,113,0.6)' : 'rgba(255,255,255,0.35)';
         particlesRef.current.unshift({
@@ -224,7 +258,7 @@ export default function GameCanvas() {
       canvas.removeEventListener('pointerdown', handlePointer);
       canvas.removeEventListener('pointermove', handleMove);
     };
-  }, []);
+  }, [settings.haptics, settings.reducedMotion]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
