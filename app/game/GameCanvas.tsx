@@ -58,8 +58,8 @@ export default function GameCanvas() {
   const ripplesRef = useRef<Ripple[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
-  const dprRef = useRef(1);
-  const sizeRef = useRef({ width: 0, height: 0 });
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const gameSizeRef = useRef({ w: 1, h: 1, dpr: 1 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
@@ -104,40 +104,68 @@ export default function GameCanvas() {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-    const ctx = canvas.getContext('2d');
+
+    const frameEl = container.closest('.frame-inner') as HTMLDivElement | null;
+    if (!frameEl) return;
+
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-      canvas.width = Math.max(1, Math.floor(width * dpr));
-      canvas.height = Math.max(1, Math.floor(height * dpr));
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      dprRef.current = dpr;
-      sizeRef.current = { width, height };
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      setStageSize(width, height);
-    });
-    observer.observe(container);
+    frameRef.current = frameEl;
 
-    let frameHandle: number;
+    const resizeCanvas = () => {
+      const box = frameEl.getBoundingClientRect();
+      const cssW = Math.max(1, Math.floor(box.width));
+      const cssH = Math.max(1, Math.floor(box.height));
+      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      gameSizeRef.current = { w: cssW, h: cssH, dpr };
+      setStageSize(cssW, cssH);
+    };
+
+    let resizeHandle = 0;
+    const requestResize = () => {
+      if (resizeHandle !== 0) return;
+      resizeHandle = window.requestAnimationFrame(() => {
+        resizeHandle = 0;
+        resizeCanvas();
+      });
+    };
+
+    resizeCanvas();
+
+    const observer = new ResizeObserver(() => {
+      requestResize();
+    });
+    observer.observe(frameEl);
+
+    const handleResize = () => requestResize();
+    window.addEventListener('resize', handleResize, { passive: true });
+    window.addEventListener('orientationchange', handleResize, { passive: true });
+
+    let frameHandle = 0;
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
-      const measuredWidth = sizeRef.current.width || state.width || canvas.clientWidth || 0;
-      const measuredHeight = sizeRef.current.height || state.height || canvas.clientHeight || 0;
-      const dpr = dprRef.current;
+      const { w: storedWidth, h: storedHeight, dpr } = gameSizeRef.current;
+      const cssWidth = storedWidth || state.width || canvas.clientWidth || 0;
+      const cssHeight = storedHeight || state.height || canvas.clientHeight || 0;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, measuredWidth, measuredHeight);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
 
       const comboIntensity = Math.min(stats.chainLen / 10, 1);
       const playingPhase = phase === 'playing' || phase === 'storm';
-      const gradient = ctx.createLinearGradient(0, 0, 0, measuredHeight);
+      const gradient = ctx.createLinearGradient(0, 0, 0, cssHeight);
       const topAlpha = playingPhase ? 0.72 : 0.85;
       const bottomAlpha = playingPhase ? 0.88 : 0.94;
       const themeActive = state.settings.theme === 'soothing-skies' && state.unlocks.themeSkies;
@@ -153,23 +181,23 @@ export default function GameCanvas() {
         gradient.addColorStop(1, `rgba(10,13,23,${bottomAlpha})`);
       }
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+      ctx.fillRect(0, 0, cssWidth, cssHeight);
 
       const slowFactor = now < slowTimeUntil ? Math.cos((now / 180) % Math.PI) : 0;
       if (slowFactor > 0) {
-        const maxDim = Math.max(measuredWidth, measuredHeight);
+        const maxDim = Math.max(cssWidth, cssHeight);
         const vignette = ctx.createRadialGradient(
-          measuredWidth / 2,
-          measuredHeight / 2,
+          cssWidth / 2,
+          cssHeight / 2,
           maxDim * 0.15,
-          measuredWidth / 2,
-          measuredHeight / 2,
+          cssWidth / 2,
+          cssHeight / 2,
           maxDim * 0.65
         );
         vignette.addColorStop(0, 'rgba(56,189,248,0.12)');
         vignette.addColorStop(1, 'rgba(15,23,42,0.65)');
         ctx.fillStyle = vignette;
-        ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+        ctx.fillRect(0, 0, cssWidth, cssHeight);
       }
 
       if (!prefersReducedMotion.current) {
@@ -178,8 +206,8 @@ export default function GameCanvas() {
         for (const dot of dots) {
           const offsetX = Math.sin(now / 16000 + dot.phase) * dot.depth * 36;
           const offsetY = Math.cos(now / 18000 + dot.phase) * dot.depth * 42;
-          const x = dot.x * measuredWidth + offsetX;
-          const y = dot.y * measuredHeight + offsetY;
+          const x = dot.x * cssWidth + offsetX;
+          const y = dot.y * cssHeight + offsetY;
           ctx.beginPath();
           ctx.fillStyle = dotColor;
           ctx.globalAlpha = 0.45;
@@ -414,6 +442,11 @@ export default function GameCanvas() {
     return () => {
       observer.disconnect();
       window.cancelAnimationFrame(frameHandle);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      if (resizeHandle !== 0) {
+        window.cancelAnimationFrame(resizeHandle);
+      }
     };
   }, [setStageSize]);
 
@@ -423,7 +456,11 @@ export default function GameCanvas() {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const { w, h, dpr } = gameSizeRef.current;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, w || canvas.width, h || canvas.height);
     }
   }, [phase]);
 
@@ -713,7 +750,11 @@ export default function GameCanvas() {
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
-      <canvas ref={canvasRef} className="h-full w-full touch-none" />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 block touch-none"
+        style={{ width: '100%', height: '100%' }}
+      />
     </div>
   );
 }
