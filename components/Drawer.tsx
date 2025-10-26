@@ -305,7 +305,7 @@ export default function Drawer({ open, view, onClose, onSelect, highlight, lifet
                   </button>
                 ))}
               </div>
-              <div className="mt-5 h-[calc(100%-88px)] overflow-y-auto pr-1">
+              <div className="drawer-content mt-5 h-[calc(100%-88px)] overflow-y-auto pr-1">
                 {view === 'missions' ? <MissionsView /> : null}
                 {view === 'shop' ? <ShopView /> : null}
                 {view === 'leaderboard' ? <LeaderboardView highlight={highlight} /> : null}
