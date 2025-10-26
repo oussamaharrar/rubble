@@ -61,7 +61,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const bottomAlign = leftHanded ? 'items-start' : 'items-end';
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between p-4">
+    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between p-4">
       <div className={clsx('flex justify-between gap-3', layoutDirection)}>
         <div className={clsx('pointer-events-auto flex flex-col gap-1.5', infoAlign)}>
           <motion.div

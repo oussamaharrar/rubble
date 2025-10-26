@@ -58,8 +58,8 @@ export default function GameCanvas() {
   const ripplesRef = useRef<Ripple[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
-  const dprRef = useRef(1);
-  const sizeRef = useRef({ width: 0, height: 0 });
+  const frameRef = useRef<HTMLElement | null>(null);
+  const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
@@ -104,35 +104,80 @@ export default function GameCanvas() {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-      canvas.width = Math.max(1, Math.floor(width * dpr));
-      canvas.height = Math.max(1, Math.floor(height * dpr));
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      dprRef.current = dpr;
-      sizeRef.current = { width, height };
+    const frameElement = container.closest('.frame-inner') as HTMLElement | null;
+    frameRef.current = frameElement ?? container;
+
+    let resizeRaf: number | null = null;
+    const resizeCanvas = () => {
+      const frame = frameRef.current;
+      if (!frame) return;
+      const box = frame.getBoundingClientRect();
+      const cssW = Math.max(1, Math.floor(box.width));
+      const cssH = Math.max(1, Math.floor(box.height));
+      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      setStageSize(width, height);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, cssW, cssH);
+
+      gameSizeRef.current = { w: cssW, h: cssH, dpr };
+      setStageSize(cssW, cssH);
+    };
+
+    const requestResize = () => {
+      if (resizeRaf !== null) {
+        return;
+      }
+      resizeRaf = window.requestAnimationFrame(() => {
+        resizeRaf = null;
+        resizeCanvas();
+      });
+    };
+
+    const observer = new ResizeObserver(() => {
+      requestResize();
     });
-    observer.observe(container);
+    if (frameRef.current) {
+      observer.observe(frameRef.current);
+    }
+
+    resizeCanvas();
+
+    const handleWindowResize: EventListener = () => {
+      requestResize();
+    };
+
+    window.addEventListener('resize', handleWindowResize, { passive: true });
+    window.addEventListener('orientationchange', handleWindowResize, { passive: true });
+    window.addEventListener('rubble:vh-resize', handleWindowResize);
 
     let frameHandle: number;
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
-      const measuredWidth = sizeRef.current.width || state.width || canvas.clientWidth || 0;
-      const measuredHeight = sizeRef.current.height || state.height || canvas.clientHeight || 0;
-      const dpr = dprRef.current;
+      const { w: cssW, h: cssH, dpr } = gameSizeRef.current;
+      const measuredWidth = cssW || state.width || canvas.clientWidth || 0;
+      const measuredHeight = cssH || state.height || canvas.clientHeight || 0;
+      const effectiveDpr = dpr || 1;
+
+      if (measuredWidth <= 0 || measuredHeight <= 0) {
+        return;
+      }
+
       ctx.save();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.setTransform(effectiveDpr, 0, 0, effectiveDpr, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
       ctx.clearRect(0, 0, measuredWidth, measuredHeight);
 
       const comboIntensity = Math.min(stats.chainLen / 10, 1);
@@ -174,7 +219,7 @@ export default function GameCanvas() {
 
       if (!prefersReducedMotion.current) {
         const dots = ambientDotsRef.current;
-        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.07)';
+        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.08)';
         for (const dot of dots) {
           const offsetX = Math.sin(now / 16000 + dot.phase) * dot.depth * 36;
           const offsetY = Math.cos(now / 18000 + dot.phase) * dot.depth * 42;
@@ -182,7 +227,7 @@ export default function GameCanvas() {
           const y = dot.y * measuredHeight + offsetY;
           ctx.beginPath();
           ctx.fillStyle = dotColor;
-          ctx.globalAlpha = 0.45;
+          ctx.globalAlpha = Math.min(0.08, 0.035 + dot.depth * 0.03);
           ctx.arc(x, y, dot.radius * (0.7 + comboIntensity * 0.25), 0, Math.PI * 2);
           ctx.fill();
           ctx.globalAlpha = 1;
@@ -414,6 +459,12 @@ export default function GameCanvas() {
     return () => {
       observer.disconnect();
       window.cancelAnimationFrame(frameHandle);
+      if (resizeRaf !== null) {
+        window.cancelAnimationFrame(resizeRaf);
+      }
+      window.removeEventListener('resize', handleWindowResize);
+      window.removeEventListener('orientationchange', handleWindowResize);
+      window.removeEventListener('rubble:vh-resize', handleWindowResize);
     };
   }, [setStageSize]);
 
@@ -421,9 +472,16 @@ export default function GameCanvas() {
     if (phase === 'home') {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { alpha: true });
       if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const { w, h, dpr } = gameSizeRef.current;
+      const effectiveDpr = dpr || 1;
+      const cssWidth = w || canvas.clientWidth || Math.floor(canvas.width / effectiveDpr) || 0;
+      const cssHeight = h || canvas.clientHeight || Math.floor(canvas.height / effectiveDpr) || 0;
+      ctx.save();
+      ctx.setTransform(effectiveDpr, 0, 0, effectiveDpr, 0, 0);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+      ctx.restore();
     }
   }, [phase]);
 
@@ -712,8 +770,12 @@ export default function GameCanvas() {
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
-      <canvas ref={canvasRef} className="h-full w-full touch-none" />
+    <div ref={containerRef} className="pointer-events-auto relative h-full w-full overflow-hidden">
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 block touch-none"
+        style={{ width: '100%', height: '100%' }}
+      />
     </div>
   );
 }
