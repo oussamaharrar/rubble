@@ -268,6 +268,8 @@ type GameStore = {
   resumeRun: () => void;
   pause: () => void;
   resume: () => void;
+  beginGameplay: () => void;
+  setPhase: (phase: GamePhase) => void;
   tick: (dt: number) => void;
   spawnBubbles: (count?: number) => void;
   spawnStormOrbs: () => void;
@@ -299,7 +301,7 @@ type GameStore = {
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
-  phase: 'start',
+  phase: 'home',
   boardKind: 'normal',
   stats: defaultStats(),
   entryMode: null,
@@ -376,7 +378,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     set({
-      phase: 'playing',
+      phase: 'intro',
       stats: { ...defaultStats(), timeLeft: 60, entryMode: mode },
       entryMode: mode,
       bubbles: [],
@@ -413,6 +415,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
       timeGainAccumulated: 0,
     });
     get().spawnBubbles(Math.floor(maxBubbles / 2));
+  },
+  beginGameplay: () => {
+    const state = get();
+    if (state.phase !== 'intro') {
+      return;
+    }
+    set({ phase: 'playing', startedAt: performance.now() });
   },
   endRun: () => {
     const state = get();
@@ -459,7 +468,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       bubbleSpeedFactor = tuning.spawn.speedFactor || BASE_SPEED_FACTOR;
     }
     set({
-      phase: 'start',
+      phase: 'home',
       stats: defaultStats(),
       entryMode: null,
       bubbles: [],
@@ -508,6 +517,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
   resume: () => {
     get().resumeRun();
+  },
+  setPhase: (phase) => {
+    set({ phase });
   },
   tick: (dt) => {
     const state = get();
