@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
 
@@ -62,6 +62,7 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
+  const [diagnostics, setDiagnostics] = useState({ width: 0, height: 0, dpr: 1, bubbles: 0 });
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -110,9 +111,9 @@ export default function GameCanvas() {
 
     const resizeCanvas = () => {
       const box = frameEl.getBoundingClientRect();
-      const cssW = Math.max(1, Math.floor(box.width));
-      const cssH = Math.max(1, Math.floor(box.height));
-      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+      const cssW = Math.max(1, Math.round(box.width));
+      const cssH = Math.max(1, Math.round(box.height));
+      const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
 
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
@@ -121,6 +122,11 @@ export default function GameCanvas() {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
+      setDiagnostics((prev) =>
+        prev.width === cssW && prev.height === cssH && prev.dpr === dpr
+          ? prev
+          : { ...prev, width: cssW, height: cssH, dpr }
+      );
       setStageSize(cssW, cssH);
     };
 
@@ -140,6 +146,8 @@ export default function GameCanvas() {
     const handleViewportResize = () => scheduleResize();
     window.addEventListener('resize', handleViewportResize, { passive: true });
     window.addEventListener('orientationchange', handleViewportResize, { passive: true });
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', handleViewportResize);
 
     const root = document.getElementById('rubble-root');
     const mutationObserver = root
@@ -158,6 +166,8 @@ export default function GameCanvas() {
       const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
       const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
       const dpr = size.dpr || 1;
+      const bubbleCount = bubbles.length;
+      setDiagnostics((prev) => (prev.bubbles === bubbleCount ? prev : { ...prev, bubbles: bubbleCount }));
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalAlpha = 1;
@@ -451,6 +461,7 @@ export default function GameCanvas() {
       }
       window.removeEventListener('resize', handleViewportResize);
       window.removeEventListener('orientationchange', handleViewportResize);
+      viewport?.removeEventListener('resize', handleViewportResize);
       window.cancelAnimationFrame(frameHandle);
     };
   }, [setStageSize]);
@@ -758,12 +769,14 @@ export default function GameCanvas() {
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
-    <div ref={frameRef} className="relative h-full w-full overflow-hidden rounded-3xl">
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 block touch-none"
-        style={{ width: '100%', height: '100%' }}
-      />
+    <div ref={frameRef} className="app-frame__inner overflow-hidden rounded-3xl bg-slate-950/40">
+      <canvas ref={canvasRef} className="app-canvas" />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-2 left-2 z-[99] rounded-md bg-black/60 px-2 py-1 text-[10px] font-mono text-emerald-300 shadow-lg shadow-black/40"
+      >
+        w:{Math.round(diagnostics.width)} h:{Math.round(diagnostics.height)} DPR:{diagnostics.dpr.toFixed(2)} bubbles:{diagnostics.bubbles}
+      </div>
     </div>
   );
 }
