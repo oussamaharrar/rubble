@@ -281,10 +281,7 @@ export default function Drawer({ open, view, onClose, onSelect, highlight, lifet
             exit={{ y: 40 }}
             transition={{ type: 'spring', stiffness: 220, damping: 26 }}
           >
-            <div
-              className="relative w-full overflow-hidden rounded-3xl border border-white/10 bg-slate-900/95 p-5 text-slate-100 shadow-2xl shadow-black/60"
-              style={{ height: '70%' }}
-            >
+            <div className="drawer-panel relative flex w-full flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-900/95 p-5 text-slate-100 shadow-2xl shadow-black/60">
               <div className="mx-auto mb-4 flex w-full max-w-[260px] items-center justify-center">
                 <span className="h-1.5 w-20 rounded-full bg-white/15" aria-hidden />
               </div>
@@ -305,7 +302,7 @@ export default function Drawer({ open, view, onClose, onSelect, highlight, lifet
                   </button>
                 ))}
               </div>
-              <div className="mt-5 h-[calc(100%-88px)] overflow-y-auto pr-1">
+              <div className="drawer-content mt-5 flex-1 pr-1">
                 {view === 'missions' ? <MissionsView /> : null}
                 {view === 'shop' ? <ShopView /> : null}
                 {view === 'leaderboard' ? <LeaderboardView highlight={highlight} /> : null}

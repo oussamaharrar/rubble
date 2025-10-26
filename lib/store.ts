@@ -14,6 +14,8 @@ import type {
   Mission,
   TargetState,
   RunStats,
+  BurstState,
+  GoldenOrbState,
 } from '@/types/game';
 
 const COMBO_WINDOW_MS = 5_000;
@@ -24,6 +26,12 @@ const DRAIN_PENALTY_TIME = 2;
 const DRAIN_PENALTY_SCORE = 15;
 const ENERGY_POINTS = 20;
 const SLOW_TIME_DURATION_MS = 5_000;
+const BURST_MAX_RADIUS = 240;
+const BURST_MIN_RADIUS_RATIO = 0.35;
+const BURST_OVERCHARGE_MULTIPLIER = 1.3;
+const BURST_SCORE_SCALE = 0.7;
+const GOLDEN_MIN_INTERVAL_MS = 20_000;
+const GOLDEN_MAX_INTERVAL_MS = 30_000;
 
 const BOOSTER_KEY = 'rubble:booster-bank';
 const SETTINGS_KEY = 'rubble_settings_v1';
@@ -211,6 +219,35 @@ function createBubble(
   };
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function spawnGoldenOrbState(
+  rng: () => number,
+  width: number,
+  height: number,
+  now: number,
+  previous: GoldenOrbState
+): GoldenOrbState {
+  const radius = previous.r;
+  const padding = Math.max(radius + 28, Math.min(width, height) * 0.1);
+  const spanX = Math.max(width - padding * 2, radius * 2);
+  const spanY = Math.max(height - padding * 2, radius * 2);
+  const x = clamp(padding + rng() * spanX, radius, width - radius);
+  const y = clamp(padding + rng() * spanY, radius, height - radius);
+  return {
+    active: true,
+    id: `golden-${now.toFixed(0)}-${Math.floor(rng() * 10_000)}`,
+    spawnedAt: now,
+    graceMs: previous.graceMs,
+    x,
+    y,
+    r: radius,
+    toxic: false,
+  };
+}
+
 function isEnergyOrb(bubble: Bubble) {
   return bubble.storm && !bubble.poison;
 }
@@ -261,6 +298,10 @@ type GameStore = {
   lastComboFrame: number;
   timeGainWindowStart: number;
   timeGainAccumulated: number;
+  burst: BurstState;
+  golden: GoldenOrbState;
+  lastGoldenSpawnAt: number;
+  nextGoldenDelay: number;
   startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
@@ -285,6 +326,11 @@ type GameStore = {
     targetHit?: boolean;
     radius?: number;
     color?: BubbleColor;
+    golden?: boolean;
+    toxic?: boolean;
+    burst?: boolean;
+    timeDelta?: number;
+    scoreDelta?: number;
   };
   grantBooster: (count: number, source?: 'energy' | 'paid' | 'mission' | 'other') => void;
   grantOrbOnPaidEntry: () => void;
@@ -298,6 +344,36 @@ type GameStore = {
   progressCombo: (combo: number) => void;
   progressSurvival: (seconds: number) => void;
   activateSlowTime: (durationMs: number) => void;
+  beginBurstCharge: (x: number, y: number) => void;
+  cancelBurstCharge: () => void;
+  fireBurst: (
+    x: number,
+    y: number
+  ) => {
+    fired: boolean;
+    radius: number;
+    holdMs: number;
+    popped: string[];
+    energyHits: number;
+    drainHits: number;
+    targetHit: boolean;
+    overcharged: boolean;
+    scoreGain: number;
+    timeDelta: number;
+  };
+  toggleBurstOvercharge: () => void;
+  spawnGoldenOrb: () => void;
+  updateGoldenOrb: (now?: number) => void;
+  hitGoldenOrb: (
+    x: number,
+    y: number
+  ) => {
+    hit: boolean;
+    golden?: boolean;
+    toxic?: boolean;
+    scoreDelta?: number;
+    timeDelta?: number;
+  };
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -342,6 +418,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
   lastComboFrame: -Infinity,
   timeGainWindowStart: 0,
   timeGainAccumulated: 0,
+  burst: {
+    readyAt: 0,
+    charging: false,
+    chargeStartAt: 0,
+    lastUseAt: 0,
+    cooldownMs: 12_000,
+    minHoldMs: 600,
+    maxHoldMs: 1_500,
+    overcharge: false,
+  },
+  golden: {
+    active: false,
+    spawnedAt: 0,
+    graceMs: 1_500,
+    x: 0,
+    y: 0,
+    r: 22,
+    toxic: false,
+  },
+  lastGoldenSpawnAt: 0,
+  nextGoldenDelay: GOLDEN_MIN_INTERVAL_MS,
   startRun: (mode = 'trial') => {
     const state = get();
     const board = state.boardKind;
@@ -376,6 +473,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       dailyRunCount = readDailyRunCount(dailyKey);
       officialDailyEligible = isDailyEligible(dailyRunCount);
     }
+
+    const nextGoldenDelay = GOLDEN_MIN_INTERVAL_MS + Math.random() * (GOLDEN_MAX_INTERVAL_MS - GOLDEN_MIN_INTERVAL_MS);
 
     set({
       phase: 'intro',
@@ -413,6 +512,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       lastComboFrame: -Infinity,
       timeGainWindowStart: 0,
       timeGainAccumulated: 0,
+      burst: {
+        ...state.burst,
+        readyAt: 0,
+        charging: false,
+        chargeStartAt: 0,
+        lastUseAt: 0,
+        overcharge: false,
+      },
+      golden: {
+        ...state.golden,
+        active: false,
+        spawnedAt: 0,
+        toxic: false,
+        x: 0,
+        y: 0,
+      },
+      lastGoldenSpawnAt: 0,
+      nextGoldenDelay,
     });
     get().spawnBubbles(Math.floor(maxBubbles / 2));
   },
@@ -495,6 +612,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       lastComboFrame: -Infinity,
       timeGainWindowStart: 0,
       timeGainAccumulated: 0,
+      burst: {
+        ...state.burst,
+        readyAt: 0,
+        charging: false,
+        chargeStartAt: 0,
+        lastUseAt: 0,
+        overcharge: false,
+      },
+      golden: {
+        ...state.golden,
+        active: false,
+        spawnedAt: 0,
+        toxic: false,
+        x: 0,
+        y: 0,
+      },
+      lastGoldenSpawnAt: 0,
+      nextGoldenDelay: GOLDEN_MIN_INTERVAL_MS + Math.random() * (GOLDEN_MAX_INTERVAL_MS - GOLDEN_MIN_INTERVAL_MS),
     });
   },
   pauseRun: () => {
@@ -537,6 +672,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
     let nextTargetAt = state.nextTargetAt;
     let celebrationUntil = state.targetCelebrationUntil;
     const perfectUntil = state.perfectUntil;
+    let burstState = state.burst;
+    let goldenState = state.golden;
+    let lastGoldenSpawnAt = state.lastGoldenSpawnAt;
+    let nextGoldenDelay = state.nextGoldenDelay;
 
     if (targetState.active && now >= targetState.expiresAt) {
       targetState = { ...targetState, active: false, expiresAt: 0 };
@@ -546,6 +685,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const color = randomColor(state.rng, state.palette);
       targetState = { color, active: true, expiresAt: now + 3_000 };
       nextTargetAt = now + 9_000 + state.rng() * 3_000;
+    }
+
+    if (goldenState.active) {
+      if (!goldenState.toxic && now >= goldenState.spawnedAt + goldenState.graceMs) {
+        goldenState = { ...goldenState, toxic: true };
+      }
+    } else if (
+      now - lastGoldenSpawnAt >= nextGoldenDelay &&
+      width > 0 &&
+      height > 0
+    ) {
+      goldenState = spawnGoldenOrbState(state.rng, width, height, now, goldenState);
+      lastGoldenSpawnAt = now;
+      nextGoldenDelay = GOLDEN_MIN_INTERVAL_MS + state.rng() * (GOLDEN_MAX_INTERVAL_MS - GOLDEN_MIN_INTERVAL_MS);
     }
 
     const updatedBubbles: Bubble[] = [];
@@ -593,6 +746,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       celebrationUntil = Math.min(celebrationUntil, now);
     }
 
+    if (phase === 'summary' && goldenState.active) {
+      goldenState = { ...goldenState, active: false, toxic: false };
+    }
+
+    if (burstState.charging && phase !== 'playing' && phase !== 'storm') {
+      burstState = { ...burstState, charging: false, chargeStartAt: 0 };
+    }
+
     set({
       bubbles: updatedBubbles,
       stats,
@@ -602,6 +763,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       nextTargetAt,
       targetCelebrationUntil: celebrationUntil,
       perfectUntil,
+      golden: goldenState,
+      lastGoldenSpawnAt,
+      nextGoldenDelay,
+      burst: burstState,
     });
 
     const desiredCount = phase === 'storm' ? state.maxBubbles + state.maxStormOrbs : state.maxBubbles;
@@ -637,6 +802,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
   tap: (x, y) => {
     const state = get();
     const now = state.now;
+    if (state.golden.active) {
+      const dxGolden = x - state.golden.x;
+      const dyGolden = y - state.golden.y;
+      if (dxGolden * dxGolden + dyGolden * dyGolden <= state.golden.r * state.golden.r) {
+        return get().hitGoldenOrb(x, y);
+      }
+    }
     let targetState = state.target;
     let nextTargetAt = state.nextTargetAt;
     let celebrationUntil = state.targetCelebrationUntil;
@@ -832,6 +1004,345 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     const until = Math.max(state.slowTimeUntil, state.now) + durationMs;
     set({ slowTimeUntil: until });
+  },
+  beginBurstCharge: (_x, _y) => {
+    const state = get();
+    if (state.burst.charging) return;
+    if (state.phase !== 'playing' && state.phase !== 'storm') {
+      return;
+    }
+    if (state.now < state.burst.readyAt) {
+      return;
+    }
+    set({ burst: { ...state.burst, charging: true, chargeStartAt: state.now } });
+  },
+  cancelBurstCharge: () => {
+    const state = get();
+    if (!state.burst.charging) return;
+    set({ burst: { ...state.burst, charging: false, chargeStartAt: 0 } });
+  },
+  fireBurst: (x, y) => {
+    const state = get();
+    const burst = state.burst;
+    const now = state.now;
+    if (!burst.charging) {
+      return {
+        fired: false,
+        radius: 0,
+        holdMs: 0,
+        popped: [],
+        energyHits: 0,
+        drainHits: 0,
+        targetHit: false,
+        overcharged: false,
+        scoreGain: 0,
+        timeDelta: 0,
+      };
+    }
+    const holdMs = Math.max(0, now - burst.chargeStartAt);
+    if (holdMs < burst.minHoldMs || now < burst.readyAt) {
+      set({ burst: { ...burst, charging: false, chargeStartAt: 0 } });
+      return {
+        fired: false,
+        radius: 0,
+        holdMs,
+        popped: [],
+        energyHits: 0,
+        drainHits: 0,
+        targetHit: false,
+        overcharged: false,
+        scoreGain: 0,
+        timeDelta: 0,
+      };
+    }
+
+    const ratio = clamp(holdMs / burst.maxHoldMs, BURST_MIN_RADIUS_RATIO, 1);
+    const baseRadius = BURST_MAX_RADIUS * ratio;
+    const overchargeReady = burst.overcharge && state.boosterBank.freeOrbs > 0;
+    const radius = overchargeReady ? baseRadius * BURST_OVERCHARGE_MULTIPLIER : baseRadius;
+
+    const popped: Bubble[] = [];
+    const survivors: Bubble[] = [];
+    const colorOrder: BubbleColor[] = [];
+    const colorGroups = new Map<BubbleColor, Bubble[]>();
+    let drainHits = 0;
+
+    for (const bubble of state.bubbles) {
+      const dx = bubble.x - x;
+      const dy = bubble.y - y;
+      if (dx * dx + dy * dy <= radius * radius) {
+        popped.push(bubble);
+        if (!isDrainOrb(bubble)) {
+          if (!colorGroups.has(bubble.color)) {
+            colorGroups.set(bubble.color, []);
+            colorOrder.push(bubble.color);
+          }
+          colorGroups.get(bubble.color)!.push(bubble);
+        } else {
+          drainHits += 1;
+        }
+      } else {
+        survivors.push(bubble);
+      }
+    }
+
+    const poppedIds = popped.map((bubble) => bubble.id);
+    const consumedOvercharge = overchargeReady && popped.length > 0;
+    let boosterBank = state.boosterBank;
+    if (consumedOvercharge) {
+      boosterBank = { ...boosterBank, freeOrbs: Math.max(0, boosterBank.freeOrbs - 1) };
+      persistBooster(boosterBank);
+    }
+
+    const stats: RunStats = { ...state.stats };
+    let comboWindowUntil = state.comboWindowUntil;
+    let currentStreak = state.currentStreak;
+    let lastComboFrame = state.lastComboFrame;
+    let timeGainWindowStart = state.timeGainWindowStart;
+    let timeGainAccumulated = state.timeGainAccumulated;
+    let targetState = state.target;
+    let nextTargetAt = state.nextTargetAt;
+    let celebrationUntil = state.targetCelebrationUntil;
+    const perfectUntil = state.perfectUntil;
+    let targetHit = false;
+    let scoreGain = 0;
+    let timeDelta = 0;
+
+    if (now - timeGainWindowStart >= 1000) {
+      timeGainWindowStart = now;
+      timeGainAccumulated = 0;
+    }
+
+    const activeTarget = Boolean(targetState.active && targetState.color && now <= targetState.expiresAt);
+
+    const drainBubbles = popped.filter((bubble) => isDrainOrb(bubble));
+    for (const _drain of drainBubbles) {
+      const prevTime = stats.timeLeft;
+      stats.timeLeft = Math.max(0, stats.timeLeft - DRAIN_PENALTY_TIME);
+      timeDelta += stats.timeLeft - prevTime;
+      const prevScore = stats.score;
+      stats.score = Math.max(0, stats.score - DRAIN_PENALTY_SCORE);
+      scoreGain += stats.score - prevScore;
+      stats.streak = Math.max(stats.streak, currentStreak);
+      currentStreak = 0;
+      stats.chainLen = 0;
+      stats.lastColor = undefined;
+      comboWindowUntil = 0;
+    }
+
+    let energyHits = 0;
+    let mutableActiveTarget = activeTarget;
+
+    for (const color of colorOrder) {
+      const group = colorGroups.get(color)!;
+      const sameColor = stats.lastColor === color && now <= comboWindowUntil;
+      const chainLen = sameColor ? stats.chainLen + 1 : 1;
+      stats.chainLen = chainLen;
+      stats.lastColor = color;
+      const baseWindow = now + COMBO_WINDOW_MS;
+      comboWindowUntil = baseWindow;
+
+      for (const bubble of group) {
+        const energy = isEnergyOrb(bubble);
+        const matchesTarget = mutableActiveTarget && targetState.color === color && !targetHit;
+        if (energy) {
+          let awarded = ENERGY_POINTS;
+          if (matchesTarget) {
+            awarded *= 3;
+          }
+          const scaled = Math.round(awarded * BURST_SCORE_SCALE);
+          stats.score += scaled;
+          scoreGain += scaled;
+          if (matchesTarget) {
+            const prevTime = stats.timeLeft;
+            stats.timeLeft += 2;
+            timeDelta += stats.timeLeft - prevTime;
+            targetHit = true;
+            mutableActiveTarget = false;
+            celebrationUntil = Math.max(celebrationUntil, now + 1_500);
+            nextTargetAt = now + 9_000 + state.rng() * 3_000;
+            targetState = { active: false, expiresAt: 0 };
+          }
+          energyHits += 1;
+        } else {
+          const multiplier = Math.min(1 + 0.25 * Math.max(chainLen - 2, 0), 4);
+          const baseAward = Math.round(BASE_POINTS * multiplier);
+          const awarded = matchesTarget ? baseAward * 3 : baseAward;
+          const scaled = Math.round(awarded * BURST_SCORE_SCALE);
+          stats.score += scaled;
+          scoreGain += scaled;
+          const availableGain = Math.max(0, 1 - timeGainAccumulated);
+          const appliedGain = Math.min(BASE_TIME_REWARD, availableGain);
+          if (appliedGain > 0) {
+            stats.timeLeft += appliedGain;
+            timeGainAccumulated += appliedGain;
+            timeDelta += appliedGain;
+          }
+          if (matchesTarget) {
+            const prevTime = stats.timeLeft;
+            stats.timeLeft += 2;
+            timeDelta += stats.timeLeft - prevTime;
+            targetHit = true;
+            mutableActiveTarget = false;
+            celebrationUntil = Math.max(celebrationUntil, now + 1_500);
+            nextTargetAt = now + 9_000 + state.rng() * 3_000;
+            targetState = { active: false, expiresAt: 0 };
+          }
+        }
+        currentStreak += 1;
+        stats.streak = Math.max(stats.streak, currentStreak);
+      }
+
+      if (chainLen >= 3 && now - lastComboFrame > 16) {
+        stats.bestCombo = Math.max(stats.bestCombo, chainLen);
+        get().progressCombo(chainLen);
+        lastComboFrame = now;
+      }
+      get().progressColor(color);
+    }
+
+    stats.timeLeft = Math.max(0, stats.timeLeft);
+
+    set({
+      stats,
+      bubbles: survivors,
+      comboWindowUntil,
+      currentStreak,
+      lastTapAt: now,
+      lastTapX: x,
+      lastTapY: y,
+      lastComboFrame,
+      timeGainWindowStart,
+      timeGainAccumulated,
+      target: targetState,
+      nextTargetAt,
+      targetCelebrationUntil: celebrationUntil,
+      perfectUntil,
+      burst: {
+        ...burst,
+        charging: false,
+        chargeStartAt: 0,
+        lastUseAt: now,
+        readyAt: now + burst.cooldownMs,
+        overcharge: false,
+      },
+      boosterBank,
+    });
+
+    if (energyHits > 0) {
+      get().grantBooster(energyHits, 'energy');
+    }
+
+    return {
+      fired: true,
+      radius,
+      holdMs,
+      popped: poppedIds,
+      energyHits,
+      drainHits,
+      targetHit,
+      overcharged: consumedOvercharge,
+      scoreGain,
+      timeDelta,
+    };
+  },
+  toggleBurstOvercharge: () => {
+    const state = get();
+    if (state.boosterBank.freeOrbs <= 0) {
+      if (state.burst.overcharge) {
+        set({ burst: { ...state.burst, overcharge: false } });
+      }
+      return;
+    }
+    set({ burst: { ...state.burst, overcharge: !state.burst.overcharge } });
+  },
+  spawnGoldenOrb: () => {
+    const state = get();
+    if (state.width <= 0 || state.height <= 0) return;
+    const now = state.now;
+    const next = spawnGoldenOrbState(state.rng, state.width, state.height, now, state.golden);
+    set({
+      golden: next,
+      lastGoldenSpawnAt: now,
+      nextGoldenDelay: GOLDEN_MIN_INTERVAL_MS + state.rng() * (GOLDEN_MAX_INTERVAL_MS - GOLDEN_MIN_INTERVAL_MS),
+    });
+  },
+  updateGoldenOrb: (nowInput) => {
+    const state = get();
+    if (!state.golden.active || state.golden.toxic) {
+      return;
+    }
+    const now = nowInput ?? state.now;
+    if (now >= state.golden.spawnedAt + state.golden.graceMs) {
+      set({ golden: { ...state.golden, toxic: true } });
+    }
+  },
+  hitGoldenOrb: (x, y) => {
+    const state = get();
+    if (!state.golden.active) {
+      return { hit: false };
+    }
+    const dx = x - state.golden.x;
+    const dy = y - state.golden.y;
+    if (dx * dx + dy * dy > state.golden.r * state.golden.r) {
+      return { hit: false };
+    }
+    const now = state.now;
+    const golden = state.golden;
+    const stats: RunStats = { ...state.stats };
+    let comboWindowUntil = state.comboWindowUntil;
+    let currentStreak = state.currentStreak;
+    const timeGainWindowStart = state.timeGainWindowStart;
+    const timeGainAccumulated = state.timeGainAccumulated;
+    const targetState = state.target;
+    const nextTargetAt = state.nextTargetAt;
+    const celebrationUntil = state.targetCelebrationUntil;
+    const perfectUntil = state.perfectUntil;
+    const prevScore = stats.score;
+    const prevTime = stats.timeLeft;
+
+    if (!golden.toxic) {
+      const awarded = BASE_POINTS * 5;
+      stats.score += awarded;
+      stats.timeLeft += 3;
+      currentStreak += 1;
+      stats.streak = Math.max(stats.streak, currentStreak);
+    } else {
+      stats.streak = Math.max(stats.streak, currentStreak);
+      currentStreak = 0;
+      stats.chainLen = 0;
+      stats.lastColor = undefined;
+      comboWindowUntil = 0;
+      stats.timeLeft = Math.max(0, stats.timeLeft - 5);
+      stats.score = Math.max(0, stats.score - DRAIN_PENALTY_SCORE);
+    }
+
+    stats.timeLeft = Math.max(0, stats.timeLeft);
+
+    const scoreDelta = stats.score - prevScore;
+    const timeDelta = stats.timeLeft - prevTime;
+
+    const nextGoldenDelay = GOLDEN_MIN_INTERVAL_MS + state.rng() * (GOLDEN_MAX_INTERVAL_MS - GOLDEN_MIN_INTERVAL_MS);
+
+    set({
+      stats,
+      golden: { ...golden, active: false, toxic: false, spawnedAt: 0 },
+      lastGoldenSpawnAt: now,
+      nextGoldenDelay,
+      comboWindowUntil,
+      currentStreak,
+      lastTapAt: now,
+      lastTapX: x,
+      lastTapY: y,
+      timeGainWindowStart,
+      timeGainAccumulated,
+      target: targetState,
+      nextTargetAt,
+      targetCelebrationUntil: celebrationUntil,
+      perfectUntil,
+    });
+
+    return { hit: true, golden: true, toxic: golden.toxic, scoreDelta, timeDelta };
   },
   loadDaily: (seed = 'rubble-daily') => {
     const key = getDailyKeyUTC();
