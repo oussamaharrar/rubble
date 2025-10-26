@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Analytics } from '@vercel/analytics/react';
 import './globals.css';
 import '@/styles/mobile-frame.css';
-import MobileVhFix from '@/app/providers/MobileVhFix';
+import VhFixProvider from '@/components/VhFixProvider';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000'),
@@ -21,7 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="format-detection" content="telephone=no" />
       </head>
       <body className="bg-[#030712] text-slate-100 antialiased">
-        <MobileVhFix />
+        <VhFixProvider />
         <Analytics />
         {children}
       </body>
