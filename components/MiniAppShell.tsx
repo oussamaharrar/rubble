@@ -5,14 +5,18 @@ import { SpeedInsights } from '@vercel/speed-insights/next';
 
 interface MiniAppShellProps {
   children: ReactNode;
+  playing: boolean;
 }
 
-export default function MiniAppShell({ children }: MiniAppShellProps) {
+export default function MiniAppShell({ children, playing }: MiniAppShellProps) {
   return (
-    <div className="miniapp-shell" role="application">
-      <div className="miniapp-shell__frame">
-        <div className="miniapp-shell__inner">{children}</div>
-      </div>
+    <div
+      id="rubble-root"
+      className="app-viewport safe-top safe-bottom"
+      data-playing={playing ? '1' : '0'}
+      role="application"
+    >
+      {children}
       <SpeedInsights />
     </div>
   );
