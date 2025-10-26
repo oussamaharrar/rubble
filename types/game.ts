@@ -40,8 +40,15 @@ export type BoosterBank = {
 export interface GameSettings {
   haptics: boolean;
   reducedMotion: boolean;
-  sfx: boolean;
+  sound: boolean;
   leftHanded: boolean;
+  theme: 'default' | 'skies';
+  particleStyle: 'classic' | 'sparkle';
+}
+
+export interface GameUnlocks {
+  themeSkies: boolean;
+  fxSparkle: boolean;
 }
 
 export type RunStats = {

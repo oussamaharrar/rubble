@@ -10,7 +10,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type SettingKey = 'haptics' | 'reducedMotion' | 'sfx' | 'leftHanded';
+type SettingKey = 'haptics' | 'reducedMotion' | 'sound' | 'leftHanded';
 
 const LABELS: Record<SettingKey, { title: string; description: string }> = {
   haptics: {
@@ -21,9 +21,9 @@ const LABELS: Record<SettingKey, { title: string; description: string }> = {
     title: 'Reduced Motion',
     description: 'Tone down visual effects and wobble for a calmer experience.',
   },
-  sfx: {
-    title: 'Sound FX',
-    description: 'Placeholder toggle for future audio cues.',
+  sound: {
+    title: 'Sound',
+    description: 'Enable gentle tap chimes and ambient layers.',
   },
   leftHanded: {
     title: 'Left-handed HUD',
@@ -103,7 +103,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           />
         ))}
         <p className="text-[11px] text-slate-400">
-          Preferences are stored locally under rubble_settings_v1. Haptics respect your device capabilities and browser support.
+          Preferences are stored locally under rubble_settings_v2. Haptics respect your device capabilities and browser support.
         </p>
       </div>
     </Modal>

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { playTapChime } from '@/lib/audio';
 import { useGameStore, type TapResult } from '@/lib/store';
 
 const COLOR_MAP = {
@@ -48,10 +49,47 @@ export default function GameCanvas() {
   const sizeRef = useRef({ width: 0, height: 0 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
+  const promptTimerRef = useRef<number | null>(null);
+  const tapHintTimerRef = useRef<number | null>(null);
+  const microProgressRef = useRef({ tap: false, perfect: false, burst: false });
+  const microTargetShownRef = useRef(false);
+  const microEnabledRef = useRef(true);
+  const [prompt, setPrompt] = useState<{ id: number; message: string } | null>(null);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
   const settings = useGameStore((state) => state.settings);
+  const unlocks = useGameStore((state) => state.unlocks);
+
+  const maybePersistMicro = useCallback(() => {
+    if (!microEnabledRef.current) return;
+    const progress = microProgressRef.current;
+    if (progress.tap && progress.perfect && progress.burst) {
+      microEnabledRef.current = false;
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('rubble:tutorial-micro', '1');
+        } catch {
+          // ignore storage errors
+        }
+      }
+    }
+  }, []);
+
+  const showPrompt = useCallback(
+    (message: string, duration = 2200) => {
+      if (!microEnabledRef.current) return;
+      if (promptTimerRef.current) {
+        window.clearTimeout(promptTimerRef.current);
+      }
+      const id = Date.now();
+      setPrompt({ id, message });
+      promptTimerRef.current = window.setTimeout(() => {
+        setPrompt((current) => (current && current.id === id ? null : current));
+      }, duration);
+    },
+    [setPrompt]
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -102,7 +140,7 @@ export default function GameCanvas() {
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
-      const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden } = state;
+      const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, settings: liveSettings, unlocks: liveUnlocks } = state;
       const measuredWidth = sizeRef.current.width || state.width || canvas.clientWidth || 0;
       const measuredHeight = sizeRef.current.height || state.height || canvas.clientHeight || 0;
       const dpr = dprRef.current;
@@ -115,10 +153,31 @@ export default function GameCanvas() {
       const gradient = ctx.createLinearGradient(0, 0, 0, measuredHeight);
       const topAlpha = playingPhase ? 0.72 : 0.85;
       const bottomAlpha = playingPhase ? 0.88 : 0.94;
-      gradient.addColorStop(0, `rgba(${18 + comboIntensity * 40},${24 + comboIntensity * 20},${43 + comboIntensity * 32},${topAlpha})`);
-      gradient.addColorStop(1, `rgba(10,13,23,${bottomAlpha})`);
+      const themeSkiesActive = liveUnlocks.themeSkies && liveSettings.theme === 'skies';
+      if (themeSkiesActive) {
+        const wave = prefersReducedMotion.current ? 0 : Math.sin(now / 1800) * 12;
+        gradient.addColorStop(0, `rgba(${42 + wave},${96 + wave * 0.6},${176 + wave * 0.8},${topAlpha})`);
+        gradient.addColorStop(1, `rgba(${16 + wave * 0.3},${42 + wave * 0.5},${112 + wave * 0.7},${bottomAlpha})`);
+      } else {
+        gradient.addColorStop(0, `rgba(${18 + comboIntensity * 40},${24 + comboIntensity * 20},${43 + comboIntensity * 32},${topAlpha})`);
+        gradient.addColorStop(1, `rgba(10,13,23,${bottomAlpha})`);
+      }
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+
+      if (themeSkiesActive && !prefersReducedMotion.current) {
+        const cloudCount = 6;
+        for (let index = 0; index < cloudCount; index += 1) {
+          const progress = ((now / 1000 + index * 57) % 24) / 24;
+          const cloudX = measuredWidth * ((index % 2 === 0 ? progress : 1 - progress) * 1.2 - 0.1);
+          const cloudY = measuredHeight * (0.15 + (index / cloudCount) * 0.35);
+          const cloudR = 60 + index * 12;
+          ctx.beginPath();
+          ctx.fillStyle = 'rgba(255,255,255,0.05)';
+          ctx.arc(cloudX, cloudY, cloudR, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
 
       const slowFactor = now < slowTimeUntil ? Math.cos((now / 180) % Math.PI) : 0;
       if (slowFactor > 0) {
@@ -348,6 +407,15 @@ export default function GameCanvas() {
       if (!result) return;
       if (result.burst) {
         vibrate([0, 18, 12, 40]);
+        if (settings.sound && result.hit) {
+          playTapChime({ pitch: result.golden ? 840 : 520 });
+        }
+        if (result.hit && microEnabledRef.current && !microProgressRef.current.burst) {
+          microProgressRef.current.burst = true;
+          showPrompt('Burst ready!', 1600);
+          maybePersistMicro();
+        }
+        const sparkleActive = unlocks.fxSparkle && settings.particleStyle === 'sparkle';
         const rippleColor = result.golden
           ? result.goldenToxic
             ? 'rgba(248,113,113,0.45)'
@@ -371,6 +439,18 @@ export default function GameCanvas() {
             color: rippleColor,
           });
         }
+        if (sparkleActive) {
+          for (let index = 0; index < 12; index += 1) {
+            const theta = (Math.PI * 2 * index) / 12 + Math.random() * 0.2;
+            particlesRef.current.unshift({
+              x: x + Math.cos(theta) * 24,
+              y: y + Math.sin(theta) * 24,
+              radius: 5,
+              life: 0.7,
+              color: 'rgba(255,255,255,0.55)',
+            });
+          }
+        }
         if (result.golden) {
           particlesRef.current.unshift({
             x,
@@ -386,11 +466,27 @@ export default function GameCanvas() {
 
       if (!result.hit) {
         vibrate(25);
+        if (settings.sound) {
+          playTapChime({ pitch: 420 });
+        }
         return;
+      }
+
+      if (microEnabledRef.current && !microProgressRef.current.tap) {
+        microProgressRef.current.tap = true;
+        if (tapHintTimerRef.current) {
+          window.clearTimeout(tapHintTimerRef.current);
+          tapHintTimerRef.current = null;
+        }
+        setPrompt(null);
+        maybePersistMicro();
       }
 
       if (result.golden) {
         vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        if (settings.sound) {
+          playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 480 : 920 });
+        }
         const color = result.goldenToxic ? 'rgba(248,113,113,0.6)' : 'rgba(253,224,71,0.65)';
         particlesRef.current.unshift({ x, y, radius: 14, life: 1, color });
         particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
@@ -403,12 +499,27 @@ export default function GameCanvas() {
         return;
       }
 
+      if (settings.sound) {
+        playTapChime({ perfect: Boolean(result.perfect), pitch: result.targetHit ? 780 : result.energy ? 680 : 560 });
+      }
+
       if (result.drain) {
         vibrate(25);
       } else if (result.energy || (result.combo ?? 0) >= 3) {
         vibrate([5, 10, 5]);
       } else {
         vibrate(8);
+      }
+
+      if (microEnabledRef.current) {
+        if (result.perfect && !microProgressRef.current.perfect) {
+          microProgressRef.current.perfect = true;
+          showPrompt('Perfect! Hit the center glow.', 1800);
+          maybePersistMicro();
+        } else if (result.targetHit && !microTargetShownRef.current) {
+          microTargetShownRef.current = true;
+          showPrompt('Target hit! Watch the color pill.', 2000);
+        }
       }
 
       const color = result.energy
@@ -426,11 +537,25 @@ export default function GameCanvas() {
         color,
       });
       particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+      const sparkleActive = unlocks.fxSparkle && settings.particleStyle === 'sparkle';
       if (result.perfect && !prefersReducedMotion.current) {
         const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
         const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
         ripplesRef.current.unshift({ x, y, progress: 0, maxRadius, color: rippleColor });
         ripplesRef.current = ripplesRef.current.slice(0, 8);
+        if (sparkleActive) {
+          for (let index = 0; index < 6; index += 1) {
+            const theta = (Math.PI * 2 * index) / 6 + Math.random() * 0.4;
+            particlesRef.current.unshift({
+              x: x + Math.cos(theta) * 12,
+              y: y + Math.sin(theta) * 12,
+              radius: 4,
+              life: 0.8,
+              color: 'rgba(255,255,255,0.6)',
+            });
+          }
+          particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+        }
       }
     };
 
@@ -520,11 +645,73 @@ export default function GameCanvas() {
       canvas.removeEventListener('pointercancel', handlePointerCancel);
       canvas.removeEventListener('pointerleave', handlePointerCancel);
     };
-  }, [settings.haptics, settings.reducedMotion]);
+  }, [
+    settings.haptics,
+    settings.reducedMotion,
+    settings.sound,
+    settings.particleStyle,
+    unlocks.fxSparkle,
+    showPrompt,
+    maybePersistMicro,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (window.localStorage.getItem('rubble:tutorial-micro') === '1') {
+        microEnabledRef.current = false;
+      }
+    } catch {
+      microEnabledRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (promptTimerRef.current) {
+        window.clearTimeout(promptTimerRef.current);
+      }
+      if (tapHintTimerRef.current) {
+        window.clearTimeout(tapHintTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!microEnabledRef.current) return;
+    if (phase === 'playing' && !microProgressRef.current.tap) {
+      if (tapHintTimerRef.current) {
+        window.clearTimeout(tapHintTimerRef.current);
+      }
+      tapHintTimerRef.current = window.setTimeout(() => {
+        if (!microEnabledRef.current) {
+          return;
+        }
+        if (promptTimerRef.current) {
+          window.clearTimeout(promptTimerRef.current);
+        }
+        const id = Date.now();
+        setPrompt({ id, message: 'Tap a bubble' });
+        promptTimerRef.current = window.setTimeout(() => {
+          setPrompt((current) => (current && current.id === id ? null : current));
+        }, 2200);
+      }, 3000);
+    } else if (tapHintTimerRef.current) {
+      window.clearTimeout(tapHintTimerRef.current);
+      tapHintTimerRef.current = null;
+    }
+  }, [phase, setPrompt]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
       <canvas ref={canvasRef} className="h-full w-full touch-none" />
+      {prompt ? (
+        <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center">
+          <div className="rounded-full border border-white/10 bg-slate-900/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-100 shadow-lg shadow-black/40">
+            {prompt.message}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
