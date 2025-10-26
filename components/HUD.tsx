@@ -18,10 +18,23 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const slowTimeUntil = useGameStore((state) => state.slowTimeUntil);
   const now = useGameStore((state) => state.now);
   const leftHanded = useGameStore((state) => state.settings.leftHanded);
+  const burst = useGameStore((state) => state.burst);
+  const toggleBurstOvercharge = useGameStore((state) => state.toggleBurstOvercharge);
+  const golden = useGameStore((state) => state.golden);
 
   const comboActive = stats.chainLen >= 3;
   const timeCritical = stats.timeLeft <= 10 && (phase === 'playing' || phase === 'storm');
   const slowActive = slowTimeUntil > now;
+  const cooldownRemaining = Math.max(0, burst.readyAt - now);
+  const burstReady = cooldownRemaining <= 0;
+  const cooldownPct = burst.cooldownMs > 0 ? Math.min(Math.max(1 - cooldownRemaining / burst.cooldownMs, 0), 1) : 1;
+  const cooldownSeconds = Math.max(0, Math.ceil(cooldownRemaining / 1000));
+  const canOvercharge = boosterBank.freeOrbs > 0;
+  const overchargeActive = burst.overcharge && canOvercharge;
+  const burstRingRadius = 16;
+  const burstCircumference = 2 * Math.PI * burstRingRadius;
+  const burstDashOffset = burstCircumference * (1 - cooldownPct);
+  const goldenDanger = golden.active && golden.toxic;
 
   const formattedTime = useMemo(() => {
     const seconds = Math.max(0, stats.timeLeft);
@@ -93,6 +106,56 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           >
             {formattedTime}
           </motion.div>
+          <AnimatePresence>
+            {goldenDanger ? (
+              <motion.div
+                key="golden-warning"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="flex items-center gap-1 rounded-full bg-rose-500/25 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-100 shadow-inner shadow-rose-500/30"
+              >
+                <span aria-hidden>☠️</span>
+                <span>Toxic Orb</span>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+          <button
+            type="button"
+            onClick={toggleBurstOvercharge}
+            disabled={!canOvercharge}
+            aria-pressed={overchargeActive}
+            aria-label={overchargeActive ? 'Overcharge ready' : 'Toggle burst overcharge'}
+            className={clsx(
+              'relative flex h-12 w-12 items-center justify-center rounded-full border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+              overchargeActive ? 'border-sky-400/60 bg-sky-500/25 shadow-inner shadow-sky-500/30' : 'border-white/15 bg-slate-900/60',
+              !canOvercharge && 'cursor-not-allowed opacity-60'
+            )}
+          >
+            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 36 36" role="presentation">
+              <circle cx="18" cy="18" r={burstRingRadius} stroke="rgba(15,23,42,0.4)" strokeWidth={3} fill="none" />
+              <circle
+                cx="18"
+                cy="18"
+                r={burstRingRadius}
+                stroke={burstReady ? '#38bdf8' : '#0ea5e9'}
+                strokeWidth={3}
+                strokeLinecap="round"
+                fill="none"
+                style={{
+                  strokeDasharray: burstCircumference,
+                  strokeDashoffset: burstDashOffset,
+                  transition: 'stroke-dashoffset 0.3s ease, stroke 0.3s ease',
+                }}
+              />
+            </svg>
+            <span className="relative flex flex-col items-center text-[9px] font-semibold uppercase tracking-wide text-slate-200">
+              <span className="text-[8px] tracking-[0.22em] text-slate-400">Burst</span>
+              <span className={clsx('text-[11px]', burstReady ? 'text-sky-100' : 'text-slate-100')}>
+                {burstReady ? 'Ready' : `${Math.max(1, cooldownSeconds)}s`}
+              </span>
+            </span>
+          </button>
           <button
             type="button"
             onClick={onPause}

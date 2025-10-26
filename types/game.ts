@@ -61,3 +61,25 @@ export type TargetState = {
   expiresAt: number;
   active: boolean;
 };
+
+export type BurstState = {
+  readyAt: number;
+  charging: boolean;
+  chargeStartAt: number;
+  lastUseAt: number;
+  cooldownMs: number;
+  minHoldMs: number;
+  maxHoldMs: number;
+  overcharge: boolean;
+};
+
+export type GoldenOrbState = {
+  active: boolean;
+  id?: string;
+  spawnedAt: number;
+  graceMs: number;
+  x: number;
+  y: number;
+  r: number;
+  toxic: boolean;
+};
