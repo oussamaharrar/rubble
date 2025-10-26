@@ -2,15 +2,9 @@
 
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import Modal from './Modal';
 import { useGameStore } from '@/lib/store';
 
-interface MissionsModalProps {
-  open: boolean;
-  onClose: () => void;
-}
-
-export default function MissionsModal({ open, onClose }: MissionsModalProps) {
+export default function MissionsView() {
   const missions = useGameStore((state) => state.missions);
   const claimMission = useGameStore((state) => state.claimMission);
   const freeOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
@@ -18,20 +12,7 @@ export default function MissionsModal({ open, onClose }: MissionsModalProps) {
   const allClaimed = useMemo(() => missions.length > 0 && missions.every((mission) => mission.claimed), [missions]);
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Daily Missions"
-      footer={
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 backdrop-blur focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-        >
-          Close
-        </button>
-      }
-    >
+    <div className="space-y-4">
       <p className="text-sm text-slate-300">
         Complete the three UTC daily goals to earn Booster Orbs. Finishing all missions adds a bonus orb.
       </p>
@@ -57,21 +38,18 @@ export default function MissionsModal({ open, onClose }: MissionsModalProps) {
                 </motion.button>
               </div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-900/80">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-sky-400 to-sky-600"
-                  style={{ width: `${progressPct}%` }}
-                />
+                <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-sky-600" style={{ width: `${progressPct}%` }} />
               </div>
             </div>
           );
         })}
       </div>
-      <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-100">
+      <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-100">
         Free Booster Orbs available: {freeOrbs}
       </div>
       {allClaimed ? (
         <p className="text-xs font-medium text-sky-200">Bonus orb granted. Come back tomorrow for new missions!</p>
       ) : null}
-    </Modal>
+    </div>
   );
 }

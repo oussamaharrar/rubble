@@ -224,6 +224,7 @@ type GameStore = {
   boardKind: BoardKind;
   stats: RunStats;
   entryMode: EntryMode | null;
+  pendingEntryMode: EntryMode | null;
   bubbles: Bubble[];
   missions: Mission[];
   boosterBank: BoosterBank;
@@ -261,6 +262,8 @@ type GameStore = {
   lastComboFrame: number;
   timeGainWindowStart: number;
   timeGainAccumulated: number;
+  setPhase: (phase: GamePhase) => void;
+  prepareIntro: (mode: EntryMode) => void;
   startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
@@ -299,10 +302,11 @@ type GameStore = {
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
-  phase: 'start',
+  phase: 'home',
   boardKind: 'normal',
   stats: defaultStats(),
   entryMode: null,
+  pendingEntryMode: null,
   bubbles: [],
   missions: [],
   boosterBank: initialBoosterBank(),
@@ -340,9 +344,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
   lastComboFrame: -Infinity,
   timeGainWindowStart: 0,
   timeGainAccumulated: 0,
+  setPhase: (phase) => {
+    if (phase === 'playing' || phase === 'storm') {
+      return;
+    }
+    set((state) => ({
+      phase,
+      ...(phase === 'home' ? { pendingEntryMode: null, resumePhase: null } : {}),
+      ...(phase !== 'home' ? { pendingEntryMode: state.pendingEntryMode } : {}),
+    }));
+  },
+  prepareIntro: (mode) => {
+    set({ phase: 'intro', pendingEntryMode: mode });
+  },
   startRun: (mode = 'trial') => {
     const state = get();
     const board = state.boardKind;
+    const entry = state.pendingEntryMode ?? mode;
     const defaultSeed = hashString(`${Date.now()}-${Math.random()}`);
     let seed = defaultSeed;
     let palette = DEFAULT_PALETTE;
@@ -377,8 +395,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({
       phase: 'playing',
-      stats: { ...defaultStats(), timeLeft: 60, entryMode: mode },
-      entryMode: mode,
+      stats: { ...defaultStats(), timeLeft: 60, entryMode: entry },
+      entryMode: entry,
+      pendingEntryMode: null,
       bubbles: [],
       stormAt: stormInterval,
       stormInterval,
@@ -459,9 +478,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       bubbleSpeedFactor = tuning.spawn.speedFactor || BASE_SPEED_FACTOR;
     }
     set({
-      phase: 'start',
+      phase: 'home',
       stats: defaultStats(),
       entryMode: null,
+      pendingEntryMode: null,
       bubbles: [],
       now: 0,
       comboWindowUntil: 0,
