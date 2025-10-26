@@ -18,6 +18,9 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const slowTimeUntil = useGameStore((state) => state.slowTimeUntil);
   const now = useGameStore((state) => state.now);
   const leftHanded = useGameStore((state) => state.settings.leftHanded);
+  const burst = useGameStore((state) => state.burst);
+  const toggleBurstOvercharge = useGameStore((state) => state.toggleBurstOvercharge);
+  const golden = useGameStore((state) => state.golden);
 
   const comboActive = stats.chainLen >= 3;
   const timeCritical = stats.timeLeft <= 10 && (phase === 'playing' || phase === 'storm');
@@ -34,6 +37,17 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
     if (stats.chainLen < 3) return '×' + stats.chainLen;
     return `×${stats.chainLen}`;
   }, [stats.chainLen]);
+
+  const burstCooldownMs = Math.max(0, burst.readyAt - Date.now());
+  const burstReady = burstCooldownMs <= 0;
+  const cooldownRatio = burst.cooldownMs > 0 ? Math.min(1, burstCooldownMs / burst.cooldownMs) : 0;
+  const fillAngle = Math.max(0, Math.min(360, (1 - cooldownRatio) * 360));
+  const canToggleOvercharge = boosterBank.freeOrbs > 0 || burst.overcharge;
+  const handleToggleBurst = () => {
+    if (!canToggleOvercharge) return;
+    toggleBurstOvercharge();
+  };
+  const goldenToxic = golden.active && golden.toxic;
 
   const handleUseOrb = () => {
     const used = consumeBooster();
@@ -82,17 +96,57 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           </div>
         </div>
         <div className={clsx('pointer-events-auto flex flex-col gap-2', leftHanded ? 'items-start' : 'items-end')}>
-          <motion.div
-            animate={timeCritical ? { scale: [1, 1.05, 1], color: ['#f8fafc', '#f87171', '#f8fafc'] } : { scale: 1, color: '#f8fafc' }}
-            transition={{ duration: 0.8, repeat: timeCritical ? Infinity : 0 }}
-            className={clsx(
-              'rounded-full border border-white/10 bg-slate-950/85 px-5 py-2 text-xl font-semibold tracking-tight text-slate-100 shadow-lg shadow-black/40',
-              timeCritical && 'border-red-400/50'
-            )}
-            aria-live="polite"
-          >
-            {formattedTime}
-          </motion.div>
+          <div className={clsx('flex items-center gap-3', leftHanded ? 'flex-row-reverse' : 'flex-row')}>
+            <button
+              type="button"
+              onClick={handleToggleBurst}
+              aria-pressed={burst.overcharge}
+              aria-label={burst.overcharge ? 'Disable Burst Overcharge' : 'Enable Burst Overcharge'}
+              disabled={!canToggleOvercharge}
+              className={clsx(
+                'relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border text-[0.6rem] font-semibold uppercase tracking-[0.2em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300',
+                burst.overcharge
+                  ? 'border-sky-400/70 shadow-[0_0_18px_rgba(56,189,248,0.35)] text-sky-200'
+                  : 'border-white/15 text-slate-200',
+                !canToggleOvercharge && 'opacity-60'
+              )}
+            >
+              {!burstReady && (
+                <span
+                  className="absolute inset-0 rounded-full opacity-80"
+                  style={{
+                    backgroundImage: `conic-gradient(rgba(56,189,248,0.8) 0deg, rgba(56,189,248,0.8) ${fillAngle}deg, rgba(15,23,42,0.4) ${fillAngle}deg)`,
+                  }}
+                />
+              )}
+              <span className="absolute inset-[4px] rounded-full bg-slate-950/90" />
+              <span className="relative z-10 flex flex-col items-center leading-tight">
+                <span>Burst</span>
+                <span className={clsx('text-[0.55rem]', burstReady ? 'text-sky-200' : 'text-slate-300')}>
+                  {burstReady ? 'Ready' : `${Math.ceil(burstCooldownMs / 1000)}s`}
+                </span>
+              </span>
+            </button>
+            <motion.div
+              animate={timeCritical ? { scale: [1, 1.05, 1], color: ['#f8fafc', '#f87171', '#f8fafc'] } : { scale: 1, color: '#f8fafc' }}
+              transition={{ duration: 0.8, repeat: timeCritical ? Infinity : 0 }}
+              className={clsx(
+                'rounded-full border border-white/10 bg-slate-950/85 px-5 py-2 text-xl font-semibold tracking-tight text-slate-100 shadow-lg shadow-black/40',
+                timeCritical && 'border-red-400/50'
+              )}
+              aria-live="polite"
+            >
+              {formattedTime}
+            </motion.div>
+          </div>
+          {burst.overcharge && (
+            <span className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-sky-300">×1.3 radius</span>
+          )}
+          {goldenToxic ? (
+            <span className="flex items-center gap-1 rounded-full bg-rose-500/20 px-3 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-rose-200">
+              ☠ Toxic Orb
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={onPause}
