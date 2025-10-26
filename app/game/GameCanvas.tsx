@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
 
@@ -52,7 +52,6 @@ type AmbientDot = {
 
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const frameRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const particlePoolRef = useRef<Particle[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
@@ -61,6 +60,7 @@ export default function GameCanvas() {
   const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
+  const [debugStats, setDebugStats] = useState({ w: 0, h: 0, dpr: 1, bubbles: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
@@ -100,9 +100,10 @@ export default function GameCanvas() {
   }, [settings.reducedMotion]);
 
   useEffect(() => {
-    const frameEl = frameRef.current;
     const canvas = canvasRef.current;
-    if (!frameEl || !canvas) return;
+    if (!canvas) return;
+    const frameEl = canvas.parentElement as HTMLDivElement | null;
+    if (!frameEl) return;
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
@@ -112,7 +113,7 @@ export default function GameCanvas() {
       const box = frameEl.getBoundingClientRect();
       const cssW = Math.max(1, Math.floor(box.width));
       const cssH = Math.max(1, Math.floor(box.height));
-      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
 
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
@@ -122,6 +123,7 @@ export default function GameCanvas() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
       setStageSize(cssW, cssH);
+      setDebugStats((prev) => (prev.w === cssW && prev.h === cssH && prev.dpr === dpr ? prev : { ...prev, w: cssW, h: cssH, dpr }));
     };
 
     const scheduleResize = () => {
@@ -134,12 +136,13 @@ export default function GameCanvas() {
 
     resizeCanvas();
 
-    const observer = new ResizeObserver(() => scheduleResize());
-    observer.observe(frameEl);
+    const resizeObserver = new ResizeObserver(() => scheduleResize());
+    resizeObserver.observe(frameEl);
 
     const handleViewportResize = () => scheduleResize();
     window.addEventListener('resize', handleViewportResize, { passive: true });
     window.addEventListener('orientationchange', handleViewportResize, { passive: true });
+    window.visualViewport?.addEventListener('resize', handleViewportResize);
 
     const root = document.getElementById('rubble-root');
     const mutationObserver = root
@@ -154,6 +157,7 @@ export default function GameCanvas() {
     const render = (dt: number) => {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
+      setDebugStats((prev) => (prev.bubbles === bubbles.length ? prev : { ...prev, bubbles: bubbles.length }));
       const size = gameSizeRef.current;
       const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
       const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
@@ -442,7 +446,7 @@ export default function GameCanvas() {
     frameHandle = window.requestAnimationFrame(step);
 
     return () => {
-      observer.disconnect();
+      resizeObserver.disconnect();
       if (mutationObserver) {
         mutationObserver.disconnect();
       }
@@ -451,6 +455,7 @@ export default function GameCanvas() {
       }
       window.removeEventListener('resize', handleViewportResize);
       window.removeEventListener('orientationchange', handleViewportResize);
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
       window.cancelAnimationFrame(frameHandle);
     };
   }, [setStageSize]);
@@ -758,12 +763,26 @@ export default function GameCanvas() {
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
-    <div ref={frameRef} className="relative h-full w-full overflow-hidden rounded-3xl">
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 block touch-none"
-        style={{ width: '100%', height: '100%' }}
-      />
-    </div>
+    <>
+      <canvas ref={canvasRef} className="app-canvas" />
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 8,
+          left: 8,
+          background: 'rgba(0,0,0,0.5)',
+          color: '#0f0',
+          fontSize: 10,
+          padding: '4px 6px',
+          borderRadius: 4,
+          zIndex: 99,
+          fontFamily: 'monospace',
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        w:{Math.round(debugStats.w)} h:{Math.round(debugStats.h)} DPR:{Number(debugStats.dpr.toFixed(2))} bubbles:{debugStats.bubbles}
+      </div>
+    </>
   );
 }

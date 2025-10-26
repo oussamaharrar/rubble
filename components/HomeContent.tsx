@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import MiniAppShell from './MiniAppShell';
+import AppExperience from './AppExperience';
 import WalletBar from './WalletBar';
 import Drawer, { type DrawerView } from './Drawer';
 import GameStage from './stages/GameStage';
@@ -92,6 +92,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const tutorialAutoRef = useRef(shouldShowTutorial());
+  const bodyOverflowRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -185,6 +186,28 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   }, [pauseRun]);
 
   const playing = phase === 'playing' || phase === 'storm';
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const body = document.body;
+    if (!body) return;
+    const shouldLock = phase === 'playing' || phase === 'storm' || phase === 'paused';
+    if (shouldLock) {
+      if (bodyOverflowRef.current === null) {
+        bodyOverflowRef.current = body.style.overflow;
+      }
+      body.style.overflow = 'hidden';
+    } else if (bodyOverflowRef.current !== null) {
+      body.style.overflow = bodyOverflowRef.current;
+      bodyOverflowRef.current = null;
+    }
+    return () => {
+      if (bodyOverflowRef.current !== null && shouldLock) {
+        body.style.overflow = bodyOverflowRef.current;
+        bodyOverflowRef.current = null;
+      }
+    };
+  }, [phase]);
+
 
   const openDrawer = useCallback((view: DrawerView) => {
     setDrawerView(view);
@@ -319,7 +342,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   );
 
   return (
-    <MiniAppShell playing={playing} header={headerContent} footer={footerContent}>
+    <AppExperience playing={playing} header={headerContent} footer={footerContent}>
       <div className="relative h-full w-full">
         <AnimatePresence mode="wait">
           {displayPhase === 'home' ? (
@@ -400,6 +423,6 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
           }}
         />
       </div>
-    </MiniAppShell>
+    </AppExperience>
   );
 }
