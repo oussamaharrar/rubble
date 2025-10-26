@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Analytics } from '@vercel/analytics/react';
 import './globals.css';
+import '@/styles/safe-layout.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000'),

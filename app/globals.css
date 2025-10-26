@@ -24,9 +24,10 @@ body {
 .app-body,
 body {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
   color: #f8fafc;
 }
 

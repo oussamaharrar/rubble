@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
+import type { BubbleColor } from '@/types/game';
 
 const COLOR_MAP = {
   yellow: '#facc15',
@@ -20,6 +22,28 @@ const GLOW_MAP = {
 } as const;
 
 const MAX_PARTICLES = 32;
+const COLOR_EMOJI: Record<BubbleColor, string> = {
+  yellow: '🟡',
+  blue: '🔵',
+  green: '🟢',
+  pink: '🌸',
+  orange: '🟠',
+};
+
+function targetBackground(color: BubbleColor) {
+  return GLOW_MAP[color].replace('0.45', '0.18');
+}
+
+type Ripple = {
+  id: number;
+  x: number;
+  y: number;
+};
+
+type TargetToast = {
+  id: number;
+  color: BubbleColor;
+};
 
 interface Particle {
   x: number;
@@ -35,10 +59,22 @@ export default function GameCanvas() {
   const particlesRef = useRef<Particle[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
+  const [ripples, setRipples] = useState<Ripple[]>([]);
+  const [targetToast, setTargetToast] = useState<TargetToast | null>(null);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
   const settings = useGameStore((state) => state.settings);
+  const target = useGameStore((state) => state.target);
+  const gameNow = useGameStore((state) => state.now);
+  const playingPhase = phase === 'playing' || phase === 'storm';
+  const targetActive = Boolean(target.active && target.color && target.expiresAt > gameNow && playingPhase);
+  const activeTargetColor = targetActive ? (target.color as BubbleColor) : undefined;
+  const targetSeconds = targetActive ? Math.max(0, (target.expiresAt - gameNow) / 1000) : 0;
+  const targetDisplay = targetActive ? targetSeconds.toFixed(1) : '';
+  const targetColorHex = activeTargetColor ? COLOR_MAP[activeTargetColor] : '#f8fafc';
+  const targetBg = activeTargetColor ? targetBackground(activeTargetColor) : 'rgba(255,255,255,0.08)';
+  const targetEmoji = activeTargetColor ? COLOR_EMOJI[activeTargetColor] : '🎯';
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -211,14 +247,29 @@ export default function GameCanvas() {
   }, [phase]);
 
   useEffect(() => {
+    if (!targetToast) return;
+    const timeout = window.setTimeout(() => setTargetToast(null), 800);
+    return () => window.clearTimeout(timeout);
+  }, [targetToast]);
+
+  useEffect(() => {
+    if (!playingPhase) {
+      setTargetToast(null);
+      setRipples([]);
+    }
+  }, [playingPhase]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const allowHaptics = settings.haptics && !settings.reducedMotion;
     const handlePointer = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
       const ratio = canvas.width / rect.width;
-      const x = (event.clientX - rect.left) * ratio;
-      const y = (event.clientY - rect.top) * ratio;
+      const displayX = event.clientX - rect.left;
+      const displayY = event.clientY - rect.top;
+      const x = displayX * ratio;
+      const y = displayY * ratio;
       const result = useGameStore.getState().tap(x, y);
       if (!result.hit) {
         if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -229,7 +280,11 @@ export default function GameCanvas() {
       if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         if (result.drain) {
           navigator.vibrate(25);
-        } else if (result.energy || (result.combo ?? 0) >= 3) {
+        } else if (result.energy) {
+          navigator.vibrate([5, 10, 5]);
+        } else if (result.perfect) {
+          navigator.vibrate(8);
+        } else if ((result.combo ?? 0) >= 3) {
           navigator.vibrate([5, 10, 5]);
         } else {
           navigator.vibrate(8);
@@ -245,6 +300,13 @@ export default function GameCanvas() {
           color,
         });
         particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+      }
+      if (result.perfect) {
+        setRipples((current) => [...current.slice(-3), { id: Date.now() + Math.random(), x: displayX, y: displayY }]);
+      }
+      if (result.target) {
+        const nextColor = (result.color ?? 'yellow') as BubbleColor;
+        setTargetToast({ id: Date.now() + Math.random(), color: nextColor });
       }
     };
     const handleMove = (event: PointerEvent) => {
@@ -263,6 +325,70 @@ export default function GameCanvas() {
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
       <canvas ref={canvasRef} className="h-full w-full touch-none" />
+      {playingPhase ? (
+        <div className="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(circle_at_center,rgba(6,8,15,0)_45%,rgba(6,8,15,0.55)_100%)]" />
+      ) : null}
+      <AnimatePresence>
+        {targetActive ? (
+          <motion.div
+            key="target-pill"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-full border px-4 py-1 text-xs font-semibold shadow-lg shadow-black/40"
+            style={{
+              borderColor: `${targetColorHex}55`,
+              backgroundColor: targetBg,
+              color: targetColorHex,
+            }}
+          >
+            Target: {targetEmoji} {targetDisplay}s
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence>
+        {targetToast ? (
+          <motion.div
+            key={targetToast.id}
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="pointer-events-none absolute left-1/2 top-16 z-40 -translate-x-1/2 rounded-full border px-3 py-1 text-xs font-semibold shadow-lg shadow-black/40"
+            style={{
+              borderColor: `${COLOR_MAP[targetToast.color]}55`,
+              backgroundColor: targetBackground(targetToast.color),
+              color: COLOR_MAP[targetToast.color],
+            }}
+          >
+            Target! ×3 +2s
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence initial={false}>
+        {ripples.map((ripple) => (
+          <motion.span
+            key={ripple.id}
+            className="pointer-events-none absolute z-20 rounded-full border border-white/50"
+            initial={{ opacity: 0.45, scale: 0 }}
+            animate={{ opacity: 0, scale: 1.6 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            style={{
+              left: ripple.x,
+              top: ripple.y,
+              width: 24,
+              height: 24,
+              marginLeft: -12,
+              marginTop: -12,
+            }}
+            onAnimationComplete={() => {
+              setRipples((current) => current.filter((item) => item.id !== ripple.id));
+            }}
+          />
+        ))}
+      </AnimatePresence>
     </div>
   );
 }

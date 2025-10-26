@@ -13,6 +13,7 @@ import type {
   GameSettings,
   Mission,
   RunStats,
+  TargetState,
 } from '@/types/game';
 
 const COMBO_WINDOW_MS = 5_000;
@@ -23,6 +24,11 @@ const DRAIN_PENALTY_TIME = 2;
 const DRAIN_PENALTY_SCORE = 15;
 const ENERGY_POINTS = 20;
 const SLOW_TIME_DURATION_MS = 5_000;
+const MAX_COMBO_WINDOW_MS = 8_000;
+const TARGET_INTERVAL_MS = 10_000;
+const TARGET_VARIATION_MS = 2_000;
+const TARGET_ACTIVE_MS = 3_000;
+const PERFECT_RADIUS_FACTOR = 0.35;
 
 const BOOSTER_KEY = 'rubble:booster-bank';
 const SETTINGS_KEY = 'rubble_settings_v1';
@@ -256,6 +262,8 @@ type GameStore = {
   lastComboFrame: number;
   timeGainWindowStart: number;
   timeGainAccumulated: number;
+  target: TargetState;
+  nextTargetAt: number;
   startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
@@ -266,7 +274,10 @@ type GameStore = {
   tick: (dt: number) => void;
   spawnBubbles: (count?: number) => void;
   spawnStormOrbs: () => void;
-  tap: (x: number, y: number) => { hit: boolean; energy?: boolean; drain?: boolean; combo?: number };
+  tap: (
+    x: number,
+    y: number
+  ) => { hit: boolean; energy?: boolean; drain?: boolean; combo?: number; perfect?: boolean; target?: boolean; color?: BubbleColor };
   grantBooster: (count: number, source?: 'energy' | 'paid' | 'mission' | 'other') => void;
   grantOrbOnPaidEntry: () => void;
   consumeBooster: () => boolean;
@@ -319,6 +330,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   lastComboFrame: -Infinity,
   timeGainWindowStart: 0,
   timeGainAccumulated: 0,
+  target: { active: false, expiresAt: 0, color: undefined },
+  nextTargetAt: TARGET_INTERVAL_MS,
   startRun: (mode = 'trial') => {
     const state = get();
     const board = state.boardKind;
@@ -386,6 +399,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       lastComboFrame: -Infinity,
       timeGainWindowStart: 0,
       timeGainAccumulated: 0,
+      target: { active: false, expiresAt: 0, color: undefined },
+      nextTargetAt: TARGET_INTERVAL_MS,
     });
     get().spawnBubbles(Math.floor(maxBubbles / 2));
   },
@@ -447,6 +462,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       lastComboFrame: -Infinity,
       timeGainWindowStart: 0,
       timeGainAccumulated: 0,
+      target: { active: false, expiresAt: 0, color: undefined },
+      nextTargetAt: TARGET_INTERVAL_MS,
     });
   },
   pauseRun: () => {
@@ -482,6 +499,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const factor = slowTimeActive ? 0.5 : 1;
     const width = state.width;
     const height = state.height;
+    const rng = state.rng;
+
+    let targetState = state.target;
+    let nextTargetAt = state.nextTargetAt;
+
+    if (targetState.active && now >= targetState.expiresAt) {
+      targetState = { ...targetState, active: false };
+    }
+
+    if ((phase === 'playing' || phase === 'storm') && !targetState.active && now >= nextTargetAt) {
+      const jitter = Math.floor(rng() * TARGET_VARIATION_MS);
+      targetState = {
+        color: randomColor(rng, state.palette),
+        expiresAt: now + TARGET_ACTIVE_MS,
+        active: true,
+      };
+      nextTargetAt = now + TARGET_INTERVAL_MS + jitter;
+    }
 
     const updatedBubbles: Bubble[] = [];
     for (const bubble of state.bubbles) {
@@ -509,6 +544,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     if (stats.timeLeft <= 0) {
       phase = 'summary';
+      targetState = { ...targetState, active: false, expiresAt: now };
     }
 
     if (phase === 'playing' && now >= state.stormAt) {
@@ -528,6 +564,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       stats,
       now,
       phase,
+      target: targetState,
+      nextTargetAt,
     });
 
     const desiredCount = phase === 'storm' ? state.maxBubbles + state.maxStormOrbs : state.maxBubbles;
@@ -596,20 +634,30 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const target = state.bubbles[hitIndex];
     const remaining = [...state.bubbles.slice(0, hitIndex), ...state.bubbles.slice(hitIndex + 1)];
     const stats = { ...state.stats };
+    const wasEnergy = isEnergyOrb(target);
+    const wasDrain = isDrainOrb(target);
+    const dx = x - target.x;
+    const dy = y - target.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const perfectThreshold = target.r * PERFECT_RADIUS_FACTOR;
     let comboWindowUntil = state.comboWindowUntil;
     let energy = false;
     let drain = false;
+    let perfect = false;
+    let targetHit = false;
     let currentStreak = state.currentStreak;
     let lastComboFrame = state.lastComboFrame;
     let timeGainWindowStart = state.timeGainWindowStart;
     let timeGainAccumulated = state.timeGainAccumulated;
+    let updatedTarget: TargetState = state.target;
+    let nextTargetAt = state.nextTargetAt;
 
     if (now - timeGainWindowStart >= 1000) {
       timeGainWindowStart = now;
       timeGainAccumulated = 0;
     }
 
-    if (isDrainOrb(target)) {
+    if (wasDrain) {
       stats.timeLeft = Math.max(0, stats.timeLeft - DRAIN_PENALTY_TIME);
       stats.score = Math.max(0, stats.score - DRAIN_PENALTY_SCORE);
       stats.chainLen = 0;
@@ -627,7 +675,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       stats.lastColor = target.color;
       comboWindowUntil = now + COMBO_WINDOW_MS;
 
-      if (isEnergyOrb(target)) {
+      if (wasEnergy) {
         stats.score += ENERGY_POINTS;
         energy = true;
       } else {
@@ -645,6 +693,29 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }
         get().progressColor(target.color);
       }
+
+      if (distance <= perfectThreshold) {
+        perfect = true;
+        stats.score += 5;
+        const windowAnchor = Math.max(comboWindowUntil, now);
+        const maxWindow = now + MAX_COMBO_WINDOW_MS;
+        comboWindowUntil = Math.min(windowAnchor + 1000, maxWindow);
+      }
+
+      if (
+        state.target.active &&
+        state.target.color === target.color &&
+        now < state.target.expiresAt
+      ) {
+        targetHit = true;
+        const multiplier = Math.min(1 + 0.25 * Math.max(stats.chainLen - 2, 0), 4);
+        const bonus = Math.round(BASE_POINTS * multiplier * 2);
+        stats.score += bonus;
+        stats.timeLeft += 2;
+        updatedTarget = { color: state.target.color, expiresAt: now, active: false };
+        const jitter = Math.floor(state.rng() * TARGET_VARIATION_MS);
+        nextTargetAt = now + TARGET_INTERVAL_MS + jitter;
+      }
     }
 
     if (stats.timeLeft < 0) stats.timeLeft = 0;
@@ -659,13 +730,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       lastComboFrame,
       timeGainWindowStart,
       timeGainAccumulated,
+      target: updatedTarget,
+      nextTargetAt,
     });
 
     if (energy) {
       get().grantBooster(1, 'energy');
     }
 
-    return { hit: true, energy, drain, combo: stats.chainLen };
+    return { hit: true, energy, drain, combo: stats.chainLen, perfect, target: targetHit, color: target.color };
   },
   grantBooster: (count, source = 'other') => {
     if (count <= 0) return;
