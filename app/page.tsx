@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import HomeContent from '@/components/HomeContent';
+import AppExperience from '@/components/AppExperience';
 
 const description =
   'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
@@ -29,18 +29,6 @@ export const metadata: Metadata = {
   },
 };
 
-type PageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-export default async function Page({ searchParams }: PageProps) {
-  const resolvedParams: Record<string, string | string[] | undefined> = await (searchParams ?? {});
-  const rawScore = resolvedParams.score;
-  const parsedScore = Array.isArray(rawScore) ? parseInt(rawScore[0] ?? '', 10) : parseInt(rawScore ?? '', 10);
-  const shareScore = Number.isFinite(parsedScore) ? parsedScore : undefined;
-  const rawBoard = resolvedParams.board;
-  const boardParam = Array.isArray(rawBoard) ? rawBoard[0] : rawBoard;
-  const shareBoard = boardParam === 'daily' ? 'daily' : 'normal';
-
-  return <HomeContent shareScore={shareScore} shareBoard={shareBoard} />;
+export default function Page() {
+  return <AppExperience />;
 }

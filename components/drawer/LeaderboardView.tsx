@@ -1,13 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Modal from './Modal';
 import { getBoard, shareUrl, type LeaderboardEntry } from '@/lib/leaderboard';
 import type { BoardKind } from '@/types/game';
 
-interface LeaderboardModalProps {
-  open: boolean;
-  onClose: () => void;
+interface LeaderboardViewProps {
   highlight?: {
     board: BoardKind;
     score: number;
@@ -35,14 +32,13 @@ function formatDate(value: string) {
   });
 }
 
-export default function LeaderboardModal({ open, onClose, highlight }: LeaderboardModalProps) {
+export default function LeaderboardView({ highlight }: LeaderboardViewProps) {
   const [activeBoard, setActiveBoard] = useState<BoardKind>('normal');
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
 
   useEffect(() => {
-    if (!open) return;
     setEntries(getBoard(activeBoard));
-  }, [open, activeBoard]);
+  }, [activeBoard]);
 
   useEffect(() => {
     if (!highlight) return;
@@ -50,13 +46,12 @@ export default function LeaderboardModal({ open, onClose, highlight }: Leaderboa
   }, [highlight]);
 
   useEffect(() => {
-    if (!open) return;
     const handleStorage = () => {
       setEntries(getBoard(activeBoard));
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, [open, activeBoard]);
+  }, [activeBoard]);
 
   const activeHighlight = useMemo(() => {
     if (!highlight) return null;
@@ -83,27 +78,14 @@ export default function LeaderboardModal({ open, onClose, highlight }: Leaderboa
   }, [shareTarget]);
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Leaderboard"
-      footer={
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-        >
-          Close
-        </button>
-      }
-    >
-      <div className="mb-4 flex gap-2">
+    <div className="space-y-4">
+      <div className="flex gap-2">
         {BOARDS.map((board) => (
           <button
             key={board.value}
             type="button"
             onClick={() => setActiveBoard(board.value)}
-            className={`flex-1 rounded-2xl px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
+            className={`button-tap flex-1 rounded-2xl px-3 py-2 text-sm font-semibold ${
               activeBoard === board.value ? 'bg-sky-500/70 text-slate-900' : 'bg-white/5 text-slate-200'
             }`}
           >
@@ -119,7 +101,10 @@ export default function LeaderboardModal({ open, onClose, highlight }: Leaderboa
             <div
               key={`${entry.date}-${entry.score}-${index}`}
               className={`flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm ${
-                activeHighlight && entry.score === activeHighlight.score && entry.combo === activeHighlight.combo && entry.streak === activeHighlight.streak
+                activeHighlight &&
+                entry.score === activeHighlight.score &&
+                entry.combo === activeHighlight.combo &&
+                entry.streak === activeHighlight.streak
                   ? 'border-sky-400/70 bg-sky-500/10'
                   : ''
               }`}
@@ -138,11 +123,11 @@ export default function LeaderboardModal({ open, onClose, highlight }: Leaderboa
           href={shareHref}
           target="_blank"
           rel="noreferrer"
-          className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-purple-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
+          className="button-tap inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-purple-500/40"
         >
           Share to Farcaster
         </a>
       ) : null}
-    </Modal>
+    </div>
   );
 }
