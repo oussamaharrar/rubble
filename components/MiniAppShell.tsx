@@ -23,8 +23,8 @@ export default function MiniAppShell({ children, header, footer, playing }: Mini
       </header>
 
       <main className="app-main pt-[var(--header-h)] pb-[var(--footer-h)]">
-        <div className="miniapp-frame px-3">
-          <div className="frame-inner relative mx-auto w-full" style={{ aspectRatio: '424 / 695' }}>
+        <div className="miniapp-frame">
+          <div className="frame-inner">
             {children}
           </div>
         </div>
