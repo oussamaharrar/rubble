@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
 
@@ -62,6 +62,8 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
+  const [frameStats, setFrameStats] = useState({ width: 0, height: 0, dpr: 1, bubbles: 0 });
+  const statsRef = useRef(frameStats);
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -71,6 +73,10 @@ export default function GameCanvas() {
       phase: Math.random() * Math.PI * 2,
     }));
   }
+
+  useEffect(() => {
+    statsRef.current = frameStats;
+  }, [frameStats]);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
@@ -112,7 +118,7 @@ export default function GameCanvas() {
       const box = frameEl.getBoundingClientRect();
       const cssW = Math.max(1, Math.floor(box.width));
       const cssH = Math.max(1, Math.floor(box.height));
-      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+      const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
 
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
@@ -121,6 +127,11 @@ export default function GameCanvas() {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
+      setFrameStats((prev) =>
+        prev.width !== cssW || prev.height !== cssH || prev.dpr !== dpr
+          ? { ...prev, width: cssW, height: cssH, dpr }
+          : prev
+      );
       setStageSize(cssW, cssH);
     };
 
@@ -154,6 +165,12 @@ export default function GameCanvas() {
     const render = (dt: number) => {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
+      const bubbleCount = bubbles.length;
+      if (statsRef.current.bubbles !== bubbleCount) {
+        setFrameStats((prev) =>
+          prev.bubbles !== bubbleCount ? { ...prev, bubbles: bubbleCount } : prev
+        );
+      }
       const size = gameSizeRef.current;
       const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
       const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
@@ -758,12 +775,26 @@ export default function GameCanvas() {
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
-    <div ref={frameRef} className="relative h-full w-full overflow-hidden rounded-3xl">
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 block touch-none"
-        style={{ width: '100%', height: '100%' }}
-      />
+    <div ref={frameRef} className="relative h-full w-full">
+      <canvas ref={canvasRef} className="app-canvas" />
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 8,
+          left: 8,
+          background: 'rgba(0,0,0,0.55)',
+          color: '#4ade80',
+          fontSize: 10,
+          padding: '4px 6px',
+          borderRadius: 4,
+          zIndex: 99,
+          fontFamily: 'monospace',
+          pointerEvents: 'none',
+        }}
+      >
+        w:{Math.round(frameStats.width)} h:{Math.round(frameStats.height)} DPR:
+        {frameStats.dpr.toFixed(2)} bubbles:{frameStats.bubbles}
+      </div>
     </div>
   );
 }

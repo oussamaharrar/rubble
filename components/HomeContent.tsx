@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import MiniAppShell from './MiniAppShell';
+import AppExperience from './AppExperience';
 import WalletBar from './WalletBar';
 import Drawer, { type DrawerView } from './Drawer';
 import GameStage from './stages/GameStage';
@@ -319,7 +319,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   );
 
   return (
-    <MiniAppShell playing={playing} header={headerContent} footer={footerContent}>
+    <AppExperience playing={playing} header={headerContent} footer={footerContent}>
       <div className="relative h-full w-full">
         <AnimatePresence mode="wait">
           {displayPhase === 'home' ? (
@@ -400,6 +400,6 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
           }}
         />
       </div>
-    </MiniAppShell>
+    </AppExperience>
   );
 }
