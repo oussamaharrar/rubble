@@ -55,3 +55,9 @@ export type RunStats = {
   paidEntryOrbs: number;
   entryMode: EntryMode | null;
 };
+
+export type TargetState = {
+  color?: BubbleColor;
+  expiresAt: number;
+  active: boolean;
+};

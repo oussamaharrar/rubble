@@ -21,6 +21,14 @@ const GLOW_MAP = {
 
 const MAX_PARTICLES = 32;
 
+interface Ripple {
+  x: number;
+  y: number;
+  progress: number;
+  maxRadius: number;
+  color: string;
+}
+
 interface Particle {
   x: number;
   y: number;
@@ -33,6 +41,7 @@ export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
+  const ripplesRef = useRef<Ripple[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
 
@@ -172,6 +181,25 @@ export default function GameCanvas() {
       }
       particlesRef.current = remaining.slice(0, MAX_PARTICLES);
 
+      const ripples = ripplesRef.current;
+      const rippleRemaining: Ripple[] = [];
+      for (const ripple of ripples) {
+        ripple.progress += dt * 0.0015;
+        if (ripple.progress >= 1) {
+          continue;
+        }
+        const radius = ripple.maxRadius * ripple.progress;
+        ctx.beginPath();
+        ctx.lineWidth = Math.max(1.2, 3 - ripple.progress * 2.4) * ratio;
+        ctx.strokeStyle = ripple.color;
+        ctx.globalAlpha = Math.max(0, 0.35 - ripple.progress * 0.3);
+        ctx.arc(ripple.x * ratio, ripple.y * ratio, Math.max(12, radius) * ratio, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        rippleRemaining.push(ripple);
+      }
+      ripplesRef.current = rippleRemaining.slice(0, 8);
+
       ctx.restore();
     };
 
@@ -182,13 +210,18 @@ export default function GameCanvas() {
         return;
       }
       const last = lastTimeRef.current ?? time;
-      const dt = Math.min(time - last, 32);
+      const rawDt = Math.min(time - last, 48);
       lastTimeRef.current = time;
       const state = useGameStore.getState();
       if (state.phase === 'playing' || state.phase === 'storm') {
-        state.tick(dt);
+        let remaining = Math.max(0, rawDt);
+        while (remaining > 0) {
+          const slice = Math.min(remaining, 10);
+          state.tick(slice);
+          remaining -= slice;
+        }
       }
-      render(dt);
+      render(rawDt);
       frameHandle = window.requestAnimationFrame(step);
     };
 
@@ -215,6 +248,9 @@ export default function GameCanvas() {
     if (!canvas) return;
     const allowHaptics = settings.haptics && !settings.reducedMotion;
     const handlePointer = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') {
+        event.preventDefault();
+      }
       const rect = canvas.getBoundingClientRect();
       const ratio = canvas.width / rect.width;
       const x = (event.clientX - rect.left) * ratio;
@@ -236,7 +272,13 @@ export default function GameCanvas() {
         }
       }
       if (result.hit) {
-        const color = result.energy ? 'rgba(56,189,248,0.6)' : result.drain ? 'rgba(248,113,113,0.6)' : 'rgba(255,255,255,0.35)';
+        const color = result.energy
+          ? 'rgba(56,189,248,0.6)'
+          : result.drain
+          ? 'rgba(248,113,113,0.6)'
+          : result.targetHit
+          ? 'rgba(56,189,248,0.65)'
+          : 'rgba(255,255,255,0.35)';
         particlesRef.current.unshift({
           x,
           y,
@@ -245,15 +287,24 @@ export default function GameCanvas() {
           color,
         });
         particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+        if (result.perfect && !prefersReducedMotion.current) {
+          const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
+          const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
+          ripplesRef.current.unshift({ x, y, progress: 0, maxRadius, color: rippleColor });
+          ripplesRef.current = ripplesRef.current.slice(0, 8);
+        }
       }
     };
     const handleMove = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') {
+        event.preventDefault();
+      }
       if (event.buttons > 0) {
         handlePointer(event);
       }
     };
-    canvas.addEventListener('pointerdown', handlePointer, { passive: true });
-    canvas.addEventListener('pointermove', handleMove, { passive: true });
+    canvas.addEventListener('pointerdown', handlePointer, { passive: false });
+    canvas.addEventListener('pointermove', handleMove, { passive: false });
     return () => {
       canvas.removeEventListener('pointerdown', handlePointer);
       canvas.removeEventListener('pointermove', handleMove);

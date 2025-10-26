@@ -96,7 +96,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           <button
             type="button"
             onClick={onPause}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/70 text-base font-semibold text-slate-100 transition hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            className="flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-white/15 bg-slate-900/70 text-base font-semibold text-slate-100 transition hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
             aria-label="Pause run"
           >
             ⏸
@@ -108,7 +108,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
         <motion.button
           type="button"
           onClick={handleUseOrb}
-          className="inline-flex items-center justify-center rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
           whileTap={{ scale: 0.95 }}
         >
           {boosterBank.freeOrbs > 0 ? 'Boost · Use Orb' : 'Boost · Shop'}
