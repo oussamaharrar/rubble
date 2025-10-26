@@ -48,6 +48,7 @@ interface PayButtonProps {
   disabled?: boolean;
   label?: string;
   icon?: ReactNode;
+  onGranted?: () => void;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -229,6 +230,7 @@ export default function PayButton({
   disabled = false,
   label,
   icon,
+  onGranted,
 }: PayButtonProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -290,8 +292,9 @@ export default function PayButton({
       dispatchBooster(boosterType, durationMs);
       showToast({ type: 'success', message: 'Boost activated on Base!' });
       setInfoMessage(null);
+      onGranted?.();
     },
-    [boosterType, durationMs, showToast]
+    [boosterType, durationMs, onGranted, showToast]
   );
 
   const handleCommerceSession = useCallback(
@@ -299,6 +302,7 @@ export default function PayButton({
       if (readBooleanField(session, 'mock')) {
         dispatchBooster(boosterType, durationMs);
         showToast({ type: 'success', message: 'Mock payment confirmed. Boost active!' });
+        onGranted?.();
         return;
       }
 
@@ -324,8 +328,9 @@ export default function PayButton({
 
       dispatchBooster(boosterType, durationMs);
       showToast({ type: 'success', message: 'Payment confirmed! Time Freeze engaged.' });
+      onGranted?.();
     },
-    [boosterType, durationMs, isMounted, showToast]
+    [boosterType, durationMs, isMounted, onGranted, showToast]
   );
 
   const handlePay = useCallback(async () => {

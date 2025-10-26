@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import PayButton from '@/components/PayButton';
@@ -16,6 +16,7 @@ interface DrawerProps {
   view: DrawerView;
   onClose: () => void;
   onSelect: (view: DrawerView) => void;
+  onShowTutorial: () => void;
   highlight?: {
     board: BoardKind;
     score: number;
@@ -78,10 +79,39 @@ function MissionsView() {
 function ShopView() {
   const freeOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
   const consumeBooster = useGameStore((state) => state.consumeBooster);
+  const unlockFeature = useGameStore((state) => state.unlockFeature);
+  const unlocks = useGameStore((state) => state.unlocks);
+  const settings = useGameStore((state) => state.settings);
+  const setSettings = useGameStore((state) => state.setSettings);
+  const grantBooster = useGameStore((state) => state.grantBooster);
+  const [message, setMessage] = useState<string | null>(null);
 
   const handleUseOrb = () => {
     void consumeBooster();
   };
+
+  useEffect(() => {
+    if (!message) return;
+    const timeout = window.setTimeout(() => setMessage(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [message]);
+
+  const handleThemeGranted = useCallback(() => {
+    unlockFeature('themeSkies');
+    setSettings({ theme: 'skies' });
+    setMessage('Soothing Skies theme unlocked!');
+  }, [setSettings, unlockFeature]);
+
+  const handleFxGranted = useCallback(() => {
+    unlockFeature('fxSparkle');
+    setSettings({ particleStyle: 'sparkle' });
+    setMessage('Sparkle FX unlocked!');
+  }, [setSettings, unlockFeature]);
+
+  const handleOrbBundle = useCallback(() => {
+    grantBooster(3, 'paid');
+    setMessage('Added +3 Energy Orbs!');
+  }, [grantBooster]);
 
   return (
     <div className="space-y-4 text-sm text-slate-200">
@@ -107,6 +137,66 @@ function ShopView() {
           <PayButton label="Boost on Base · 1 wei" />
         </div>
       </div>
+      <div className="rounded-2xl border border-sky-400/30 bg-sky-500/10 p-4 shadow-inner shadow-sky-500/30">
+        <p className="text-sm font-semibold text-sky-100">Theme Pack · Soothing Skies</p>
+        <p className="text-xs text-sky-100/80">Unlock an airy gradient preset with parallax clouds.</p>
+        <div className="mt-3">
+          {unlocks.themeSkies ? (
+            <div className="flex items-center justify-between">
+              <span className="rounded-full bg-sky-500/20 px-3 py-1 text-xs font-semibold text-sky-100">
+                Active: {settings.theme === 'skies' ? 'Skies' : 'Classic'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSettings({ theme: settings.theme === 'skies' ? 'default' : 'skies' })}
+                className="button-tap rounded-full border border-sky-300/50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-100"
+              >
+                Toggle Theme
+              </button>
+            </div>
+          ) : (
+            <div className="max-w-xs">
+              <PayButton sku="theme_pack_soothing_skies" label="Unlock Theme · 1 wei" onGranted={handleThemeGranted} />
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="rounded-2xl border border-violet-400/30 bg-violet-500/10 p-4 shadow-inner shadow-violet-500/30">
+        <p className="text-sm font-semibold text-violet-100">Particle Pack · Sparkle FX</p>
+        <p className="text-xs text-violet-100/80">Add sparkle subparticles to Perfect pops and bursts.</p>
+        <div className="mt-3">
+          {unlocks.fxSparkle ? (
+            <div className="flex items-center justify-between">
+              <span className="rounded-full bg-violet-500/25 px-3 py-1 text-xs font-semibold text-violet-100">
+                {settings.particleStyle === 'sparkle' ? 'Sparkle Enabled' : 'Classic Particles'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSettings({ particleStyle: settings.particleStyle === 'sparkle' ? 'classic' : 'sparkle' })}
+                className="button-tap rounded-full border border-violet-300/50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100"
+              >
+                Toggle FX
+              </button>
+            </div>
+          ) : (
+            <div className="max-w-xs">
+              <PayButton sku="particle_pack_sparkle_fx" label="Unlock Sparkle · 1 wei" onGranted={handleFxGranted} />
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 shadow-inner shadow-amber-500/20">
+        <p className="text-sm font-semibold text-amber-100">Starter Orb Bundle</p>
+        <p className="text-xs text-amber-100/80">Buy 3 extra Energy Orbs instantly via Base Pay.</p>
+        <div className="mt-3 max-w-xs">
+          <PayButton sku="starter_orb_bundle" label="Buy +3 Orbs · 1 wei" onGranted={handleOrbBundle} />
+        </div>
+      </div>
+      {message ? (
+        <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold text-slate-100">
+          {message}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -221,7 +311,7 @@ const HOW_TO = [
   'Use Booster Orbs or Base boosts to slow time during hectic waves.',
 ];
 
-function HowToView() {
+function HowToView({ onShowTutorial }: { onShowTutorial: () => void }) {
   return (
     <div className="space-y-3 text-left text-sm text-slate-200">
       {HOW_TO.map((tip, index) => (
@@ -230,6 +320,13 @@ function HowToView() {
           <p className="mt-1 text-sm text-slate-200">{tip}</p>
         </div>
       ))}
+      <button
+        type="button"
+        onClick={onShowTutorial}
+        className="button-tap w-full rounded-2xl border border-sky-400/40 bg-sky-500/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+      >
+        Launch Guided Tutorial
+      </button>
     </div>
   );
 }
@@ -258,7 +355,7 @@ function StatsView({ stats }: { stats: LifetimeStats }) {
   );
 }
 
-export default function Drawer({ open, view, onClose, onSelect, highlight, lifetimeStats }: DrawerProps) {
+export default function Drawer({ open, view, onClose, onSelect, onShowTutorial, highlight, lifetimeStats }: DrawerProps) {
   return (
     <AnimatePresence>
       {open ? (
@@ -309,7 +406,7 @@ export default function Drawer({ open, view, onClose, onSelect, highlight, lifet
                 {view === 'missions' ? <MissionsView /> : null}
                 {view === 'shop' ? <ShopView /> : null}
                 {view === 'leaderboard' ? <LeaderboardView highlight={highlight} /> : null}
-                {view === 'howto' ? <HowToView /> : null}
+                {view === 'howto' ? <HowToView onShowTutorial={onShowTutorial} /> : null}
                 {view === 'stats' ? <StatsView stats={lifetimeStats} /> : null}
               </div>
               <button

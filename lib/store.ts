@@ -12,6 +12,7 @@ import type {
   EntryMode,
   GamePhase,
   GameSettings,
+  GameUnlocks,
   GoldenOrbState,
   Mission,
   TargetState,
@@ -33,7 +34,8 @@ const GOLDEN_RESPAWN_MIN_MS = 20_000;
 const GOLDEN_RESPAWN_RANGE_MS = 10_000;
 
 const BOOSTER_KEY = 'rubble:booster-bank';
-const SETTINGS_KEY = 'rubble_settings_v1';
+const SETTINGS_KEY = 'rubble_settings_v2';
+const UNLOCKS_KEY = 'rubble:unlocks-v1';
 const DAILY_RUN_KEY_PREFIX = 'rubble:daily-runs';
 
 const BASE_MAX_BUBBLES = 40;
@@ -48,9 +50,46 @@ function settingsDefaults(): GameSettings {
   return {
     haptics: true,
     reducedMotion: false,
-    sfx: true,
+    sound: true,
     leftHanded: false,
+    theme: 'default',
+    particleStyle: 'classic',
   };
+}
+
+function unlockDefaults(): GameUnlocks {
+  return {
+    themeSkies: false,
+    fxSparkle: false,
+  };
+}
+
+function readUnlocks(): GameUnlocks {
+  if (typeof window === 'undefined') {
+    return unlockDefaults();
+  }
+  try {
+    const raw = window.localStorage.getItem(UNLOCKS_KEY);
+    if (!raw) {
+      return unlockDefaults();
+    }
+    const parsed = JSON.parse(raw) as Partial<GameUnlocks>;
+    return {
+      themeSkies: parsed.themeSkies === true,
+      fxSparkle: parsed.fxSparkle === true,
+    };
+  } catch {
+    return unlockDefaults();
+  }
+}
+
+function persistUnlocks(unlocks: GameUnlocks) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(UNLOCKS_KEY, JSON.stringify(unlocks));
+  } catch {
+    // ignore persistence failures
+  }
 }
 
 function readSettings(): GameSettings {
@@ -62,13 +101,16 @@ function readSettings(): GameSettings {
     if (!raw) {
       return settingsDefaults();
     }
-    const parsed = JSON.parse(raw) as Partial<GameSettings>;
+    const parsed = JSON.parse(raw) as Partial<GameSettings> & { sfx?: boolean };
     const defaults = settingsDefaults();
+    const legacySound = typeof parsed.sfx === 'boolean' ? parsed.sfx : undefined;
     return {
       haptics: typeof parsed.haptics === 'boolean' ? parsed.haptics : defaults.haptics,
       reducedMotion: typeof parsed.reducedMotion === 'boolean' ? parsed.reducedMotion : defaults.reducedMotion,
-      sfx: typeof parsed.sfx === 'boolean' ? parsed.sfx : defaults.sfx,
+      sound: typeof parsed.sound === 'boolean' ? parsed.sound : legacySound ?? defaults.sound,
       leftHanded: typeof parsed.leftHanded === 'boolean' ? parsed.leftHanded : defaults.leftHanded,
+      theme: parsed.theme === 'skies' ? 'skies' : defaults.theme,
+      particleStyle: parsed.particleStyle === 'sparkle' ? 'sparkle' : defaults.particleStyle,
     };
   } catch {
     return settingsDefaults();
@@ -274,6 +316,7 @@ type GameStore = {
   bubbles: Bubble[];
   missions: Mission[];
   boosterBank: BoosterBank;
+  unlocks: GameUnlocks;
   stormAt: number;
   stormInterval: number;
   stormDuration: number;
@@ -331,6 +374,7 @@ type GameStore = {
   loadDaily: (seed?: string | number) => void;
   setBoardKind: (board: BoardKind) => void;
   setSettings: (patch: Partial<GameSettings>) => void;
+  unlockFeature: (key: keyof GameUnlocks) => void;
   setStageSize: (width: number, height: number) => void;
   claimMission: (id: string) => void;
   progressColor: (color: BubbleColor) => void;
@@ -608,6 +652,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   bubbles: [],
   missions: [],
   boosterBank: initialBoosterBank(),
+  unlocks: readUnlocks(),
   stormAt: BASE_STORM_INTERVAL_MS,
   stormInterval: BASE_STORM_INTERVAL_MS,
   stormDuration: BASE_STORM_DURATION_MS,
@@ -1277,11 +1322,23 @@ export const useGameStore = create<GameStore>((set, get) => {
       const next: GameSettings = {
         haptics: patch.haptics ?? state.settings.haptics,
         reducedMotion: patch.reducedMotion ?? state.settings.reducedMotion,
-        sfx: patch.sfx ?? state.settings.sfx,
+        sound: patch.sound ?? state.settings.sound,
         leftHanded: patch.leftHanded ?? state.settings.leftHanded,
+        theme: patch.theme ?? state.settings.theme,
+        particleStyle: patch.particleStyle ?? state.settings.particleStyle,
       };
       persistSettings(next);
       return { settings: next };
+    });
+  },
+  unlockFeature: (key) => {
+    set((state) => {
+      if (state.unlocks[key]) {
+        return {};
+      }
+      const next = { ...state.unlocks, [key]: true } as GameUnlocks;
+      persistUnlocks(next);
+      return { unlocks: next };
     });
   },
   setStageSize: (width, height) => {

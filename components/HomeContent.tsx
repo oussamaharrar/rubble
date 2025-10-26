@@ -11,12 +11,14 @@ import HomeScreen from './stages/HomeScreen';
 import IntroScreen from './stages/IntroScreen';
 import SummaryScreen from './stages/SummaryScreen';
 import type { LifetimeStats } from './StatsModal';
+import TutorialOverlay from './TutorialOverlay';
 import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
 
 const LIFETIME_KEY = 'rubble:lifetime-stats';
+const TUTORIAL_KEY = 'rubble:tutorial-dismissed';
 
 type HighlightEntry = {
   board: BoardKind;
@@ -87,6 +89,15 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [highlight, setHighlight] = useState<HighlightEntry | null>(null);
   const [lastSavedRun, setLastSavedRun] = useState<number | null>(null);
   const [backdropPhase, setBackdropPhase] = useState<GamePhase>('home');
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [tutorialDismissed, setTutorialDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem(TUTORIAL_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -97,6 +108,12 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   useEffect(() => {
     loadDaily();
   }, [loadDaily]);
+
+  useEffect(() => {
+    if (!tutorialDismissed && phase === 'intro') {
+      setTutorialOpen(true);
+    }
+  }, [phase, tutorialDismissed]);
 
   useEffect(() => {
     if (phase === 'summary') {
@@ -174,6 +191,32 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   }, []);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+
+  const handleShowTutorial = useCallback(() => {
+    setTutorialOpen(true);
+  }, []);
+
+  const handleTutorialClose = useCallback(
+    (options?: { dontShow?: boolean }) => {
+      setTutorialOpen(false);
+      if (options?.dontShow) {
+        setTutorialDismissed(true);
+        if (typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem(TUTORIAL_KEY, '1');
+          } catch {
+            // ignore storage errors
+          }
+        }
+      } else if (options?.dontShow === false) {
+        setTutorialDismissed(false);
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(TUTORIAL_KEY);
+        }
+      }
+    },
+    []
+  );
 
   const openGate = useCallback(
     (board: BoardKind) => {
@@ -356,9 +399,11 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
           view={drawerView}
           onClose={closeDrawer}
           onSelect={setDrawerView}
+          onShowTutorial={handleShowTutorial}
           highlight={highlight}
           lifetimeStats={lifetime}
         />
+        <TutorialOverlay open={tutorialOpen} onClose={handleTutorialClose} />
       </div>
     </MiniAppShell>
   );
