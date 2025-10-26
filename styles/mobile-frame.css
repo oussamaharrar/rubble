@@ -52,9 +52,10 @@ body {
   position: relative;
   width: 100vw;
   max-width: var(--frame-w);
-  height: 100%;
-  max-height: calc(var(--vh, 1vh) * 100);
+  height: calc(var(--vh, 1vh) * 100);
+  max-height: 100%;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -64,10 +65,10 @@ body {
 
 .app-frame__inner {
   position: relative;
+  margin: 0 auto;
   aspect-ratio: 424 / 695;
-  width: 100%;
-  height: 100%;
-  max-height: var(--frame-h);
+  width: min(100%, var(--frame-w));
+  height: min(100%, var(--frame-h));
   display: grid;
   border-radius: 18px;
   overflow: hidden;
@@ -94,6 +95,13 @@ body {
   z-index: 2;
   width: 100%;
   height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-frame * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .app-chrome__inner {
@@ -159,4 +167,19 @@ body {
 .frame-inner canvas,
 canvas {
   overscroll-behavior: contain;
+}
+
+.rubble-diag {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #a6ffa6;
+  font: 10px/1.2 monospace;
+  padding: 4px 6px;
+  border-radius: 4px;
+  z-index: 99;
+  pointer-events: none;
+  user-select: none;
+  white-space: pre;
 }
