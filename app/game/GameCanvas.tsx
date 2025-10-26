@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useDiagnostics } from '@/components/DiagnosticsToggle';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
 
@@ -50,6 +51,16 @@ type AmbientDot = {
   phase: number;
 };
 
+type DiagnosticsState = {
+  cssWidth: number;
+  cssHeight: number;
+  bufferWidth: number;
+  bufferHeight: number;
+  dpr: number;
+  fps: number;
+  visibleBubbles: number;
+};
+
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -62,8 +73,18 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
-  const [frameStats, setFrameStats] = useState({ width: 0, height: 0, dpr: 1, bubbles: 0 });
-  const statsRef = useRef(frameStats);
+  const diagnosticsEnabled = useDiagnostics();
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsState>({
+    cssWidth: 0,
+    cssHeight: 0,
+    bufferWidth: 0,
+    bufferHeight: 0,
+    dpr: 1,
+    fps: 0,
+    visibleBubbles: 0,
+  });
+  const statsRef = useRef<DiagnosticsState>(diagnostics);
+  const diagnosticsEnabledRef = useRef(diagnosticsEnabled);
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -75,8 +96,15 @@ export default function GameCanvas() {
   }
 
   useEffect(() => {
-    statsRef.current = frameStats;
-  }, [frameStats]);
+    diagnosticsEnabledRef.current = diagnosticsEnabled;
+    if (diagnosticsEnabled) {
+      setDiagnostics({ ...statsRef.current });
+    }
+  }, [diagnosticsEnabled]);
+
+  useEffect(() => {
+    statsRef.current = { ...statsRef.current, ...diagnostics };
+  }, [diagnostics]);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
@@ -127,11 +155,18 @@ export default function GameCanvas() {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
-      setFrameStats((prev) =>
-        prev.width !== cssW || prev.height !== cssH || prev.dpr !== dpr
-          ? { ...prev, width: cssW, height: cssH, dpr }
-          : prev
-      );
+      const nextStats = {
+        ...statsRef.current,
+        cssWidth: cssW,
+        cssHeight: cssH,
+        bufferWidth: canvas.width,
+        bufferHeight: canvas.height,
+        dpr,
+      };
+      statsRef.current = nextStats;
+      if (diagnosticsEnabledRef.current) {
+        setDiagnostics({ ...nextStats });
+      }
       setStageSize(cssW, cssH);
     };
 
@@ -151,6 +186,8 @@ export default function GameCanvas() {
     const handleViewportResize = () => scheduleResize();
     window.addEventListener('resize', handleViewportResize, { passive: true });
     window.addEventListener('orientationchange', handleViewportResize, { passive: true });
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', handleViewportResize);
 
     const root = document.getElementById('rubble-root');
     const mutationObserver = root
@@ -166,11 +203,6 @@ export default function GameCanvas() {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
       const bubbleCount = bubbles.length;
-      if (statsRef.current.bubbles !== bubbleCount) {
-        setFrameStats((prev) =>
-          prev.bubbles !== bubbleCount ? { ...prev, bubbles: bubbleCount } : prev
-        );
-      }
       const size = gameSizeRef.current;
       const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
       const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
@@ -432,6 +464,21 @@ export default function GameCanvas() {
       }
 
       ctx.restore();
+
+      const currentStats = statsRef.current;
+      const fpsInstant = dt > 0 ? 1000 / dt : currentStats.fps || 0;
+      const smoothedFps = currentStats.fps
+        ? currentStats.fps + (fpsInstant - currentStats.fps) * 0.1
+        : fpsInstant;
+      const nextStats = {
+        ...currentStats,
+        visibleBubbles: bubbleCount,
+        fps: Number.isFinite(smoothedFps) ? smoothedFps : 0,
+      };
+      statsRef.current = nextStats;
+      if (diagnosticsEnabledRef.current) {
+        setDiagnostics({ ...nextStats });
+      }
     };
 
     const step = (time: number) => {
@@ -468,6 +515,7 @@ export default function GameCanvas() {
       }
       window.removeEventListener('resize', handleViewportResize);
       window.removeEventListener('orientationchange', handleViewportResize);
+      vv?.removeEventListener('resize', handleViewportResize);
       window.cancelAnimationFrame(frameHandle);
     };
   }, [setStageSize]);
@@ -774,27 +822,18 @@ export default function GameCanvas() {
     };
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
-  return (
-    <div ref={frameRef} className="relative h-full w-full">
-      <canvas ref={canvasRef} className="app-canvas" />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 8,
-          background: 'rgba(0,0,0,0.55)',
-          color: '#4ade80',
-          fontSize: 10,
-          padding: '4px 6px',
-          borderRadius: 4,
-          zIndex: 99,
-          fontFamily: 'monospace',
-          pointerEvents: 'none',
-        }}
-      >
-        w:{Math.round(frameStats.width)} h:{Math.round(frameStats.height)} DPR:
-        {frameStats.dpr.toFixed(2)} bubbles:{frameStats.bubbles}
+    return (
+      <div ref={frameRef} className="relative h-full w-full">
+        <canvas ref={canvasRef} className="app-canvas" />
+        {diagnosticsEnabled ? (
+          <div className="rubble-diag" role="status" aria-live="polite">
+            {`DPR: ${diagnostics.dpr.toFixed(2)}\n`}
+            {`canvasCSS: ${Math.round(diagnostics.cssWidth)}×${Math.round(diagnostics.cssHeight)}\n`}
+            {`buffer(px): ${diagnostics.bufferWidth}×${diagnostics.bufferHeight}\n`}
+            {`FPS: ${diagnostics.fps.toFixed(1)}\n`}
+            {`visibleBubbles: ${diagnostics.visibleBubbles}`}
+          </div>
+        ) : null}
       </div>
-    </div>
-  );
-}
+    );
+  }
