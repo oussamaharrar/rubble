@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDiagnostics } from '@/components/DiagnosticsToggle';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
 
@@ -62,8 +63,19 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
-  const [frameStats, setFrameStats] = useState({ width: 0, height: 0, dpr: 1, bubbles: 0 });
-  const statsRef = useRef(frameStats);
+  const diagnosticsEnabled = useDiagnostics();
+  const diagnosticsEnabledRef = useRef(diagnosticsEnabled);
+  const diagnosticsNeedsRenderRef = useRef(false);
+  const [, forceDiagnosticsRender] = useState(0);
+  const diagnosticsRef = useRef({
+    cssWidth: 0,
+    cssHeight: 0,
+    bufferWidth: 0,
+    bufferHeight: 0,
+    dpr: 1,
+    fps: 0,
+    visibleBubbles: 0,
+  });
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -75,8 +87,18 @@ export default function GameCanvas() {
   }
 
   useEffect(() => {
-    statsRef.current = frameStats;
-  }, [frameStats]);
+    diagnosticsEnabledRef.current = diagnosticsEnabled;
+    if (diagnosticsEnabled) {
+      diagnosticsNeedsRenderRef.current = true;
+      forceDiagnosticsRender((value) => value + 1);
+    }
+  }, [diagnosticsEnabled]);
+
+  const requestDiagnosticsRender = useCallback(() => {
+    if (diagnosticsEnabledRef.current) {
+      diagnosticsNeedsRenderRef.current = true;
+    }
+  }, []);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
@@ -127,11 +149,13 @@ export default function GameCanvas() {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
-      setFrameStats((prev) =>
-        prev.width !== cssW || prev.height !== cssH || prev.dpr !== dpr
-          ? { ...prev, width: cssW, height: cssH, dpr }
-          : prev
-      );
+      const diagnostics = diagnosticsRef.current;
+      diagnostics.cssWidth = cssW;
+      diagnostics.cssHeight = cssH;
+      diagnostics.bufferWidth = canvas.width;
+      diagnostics.bufferHeight = canvas.height;
+      diagnostics.dpr = dpr;
+      requestDiagnosticsRender();
       setStageSize(cssW, cssH);
     };
 
@@ -165,11 +189,11 @@ export default function GameCanvas() {
     const render = (dt: number) => {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
+      const diagnostics = diagnosticsRef.current;
       const bubbleCount = bubbles.length;
-      if (statsRef.current.bubbles !== bubbleCount) {
-        setFrameStats((prev) =>
-          prev.bubbles !== bubbleCount ? { ...prev, bubbles: bubbleCount } : prev
-        );
+      if (diagnostics.visibleBubbles !== bubbleCount) {
+        diagnostics.visibleBubbles = bubbleCount;
+        requestDiagnosticsRender();
       }
       const size = gameSizeRef.current;
       const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
@@ -443,6 +467,13 @@ export default function GameCanvas() {
       const last = lastTimeRef.current ?? time;
       const rawDt = Math.min(time - last, 48);
       lastTimeRef.current = time;
+      if (rawDt > 0) {
+        const diagnostics = diagnosticsRef.current;
+        const instantaneous = Math.min(240, 1000 / rawDt);
+        diagnostics.fps =
+          diagnostics.fps > 0 ? diagnostics.fps * 0.85 + instantaneous * 0.15 : instantaneous;
+        requestDiagnosticsRender();
+      }
       const state = useGameStore.getState();
       if (state.phase === 'playing' || state.phase === 'storm') {
         let remaining = Math.max(0, rawDt);
@@ -453,6 +484,10 @@ export default function GameCanvas() {
         }
       }
       render(rawDt);
+      if (diagnosticsEnabledRef.current && diagnosticsNeedsRenderRef.current) {
+        diagnosticsNeedsRenderRef.current = false;
+        forceDiagnosticsRender((value) => value + 1);
+      }
       frameHandle = window.requestAnimationFrame(step);
     };
 
@@ -470,7 +505,7 @@ export default function GameCanvas() {
       window.removeEventListener('orientationchange', handleViewportResize);
       window.cancelAnimationFrame(frameHandle);
     };
-  }, [setStageSize]);
+  }, [requestDiagnosticsRender, setStageSize]);
 
   useEffect(() => {
     if (phase === 'home') {
@@ -774,27 +809,21 @@ export default function GameCanvas() {
     };
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
+  const diagnostics = diagnosticsRef.current;
+  const showDiagnostics = diagnosticsEnabled;
+
   return (
-    <div ref={frameRef} className="relative h-full w-full">
+    <div ref={frameRef} className="app-surface relative h-full w-full">
       <canvas ref={canvasRef} className="app-canvas" />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 8,
-          background: 'rgba(0,0,0,0.55)',
-          color: '#4ade80',
-          fontSize: 10,
-          padding: '4px 6px',
-          borderRadius: 4,
-          zIndex: 99,
-          fontFamily: 'monospace',
-          pointerEvents: 'none',
-        }}
-      >
-        w:{Math.round(frameStats.width)} h:{Math.round(frameStats.height)} DPR:
-        {frameStats.dpr.toFixed(2)} bubbles:{frameStats.bubbles}
-      </div>
+      {showDiagnostics && (
+        <div className="rubble-diag" role="status" aria-live="polite">
+          {`DPR: ${diagnostics.dpr.toFixed(2)}\n`}
+          {`CSS: ${Math.round(diagnostics.cssWidth)}×${Math.round(diagnostics.cssHeight)}\n`}
+          {`BUF: ${diagnostics.bufferWidth}×${diagnostics.bufferHeight}\n`}
+          {`FPS: ${diagnostics.fps.toFixed(1)}\n`}
+          {`BUB: ${diagnostics.visibleBubbles}`}
+        </div>
+      )}
     </div>
   );
 }
