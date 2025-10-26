@@ -3,6 +3,7 @@
   --frame-h: 695px;
   --header-h: 64px;
   --footer-h: 44px;
+  --vh: 1vh;
 }
 
 @supports (padding: max(0px)) {
@@ -22,6 +23,11 @@
   overflow: hidden;
 }
 
+.app-viewport.vhfix {
+  height: calc(var(--vh) * 100);
+  min-height: auto;
+}
+
 /* The 424×695 frame */
 .miniapp-frame {
   width: 100%;
@@ -36,6 +42,7 @@
   aspect-ratio: 424 / 695;
   overflow: hidden;
   border-radius: 18px;
+  touch-action: none;
 }
 
 /* Content column; header/footer are fixed */
@@ -59,7 +66,9 @@
 /* Mobile niceties */
 html,
 body {
-  overscroll-behavior: none;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: contain;
   touch-action: manipulation;
 }
 
@@ -76,4 +85,16 @@ body {
   background: radial-gradient(circle at top, rgba(148, 163, 255, 0.08), transparent 60%),
     radial-gradient(circle at bottom, rgba(56, 189, 248, 0.06), transparent 55%);
   opacity: 0.75;
+}
+
+.drawer-content {
+  max-height: 70%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.frame-inner,
+.frame-inner canvas,
+canvas {
+  overscroll-behavior: contain;
 }
