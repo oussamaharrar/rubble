@@ -17,7 +17,7 @@ export type Bubble = {
   createdAt: number;
 };
 
-export type GamePhase = 'start' | 'playing' | 'storm' | 'paused' | 'summary';
+export type GamePhase = 'home' | 'gate' | 'intro' | 'playing' | 'storm' | 'paused' | 'summary';
 
 export type MissionKind = 'color' | 'combo' | 'survival';
 
