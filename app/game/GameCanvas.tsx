@@ -20,6 +20,9 @@ const GLOW_MAP = {
 } as const;
 
 const MAX_PARTICLES = 32;
+const BURST_MIN_RADIUS = 110;
+const BURST_MAX_RADIUS = 220;
+const OVERCHARGE_RADIUS_SCALE = 1.3;
 
 interface Ripple {
   x: number;
@@ -46,6 +49,10 @@ export default function GameCanvas() {
   const prefersReducedMotion = useRef(false);
   const dprRef = useRef(1);
   const sizeRef = useRef({ width: 0, height: 0 });
+  const burstPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const activePointerRef = useRef<number | null>(null);
+  const chargeActiveRef = useRef(false);
+  const shakeRef = useRef(0);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
@@ -100,7 +107,7 @@ export default function GameCanvas() {
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
-      const { bubbles, stats, slowTimeUntil, now, phase } = state;
+      const { bubbles, stats, slowTimeUntil, now, phase, burst, golden } = state;
       const measuredWidth = sizeRef.current.width || state.width || canvas.clientWidth || 0;
       const measuredHeight = sizeRef.current.height || state.height || canvas.clientHeight || 0;
       const dpr = dprRef.current;
@@ -136,7 +143,18 @@ export default function GameCanvas() {
       }
 
       const wobble = prefersReducedMotion.current ? 0 : Math.sin(now / 420) * 4;
-      ctx.translate(0, wobble);
+      let shakeX = 0;
+      let shakeY = 0;
+      if (shakeRef.current > 0.05) {
+        const shakePower = shakeRef.current;
+        const angle = (now / 280) % (Math.PI * 2);
+        shakeX = Math.cos(angle) * shakePower;
+        shakeY = Math.sin(angle * 1.35) * shakePower;
+        shakeRef.current = Math.max(0, shakePower * 0.82);
+      } else {
+        shakeRef.current = 0;
+      }
+      ctx.translate(shakeX, wobble + shakeY);
 
       for (const bubble of bubbles) {
         const x = bubble.x;
@@ -170,6 +188,36 @@ export default function GameCanvas() {
           ctx.stroke();
           ctx.setLineDash([]);
         }
+      }
+
+      if (golden.active) {
+        const elapsed = Math.max(0, now - golden.spawnedAt);
+        const graceFraction = golden.graceMs > 0 ? Math.min(1, elapsed / golden.graceMs) : 1;
+        const ringRadius = golden.r + 18;
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = golden.toxic ? 'rgba(248,113,113,0.9)' : 'rgba(250,204,21,0.92)';
+        ctx.shadowBlur = golden.toxic ? 24 : 18;
+        ctx.shadowColor = golden.toxic ? 'rgba(248,113,113,0.6)' : 'rgba(250,204,21,0.6)';
+        ctx.arc(golden.x, golden.y, golden.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 3;
+        if (!golden.toxic) {
+          ctx.strokeStyle = 'rgba(250,204,21,0.75)';
+          ctx.beginPath();
+          const remaining = Math.max(0, 1 - graceFraction);
+          ctx.arc(golden.x, golden.y, ringRadius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * remaining);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = 'rgba(248,113,113,0.65)';
+          ctx.beginPath();
+          ctx.setLineDash([6, 6]);
+          ctx.arc(golden.x, golden.y, ringRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.restore();
       }
 
       const particles = particlesRef.current;
@@ -208,6 +256,36 @@ export default function GameCanvas() {
         rippleRemaining.push(ripple);
       }
       ripplesRef.current = rippleRemaining.slice(0, 8);
+
+      const burstPointer = burstPointerRef.current;
+      if (burst.charging && burstPointer) {
+        const holdMs = Math.min(Math.max(0, now - burst.chargeStartAt), burst.maxHoldMs);
+        const progress = burst.maxHoldMs > 0 ? Math.min(1, holdMs / burst.maxHoldMs) : 1;
+        let indicatorRadius = BURST_MIN_RADIUS + (BURST_MAX_RADIUS - BURST_MIN_RADIUS) * progress;
+        if (burst.overcharge) {
+          indicatorRadius *= OVERCHARGE_RADIUS_SCALE;
+        }
+        ctx.beginPath();
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = burst.overcharge ? 'rgba(56,189,248,0.85)' : 'rgba(248,250,252,0.75)';
+        ctx.globalAlpha = 0.9;
+        ctx.arc(burstPointer.x, burstPointer.y, indicatorRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.setLineDash([12, 10]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = burst.overcharge ? 'rgba(56,189,248,0.55)' : 'rgba(250,204,21,0.45)';
+        ctx.arc(
+          burstPointer.x,
+          burstPointer.y,
+          Math.max(36, indicatorRadius * 0.6),
+          -Math.PI / 2,
+          -Math.PI / 2 + Math.PI * 2 * progress
+        );
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
       ctx.restore();
     };
@@ -256,13 +334,8 @@ export default function GameCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const allowHaptics = settings.haptics && !settings.reducedMotion;
-    const handlePointer = (event: PointerEvent) => {
-      if (event.pointerType === 'touch') {
-        event.preventDefault();
-      }
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+
+    const performTap = (x: number, y: number) => {
       const result = useGameStore.getState().tap(x, y);
       if (!result.hit) {
         if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -279,43 +352,130 @@ export default function GameCanvas() {
           navigator.vibrate(8);
         }
       }
-      if (result.hit) {
-        const color = result.energy
-          ? 'rgba(56,189,248,0.6)'
-          : result.drain
-          ? 'rgba(248,113,113,0.6)'
-          : result.targetHit
-          ? 'rgba(56,189,248,0.65)'
-          : 'rgba(255,255,255,0.35)';
-        particlesRef.current.unshift({
-          x,
-          y,
-          radius: 12,
-          life: 1,
-          color,
-        });
-        particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
-        if (result.perfect && !prefersReducedMotion.current) {
-          const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
-          const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
-          ripplesRef.current.unshift({ x, y, progress: 0, maxRadius, color: rippleColor });
-          ripplesRef.current = ripplesRef.current.slice(0, 8);
-        }
+      const color = result.energy
+        ? 'rgba(56,189,248,0.6)'
+        : result.drain
+        ? 'rgba(248,113,113,0.6)'
+        : result.targetHit
+        ? 'rgba(56,189,248,0.65)'
+        : 'rgba(255,255,255,0.35)';
+      particlesRef.current.unshift({ x, y, radius: 12, life: 1, color });
+      particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+      if (result.perfect && !prefersReducedMotion.current) {
+        const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
+        const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
+        ripplesRef.current.unshift({ x, y, progress: 0, maxRadius, color: rippleColor });
+        ripplesRef.current = ripplesRef.current.slice(0, 8);
       }
     };
-    const handleMove = (event: PointerEvent) => {
+
+    const handlePointerDown = (event: PointerEvent) => {
       if (event.pointerType === 'touch') {
         event.preventDefault();
       }
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const started = useGameStore.getState().beginBurstCharge(x, y);
+      if (!started) {
+        performTap(x, y);
+        return;
+      }
+      activePointerRef.current = event.pointerId;
+      burstPointerRef.current = { x, y };
+      chargeActiveRef.current = true;
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (chargeActiveRef.current && activePointerRef.current === event.pointerId) {
+        if (event.pointerType === 'touch') {
+          event.preventDefault();
+        }
+        const rect = canvas.getBoundingClientRect();
+        burstPointerRef.current = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+        return;
+      }
       if (event.buttons > 0) {
-        handlePointer(event);
+        if (event.pointerType === 'touch') {
+          event.preventDefault();
+        }
+        const rect = canvas.getBoundingClientRect();
+        performTap(event.clientX - rect.left, event.clientY - rect.top);
       }
     };
-    canvas.addEventListener('pointerdown', handlePointer, { passive: false });
-    canvas.addEventListener('pointermove', handleMove, { passive: false });
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (!chargeActiveRef.current || activePointerRef.current !== event.pointerId) {
+        return;
+      }
+      if (event.pointerType === 'touch') {
+        event.preventDefault();
+      }
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const result = useGameStore.getState().fireBurst(x, y);
+      chargeActiveRef.current = false;
+      activePointerRef.current = null;
+      burstPointerRef.current = null;
+      if (!result.triggered) {
+        performTap(x, y);
+        return;
+      }
+      if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate([12, 18, 12]);
+      }
+      const rippleColor = result.golden === 'toxic' ? 'rgba(248,113,113,0.4)' : 'rgba(148,232,255,0.4)';
+      const burstRippleRadius = Math.max(result.radius * 1.35, 120);
+      ripplesRef.current.unshift({ x, y, progress: 0, maxRadius: burstRippleRadius, color: rippleColor });
+      ripplesRef.current = ripplesRef.current.slice(0, 8);
+      for (const bubble of result.popped.slice(0, 20)) {
+        const bubbleColor = bubble.energy
+          ? 'rgba(56,189,248,0.55)'
+          : bubble.drain
+          ? 'rgba(248,113,113,0.6)'
+          : 'rgba(255,255,255,0.32)';
+        particlesRef.current.unshift({
+          x: bubble.x,
+          y: bubble.y,
+          radius: Math.max(10, bubble.r * 0.6),
+          life: 1,
+          color: bubbleColor,
+        });
+      }
+      particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+      shakeRef.current = Math.min(18, 6 + result.radius * 0.08);
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      if (chargeActiveRef.current && activePointerRef.current === event.pointerId) {
+        useGameStore.getState().cancelBurstCharge();
+        chargeActiveRef.current = false;
+        activePointerRef.current = null;
+        burstPointerRef.current = null;
+      }
+    };
+
+    canvas.addEventListener('pointerdown', handlePointerDown, { passive: false });
+    canvas.addEventListener('pointermove', handlePointerMove, { passive: false });
+    canvas.addEventListener('pointerup', handlePointerUp, { passive: false });
+    canvas.addEventListener('pointercancel', handlePointerCancel, { passive: false });
+    canvas.addEventListener('pointerleave', handlePointerCancel, { passive: false });
     return () => {
-      canvas.removeEventListener('pointerdown', handlePointer);
-      canvas.removeEventListener('pointermove', handleMove);
+      canvas.removeEventListener('pointerdown', handlePointerDown);
+      canvas.removeEventListener('pointermove', handlePointerMove);
+      canvas.removeEventListener('pointerup', handlePointerUp);
+      canvas.removeEventListener('pointercancel', handlePointerCancel);
+      canvas.removeEventListener('pointerleave', handlePointerCancel);
+      if (chargeActiveRef.current) {
+        useGameStore.getState().cancelBurstCharge();
+        chargeActiveRef.current = false;
+        activePointerRef.current = null;
+        burstPointerRef.current = null;
+      }
     };
   }, [settings.haptics, settings.reducedMotion]);
 

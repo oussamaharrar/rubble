@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { useGameStore } from '@/lib/store';
@@ -18,10 +18,30 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const slowTimeUntil = useGameStore((state) => state.slowTimeUntil);
   const now = useGameStore((state) => state.now);
   const leftHanded = useGameStore((state) => state.settings.leftHanded);
+  const burst = useGameStore((state) => state.burst);
+  const toggleBurstOvercharge = useGameStore((state) => state.toggleBurstOvercharge);
+  const golden = useGameStore((state) => state.golden);
 
   const comboActive = stats.chainLen >= 3;
   const timeCritical = stats.timeLeft <= 10 && (phase === 'playing' || phase === 'storm');
   const slowActive = slowTimeUntil > now;
+  const burstCooldownRemaining = Math.max(0, burst.readyAt - now);
+  const burstProgress = useMemo(() => {
+    if (burst.cooldownMs <= 0) return 1;
+    const ratio = 1 - burstCooldownRemaining / burst.cooldownMs;
+    return Math.max(0, Math.min(1, ratio));
+  }, [burst.cooldownMs, burstCooldownRemaining]);
+  const burstReady = burstCooldownRemaining <= 0;
+  const burstCooldownSeconds = Math.max(0, Math.ceil(burstCooldownRemaining / 1000));
+  const burstLabel = burst.overcharge ? 'Over' : burstReady ? 'Ready' : `${burstCooldownSeconds}s`;
+  const burstRingColor = burst.overcharge ? '#38bdf8' : burstReady ? '#34d399' : '#f97316';
+  const burstRingStyle = useMemo<CSSProperties>(
+    () => ({
+      backgroundImage: `conic-gradient(${burstRingColor} ${Math.max(0, burstProgress) * 360}deg, rgba(15,23,42,0.45) 0deg)`,
+    }),
+    [burstProgress, burstRingColor]
+  );
+  const goldenDanger = golden.active && golden.toxic;
 
   const formattedTime = useMemo(() => {
     const seconds = Math.max(0, stats.timeLeft);
@@ -38,6 +58,17 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const handleUseOrb = () => {
     const used = consumeBooster();
     if (!used) {
+      onRequestShop();
+    }
+  };
+
+  const handleBurstToggle = () => {
+    if (boosterBank.freeOrbs <= 0 && !burst.overcharge) {
+      onRequestShop();
+      return;
+    }
+    const enabled = toggleBurstOvercharge();
+    if (!enabled && boosterBank.freeOrbs <= 0) {
       onRequestShop();
     }
   };
@@ -82,17 +113,48 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           </div>
         </div>
         <div className={clsx('pointer-events-auto flex flex-col gap-2', leftHanded ? 'items-start' : 'items-end')}>
-          <motion.div
-            animate={timeCritical ? { scale: [1, 1.05, 1], color: ['#f8fafc', '#f87171', '#f8fafc'] } : { scale: 1, color: '#f8fafc' }}
-            transition={{ duration: 0.8, repeat: timeCritical ? Infinity : 0 }}
-            className={clsx(
-              'rounded-full border border-white/10 bg-slate-950/85 px-5 py-2 text-xl font-semibold tracking-tight text-slate-100 shadow-lg shadow-black/40',
-              timeCritical && 'border-red-400/50'
+          <div className={clsx('flex items-center gap-2', leftHanded ? 'flex-row-reverse' : 'flex-row')}>
+            <motion.div
+              animate={timeCritical ? { scale: [1, 1.05, 1], color: ['#f8fafc', '#f87171', '#f8fafc'] } : { scale: 1, color: '#f8fafc' }}
+              transition={{ duration: 0.8, repeat: timeCritical ? Infinity : 0 }}
+              className={clsx(
+                'rounded-full border border-white/10 bg-slate-950/85 px-5 py-2 text-xl font-semibold tracking-tight text-slate-100 shadow-lg shadow-black/40',
+                timeCritical && 'border-red-400/50'
+              )}
+              aria-live="polite"
+            >
+              {formattedTime}
+            </motion.div>
+            {goldenDanger && (
+              <span className="rounded-full bg-rose-600/80 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-rose-100 shadow shadow-rose-900/40">
+                ☠
+              </span>
             )}
-            aria-live="polite"
-          >
-            {formattedTime}
-          </motion.div>
+            <button
+              type="button"
+              onClick={handleBurstToggle}
+              className={clsx(
+                'relative flex h-12 w-12 min-h-[44px] min-w-[44px] items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50',
+                burst.overcharge ? 'text-sky-100' : burstReady ? 'text-emerald-100' : 'text-slate-200'
+              )}
+              aria-pressed={burst.overcharge}
+              aria-label={burstReady ? 'Burst ready' : `Burst cooling down ${burstCooldownSeconds} seconds`}
+            >
+              <span className="absolute inset-0 rounded-full opacity-80" style={burstRingStyle} aria-hidden="true" />
+              <span
+                className={clsx(
+                  'relative inline-flex h-9 w-9 items-center justify-center rounded-full border bg-slate-950/85 text-[11px] font-semibold uppercase tracking-tight shadow-inner transition',
+                  burst.overcharge
+                    ? 'border-sky-400/70 text-sky-100 shadow-sky-500/40'
+                    : burstReady
+                    ? 'border-emerald-400/70 text-emerald-100 shadow-emerald-500/30'
+                    : 'border-amber-400/50 text-amber-100'
+                )}
+              >
+                {burstLabel}
+              </span>
+            </button>
+          </div>
           <button
             type="button"
             onClick={onPause}
