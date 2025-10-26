@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode } from 'react';
+import clsx from 'clsx';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 
 interface MiniAppShellProps {
@@ -24,12 +25,21 @@ export default function MiniAppShell({ children, header, footer, playing }: Mini
         </div>
       </header>
 
-      <main className="app-main pt-[var(--header-h)] pb-[var(--footer-h)]">
-        <div className="miniapp-frame">
-          <div className="frame-inner">
-            {children}
+      <main
+        className={clsx(
+          'app-main',
+          playing ? 'pt-0 pb-0' : 'pt-[var(--header-h)] pb-[var(--footer-h)]'
+        )}
+      >
+        {playing ? (
+          children
+        ) : (
+          <div className="miniapp-frame">
+            <div className="frame-inner">
+              {children}
+            </div>
           </div>
-        </div>
+        )}
       </main>
 
       <footer className="home-chrome fixed inset-x-0 bottom-0 z-40 h-[var(--footer-h)] border-t border-white/10 bg-[#06080f]/80 backdrop-blur-md">

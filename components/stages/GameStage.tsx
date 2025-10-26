@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import GameCanvas from '@/app/game/GameCanvas';
+import AppExperience from '@/components/AppExperience';
 import HUD from '@/components/HUD';
 import PauseOverlay from '@/components/PauseOverlay';
 import { useGameStore } from '@/lib/store';
@@ -50,56 +51,61 @@ export default function GameStage({ onPause, onResume, onExit, onRequestDrawer }
   const handleRequestShop = () => onRequestDrawer('shop');
 
   return (
-    <div className="absolute inset-0">
+    <AppExperience
+      hud={
+        <div className="relative h-full w-full">
+          <HUD onPause={onPause} onRequestShop={handleRequestShop} />
+          <div className="pointer-events-none absolute inset-x-0 top-4 z-40 flex flex-col items-center gap-2 px-4 text-xs font-semibold uppercase tracking-wide">
+            <AnimatePresence>
+              {showTargetActive && targetLabel && targetClass ? (
+                <motion.div
+                  key="target-active"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.2 }}
+                  className={`rounded-full border px-3 py-1 ${targetClass}`}
+                >
+                  Target · {targetLabel}
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+            <AnimatePresence>
+              {showCelebration ? (
+                <motion.div
+                  key="target-hit"
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.94 }}
+                  transition={{ duration: 0.18 }}
+                  className="rounded-full border border-sky-400/50 bg-sky-500/20 px-4 py-1 text-sky-100 shadow-lg shadow-sky-500/30"
+                >
+                  Target!
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+            <AnimatePresence>
+              {showPerfect ? (
+                <motion.div
+                  key="perfect"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.18 }}
+                  className="rounded-full border border-emerald-400/50 bg-emerald-500/15 px-3 py-1 text-emerald-100 shadow-lg shadow-emerald-500/20"
+                >
+                  Perfect!
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
+          <FirstRunPrompts />
+          <PauseOverlay open={paused} onResume={onResume} onExit={onExit} />
+        </div>
+      }
+    >
       <GameCanvas />
-      <HUD onPause={onPause} onRequestShop={handleRequestShop} />
-      <div className="pointer-events-none absolute inset-x-0 top-4 z-40 flex flex-col items-center gap-2 px-4 text-xs font-semibold uppercase tracking-wide">
-        <AnimatePresence>
-          {showTargetActive && targetLabel && targetClass ? (
-            <motion.div
-              key="target-active"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-              className={`rounded-full border px-3 py-1 ${targetClass}`}
-            >
-              Target · {targetLabel}
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-        <AnimatePresence>
-          {showCelebration ? (
-            <motion.div
-              key="target-hit"
-              initial={{ opacity: 0, scale: 0.92 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.94 }}
-              transition={{ duration: 0.18 }}
-              className="rounded-full border border-sky-400/50 bg-sky-500/20 px-4 py-1 text-sky-100 shadow-lg shadow-sky-500/30"
-            >
-              Target!
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-        <AnimatePresence>
-          {showPerfect ? (
-            <motion.div
-              key="perfect"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.18 }}
-              className="rounded-full border border-emerald-400/50 bg-emerald-500/15 px-3 py-1 text-emerald-100 shadow-lg shadow-emerald-500/20"
-            >
-              Perfect!
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-      </div>
-      <FirstRunPrompts />
-      <PauseOverlay open={paused} onResume={onResume} onExit={onExit} />
-    </div>
+    </AppExperience>
   );
 }
 
