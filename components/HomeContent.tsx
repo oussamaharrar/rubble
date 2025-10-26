@@ -106,7 +106,6 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [lastSavedRun, setLastSavedRun] = useState<number | null>(null);
 
   const playing = phase === 'playing' || phase === 'storm';
-  const hideChrome = playing || phase === 'paused';
   const showHud = playing;
   const showStartScreen = phase === 'start';
   const showPauseOverlay = phase === 'paused';
@@ -260,143 +259,151 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
     }
   }, []);
 
+  const headerContent = (
+    <>
+      <div className="flex flex-shrink-0 items-center gap-2 text-xs uppercase tracking-[0.24em] text-slate-200">
+        <span className="text-sm font-semibold text-white">Rubble</span>
+        <span className="hidden font-medium text-slate-500 sm:inline">Storm &amp; Combos</span>
+      </div>
+      <div className="flex flex-1 flex-wrap items-center justify-end gap-2 text-[13px] text-slate-200">
+        <button
+          type="button"
+          onClick={() => setShopOpen(true)}
+          className="home-chrome inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 font-semibold transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          Boosts
+        </button>
+        <button
+          type="button"
+          onClick={() => setMissionsOpen(true)}
+          className="home-chrome inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 font-semibold transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          Missions {missions.length > 0 ? `(${completedMissions}/${missions.length})` : ''}
+        </button>
+        <button
+          type="button"
+          onClick={() => setLeaderboardOpen(true)}
+          className="home-chrome inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 font-semibold transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          Leaderboard
+        </button>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="home-chrome inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 font-semibold transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          Settings
+        </button>
+      </div>
+    </>
+  );
+
+  const footerContent = (
+    <>
+      <button
+        type="button"
+        onClick={() => setHowOpen(true)}
+        className="home-chrome inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 text-sm font-semibold transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+      >
+        How to Play
+      </button>
+      <button
+        type="button"
+        onClick={() => setStatsOpen(true)}
+        className="home-chrome inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 text-sm font-semibold transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+      >
+        Stats
+      </button>
+    </>
+  );
+
   return (
-    <MiniAppShell>
-      <div className="flex h-full flex-col bg-gradient-to-b from-slate-950 via-slate-950/80 to-slate-950">
-        <AnimatePresence initial={false}>
-          {!hideChrome ? (
-            <motion.header
-              key="app-header"
-              initial={{ opacity: 0, y: -16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="flex items-center justify-between border-b border-white/10 px-4 py-3"
+    <MiniAppShell header={headerContent} footer={footerContent}>
+      <div className="relative h-full w-full">
+        <GameCanvas />
+        <AnimatePresence>
+          {showHud ? (
+            <motion.div
+              key="hud"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="frame-overlay"
             >
-              <WalletBar />
-              <div className="flex items-center gap-3 text-xs text-slate-300">
-                <button
-                  type="button"
-                  onClick={() => setShopOpen(true)}
-                  className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                >
-                  Boosts
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMissionsOpen(true)}
-                  className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                >
-                  Missions {missions.length > 0 ? `(${completedMissions}/${missions.length})` : ''}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLeaderboardOpen(true)}
-                  className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                >
-                  Leaderboard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(true)}
-                  className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                >
-                  Settings
-                </button>
-              </div>
-            </motion.header>
+              <HUD onPause={pauseRun} onRequestShop={() => setShopOpen(true)} />
+            </motion.div>
           ) : null}
         </AnimatePresence>
-        {showShareBanner ? (
-          <div className="bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">
-            <div className="flex items-center justify-between gap-3">
-              <span>
-                Shared score: {shareScore} ({shareBoard === 'daily' ? 'Daily Challenge' : 'Arcade'})
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setLeaderboardOpen(true)}
-                  className="rounded-full border border-emerald-400/40 px-3 py-1 font-semibold text-emerald-100 transition hover:bg-emerald-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"
-                >
-                  View Board
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShareDismissed(true)}
-                  className="rounded-full border border-emerald-400/40 px-3 py-1 font-semibold text-emerald-100 transition hover:bg-emerald-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-        <div className="relative flex-1 overflow-hidden p-4">
-          <motion.div
-            className="relative h-full w-full overflow-hidden rounded-3xl border border-white/10 shadow-inner shadow-black/40"
-            animate={{
-              backgroundColor: playing ? 'rgba(2,6,23,0.92)' : 'rgba(7,12,24,0.7)',
-              boxShadow: playing ? '0 22px 48px rgba(1,3,11,0.65)' : '0 32px 64px rgba(3,7,18,0.55)',
-            }}
-            transition={{ duration: 0.3, ease: 'easeOut' }}
-          >
-            <GameCanvas />
-            <AnimatePresence>
-              {showHud ? (
-                <motion.div
-                  key="hud"
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.2, ease: 'easeOut' }}
-                >
-                  <HUD onPause={pauseRun} onRequestShop={() => setShopOpen(true)} />
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-            <PauseOverlay open={showPauseOverlay} onResume={resumeRun} onExit={exitToMenu} />
-            <StartScreen
-              open={showStartScreen}
-              onPlay={requestPlay}
-              onDailyChallenge={requestDaily}
-              onOpenMissions={() => setMissionsOpen(true)}
-              onOpenHowTo={() => setHowOpen(true)}
-              onOpenStats={() => setStatsOpen(true)}
-              onOpenShop={() => setShopOpen(true)}
-              onOpenLeaderboard={() => setLeaderboardOpen(true)}
-              onOpenSettings={() => setSettingsOpen(true)}
-            />
-            <StoryIntro open={storyOpen} onDismiss={handleDismissStory} />
-          </motion.div>
+        <div className="frame-overlay">
+          <PauseOverlay open={showPauseOverlay} onResume={resumeRun} onExit={exitToMenu} />
+          <StartScreen
+            open={showStartScreen}
+            onPlay={requestPlay}
+            onDailyChallenge={requestDaily}
+            onOpenMissions={() => setMissionsOpen(true)}
+            onOpenHowTo={() => setHowOpen(true)}
+            onOpenStats={() => setStatsOpen(true)}
+            onOpenShop={() => setShopOpen(true)}
+            onOpenLeaderboard={() => setLeaderboardOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            shareBanner={
+              showShareBanner ? (
+                <div className="home-chrome rounded-2xl bg-emerald-500/15 px-4 py-2 text-[13px] text-emerald-100 shadow-lg shadow-emerald-500/20">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">
+                      Shared score: {shareScore} ({shareBoard === 'daily' ? 'Daily Challenge' : 'Arcade'})
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLeaderboardOpen(true)}
+                        className="inline-flex min-h-[36px] min-w-[44px] items-center justify-center rounded-full border border-emerald-400/50 px-3 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"
+                      >
+                        View Board
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShareDismissed(true)}
+                        className="inline-flex min-h-[36px] min-w-[44px] items-center justify-center rounded-full border border-emerald-400/50 px-3 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null
+            }
+          />
+          <StoryIntro open={storyOpen} onDismiss={handleDismissStory} />
         </div>
-        <AnimatePresence initial={false}>
-          {!hideChrome ? (
-            <motion.footer
-              key="app-footer"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 16 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="flex items-center justify-between border-t border-white/5 px-4 py-3 text-xs text-slate-400"
-            >
+        <div className="home-chrome pointer-events-none absolute inset-x-0 top-4 flex flex-col gap-3 px-4">
+          <section className="pointer-events-auto relative bg-gradient-to-b from-[#06080f] to-[#0a0d15] rounded-3xl p-6 pb-10 shadow-lg text-center">
+            <h2 className="text-2xl font-bold tracking-wide text-white mb-2">Storm &amp; Combos</h2>
+            <p className="text-gray-400 text-sm mb-6">
+              Race the clock, chain colors, and survive the Base storm for leaderboard glory.
+            </p>
+            <div className="flex flex-wrap justify-center gap-2 text-xs text-slate-200">
               <button
                 type="button"
-                onClick={() => setHowOpen(true)}
-                className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                onClick={requestPlay}
+                className="inline-flex min-h-[40px] min-w-[44px] items-center justify-center rounded-full bg-sky-500/90 px-5 font-semibold text-slate-900 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
               >
-                How to Play
+                Play Normal
               </button>
               <button
                 type="button"
-                onClick={() => setStatsOpen(true)}
-                className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                onClick={requestDaily}
+                className="inline-flex min-h-[40px] min-w-[44px] items-center justify-center rounded-full border border-amber-400/60 bg-amber-500/15 px-5 font-semibold text-amber-200 shadow-lg shadow-amber-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-200"
               >
-                Stats
+                Daily Run
               </button>
-            </motion.footer>
-          ) : null}
-        </AnimatePresence>
+            </div>
+          </section>
+          <div className="pointer-events-auto">
+            <WalletBar />
+          </div>
+        </div>
       </div>
       <MissionsModal open={missionsOpen} onClose={() => setMissionsOpen(false)} />
       <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} />

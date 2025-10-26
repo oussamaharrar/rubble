@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 interface StartScreenProps {
@@ -13,6 +13,7 @@ interface StartScreenProps {
   onOpenShop: () => void;
   onOpenLeaderboard: () => void;
   onOpenSettings: () => void;
+  shareBanner?: ReactNode;
 }
 
 export default function StartScreen({
@@ -25,6 +26,7 @@ export default function StartScreen({
   onOpenShop,
   onOpenLeaderboard,
   onOpenSettings,
+  shareBanner,
 }: StartScreenProps) {
   useEffect(() => {
     if (!open) return;
@@ -48,6 +50,7 @@ export default function StartScreen({
           exit={{ opacity: 0 }}
           className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-gradient-to-br from-slate-950/90 via-slate-900/70 to-sky-950/80 px-6 text-center"
         >
+          {shareBanner ? <div className="mb-4 w-full max-w-sm">{shareBanner}</div> : null}
           <motion.div
             initial={{ scale: 0.9, rotate: -2 }}
             animate={{ scale: 1, rotate: 0 }}

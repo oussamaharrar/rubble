@@ -19,14 +19,19 @@ const GLOW_MAP = {
   orange: 'rgba(251,146,60,0.45)',
 } as const;
 
-const MAX_PARTICLES = 32;
+const MAX_PARTICLES = 42;
+
+type ParticleKind = 'burst' | 'ripple' | 'label';
 
 interface Particle {
+  kind: ParticleKind;
   x: number;
   y: number;
   radius: number;
   life: number;
   color: string;
+  text?: string;
+  velocity?: number;
 }
 
 export default function GameCanvas() {
@@ -86,7 +91,7 @@ export default function GameCanvas() {
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
-      const { bubbles, width, stats, slowTimeUntil, now, phase } = state;
+      const { bubbles, width, stats, slowTimeUntil, now, phase, target } = state;
       const ratio = width > 0 ? canvas.width / width : 1;
       ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -120,6 +125,9 @@ export default function GameCanvas() {
       const wobble = prefersReducedMotion.current ? 0 : Math.sin(now / 420) * 4;
       ctx.translate(0, wobble);
 
+      const targetActive = target.active && now < target.expiresAt;
+      const targetColor = target.color;
+
       for (const bubble of bubbles) {
         const x = bubble.x * ratio;
         const y = bubble.y * ratio;
@@ -152,22 +160,55 @@ export default function GameCanvas() {
           ctx.stroke();
           ctx.setLineDash([]);
         }
+
+        if (targetActive && bubble.color === targetColor && !bubble.poison) {
+          ctx.beginPath();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+          ctx.setLineDash([4, 6]);
+          ctx.arc(x, y, r * 1.18, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
 
       const particles = particlesRef.current;
       const remaining: Particle[] = [];
       for (const particle of particles) {
-        const radius = particle.radius * ratio;
         const alpha = Math.max(0, particle.life);
-        if (alpha <= 0) continue;
-        ctx.beginPath();
-        ctx.fillStyle = particle.color;
-        ctx.globalAlpha = alpha;
-        ctx.arc(particle.x * ratio, particle.y * ratio, radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        particle.life -= dt * 0.0025;
-        particle.radius += dt * 0.04;
+        if (alpha <= 0) {
+          continue;
+        }
+        if (particle.kind === 'burst') {
+          const radius = particle.radius * ratio;
+          ctx.beginPath();
+          ctx.fillStyle = particle.color;
+          ctx.globalAlpha = alpha;
+          ctx.arc(particle.x * ratio, particle.y * ratio, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          particle.life -= dt * 0.0025;
+          particle.radius += dt * 0.04;
+        } else if (particle.kind === 'ripple') {
+          ctx.beginPath();
+          ctx.globalAlpha = alpha * 0.8;
+          ctx.strokeStyle = particle.color;
+          ctx.lineWidth = 2;
+          ctx.arc(particle.x * ratio, particle.y * ratio, particle.radius * ratio, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          particle.life -= dt * 0.0016;
+          particle.radius += dt * 0.22;
+        } else if (particle.kind === 'label') {
+          ctx.globalAlpha = alpha;
+          ctx.font = `600 ${Math.max(14, 18 * alpha)}px 'Inter', sans-serif`;
+          ctx.fillStyle = particle.color;
+          ctx.textAlign = 'center';
+          ctx.fillText(particle.text ?? '', particle.x * ratio, particle.y * ratio);
+          ctx.globalAlpha = 1;
+          particle.y += (particle.velocity ?? -0.04) * dt;
+          particle.life -= dt * 0.0012;
+        }
         remaining.push(particle);
       }
       particlesRef.current = remaining.slice(0, MAX_PARTICLES);
@@ -182,7 +223,7 @@ export default function GameCanvas() {
         return;
       }
       const last = lastTimeRef.current ?? time;
-      const dt = Math.min(time - last, 32);
+      const dt = Math.min(time - last, 16);
       lastTimeRef.current = time;
       const state = useGameStore.getState();
       if (state.phase === 'playing' || state.phase === 'storm') {
@@ -215,6 +256,9 @@ export default function GameCanvas() {
     if (!canvas) return;
     const allowHaptics = settings.haptics && !settings.reducedMotion;
     const handlePointer = (event: PointerEvent) => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
       const rect = canvas.getBoundingClientRect();
       const ratio = canvas.width / rect.width;
       const x = (event.clientX - rect.left) * ratio;
@@ -231,20 +275,45 @@ export default function GameCanvas() {
           navigator.vibrate(25);
         } else if (result.energy || (result.combo ?? 0) >= 3) {
           navigator.vibrate([5, 10, 5]);
+        } else if (result.perfect) {
+          navigator.vibrate(10);
         } else {
           navigator.vibrate(8);
         }
       }
       if (result.hit) {
         const color = result.energy ? 'rgba(56,189,248,0.6)' : result.drain ? 'rgba(248,113,113,0.6)' : 'rgba(255,255,255,0.35)';
-        particlesRef.current.unshift({
-          x,
-          y,
-          radius: 12,
-          life: 1,
-          color,
-        });
-        particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+        const payload: Particle[] = [
+          {
+            kind: 'burst',
+            x,
+            y,
+            radius: 12,
+            life: 1,
+            color,
+          },
+        ];
+        if (result.perfect && !prefersReducedMotion.current) {
+          payload.push({
+            kind: 'ripple',
+            x,
+            y,
+            radius: 18,
+            life: 0.9,
+            color: 'rgba(173,216,255,0.7)',
+          });
+          payload.push({
+            kind: 'label',
+            x,
+            y: y - 26,
+            radius: 0,
+            life: 1,
+            color: 'rgba(255,255,255,0.92)',
+            text: 'Perfect',
+            velocity: -0.035,
+          });
+        }
+        particlesRef.current = [...payload, ...particlesRef.current].slice(0, MAX_PARTICLES);
       }
     };
     const handleMove = (event: PointerEvent) => {
@@ -252,17 +321,22 @@ export default function GameCanvas() {
         handlePointer(event);
       }
     };
-    canvas.addEventListener('pointerdown', handlePointer, { passive: true });
-    canvas.addEventListener('pointermove', handleMove, { passive: true });
+    const preventTouchScroll = (event: TouchEvent) => {
+      event.preventDefault();
+    };
+    canvas.addEventListener('pointerdown', handlePointer, { passive: false });
+    canvas.addEventListener('pointermove', handleMove, { passive: false });
+    canvas.addEventListener('touchmove', preventTouchScroll, { passive: false });
     return () => {
       canvas.removeEventListener('pointerdown', handlePointer);
       canvas.removeEventListener('pointermove', handleMove);
+      canvas.removeEventListener('touchmove', preventTouchScroll);
     };
   }, [settings.haptics, settings.reducedMotion]);
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
-      <canvas ref={canvasRef} className="h-full w-full touch-none" />
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden">
+      <canvas ref={canvasRef} className="h-full w-full" />
     </div>
   );
 }
