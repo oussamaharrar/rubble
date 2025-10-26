@@ -53,7 +53,7 @@ export default function GameStage({ onPause, onResume, onExit, onRequestDrawer }
     <div className="absolute inset-0">
       <GameCanvas />
       <HUD onPause={onPause} onRequestShop={handleRequestShop} />
-      <div className="pointer-events-none absolute inset-x-0 top-4 z-40 flex flex-col items-center gap-2 px-4 text-xs font-semibold uppercase tracking-wide">
+      <div className="pointer-events-none absolute inset-x-0 top-4 z-20 flex flex-col items-center gap-2 px-4 text-xs font-semibold uppercase tracking-wide">
         <AnimatePresence>
           {showTargetActive && targetLabel && targetClass ? (
             <motion.div
@@ -164,7 +164,7 @@ function FirstRunPrompts() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.2 }}
-            className="pointer-events-none absolute z-40 flex -translate-x-1/2 flex-col items-center text-xs font-semibold uppercase tracking-[0.18em] text-sky-100"
+            className="pointer-events-none absolute z-20 flex -translate-x-1/2 flex-col items-center text-xs font-semibold uppercase tracking-[0.18em] text-sky-100"
             style={tapStyle}
           >
             <span className="rounded-full border border-sky-400/40 bg-sky-500/20 px-3 py-1 shadow-lg shadow-sky-500/20">
@@ -174,7 +174,7 @@ function FirstRunPrompts() {
           </motion.div>
         ) : null}
       </AnimatePresence>
-      <div className="pointer-events-none absolute inset-x-0 top-24 z-40 flex flex-col items-center gap-2 px-4 text-xs font-semibold uppercase tracking-[0.18em]">
+      <div className="pointer-events-none absolute inset-x-0 top-24 z-20 flex flex-col items-center gap-2 px-4 text-xs font-semibold uppercase tracking-[0.18em]">
         <AnimatePresence>
           {showPerfectBanner ? (
             <motion.div

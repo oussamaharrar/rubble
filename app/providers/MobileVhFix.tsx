@@ -9,6 +9,7 @@ export default function MobileVhFix() {
       document.documentElement.style.setProperty('--vh', `${vh}px`);
       const root = document.getElementById('rubble-root');
       if (root) root.classList.toggle('vhfix', true);
+      window.dispatchEvent(new Event('rubble:vh-resize'));
     };
     apply();
     window.addEventListener('resize', apply, { passive: true });

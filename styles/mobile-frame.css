@@ -42,6 +42,7 @@
   aspect-ratio: 424 / 695;
   overflow: hidden;
   border-radius: 18px;
+  flex: 0 0 auto;
   touch-action: none;
 }
 
