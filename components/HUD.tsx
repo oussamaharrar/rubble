@@ -4,6 +4,15 @@ import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { useGameStore } from '@/lib/store';
+import type { BubbleColor } from '@/types/game';
+
+const TARGET_BADGE_CLASS: Record<BubbleColor, string> = {
+  yellow: 'bg-yellow-400/90 text-slate-900',
+  blue: 'bg-sky-400/90 text-slate-900',
+  green: 'bg-emerald-400/90 text-slate-900',
+  pink: 'bg-pink-400/90 text-slate-900',
+  orange: 'bg-orange-400/90 text-slate-900',
+};
 
 interface HudProps {
   onPause: () => void;
@@ -18,10 +27,16 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
   const slowTimeUntil = useGameStore((state) => state.slowTimeUntil);
   const now = useGameStore((state) => state.now);
   const leftHanded = useGameStore((state) => state.settings.leftHanded);
+  const target = useGameStore((state) => state.target);
+  const targetHitAt = useGameStore((state) => state.targetHitAt);
+  const perfectFlashUntil = useGameStore((state) => state.perfectFlashUntil);
 
   const comboActive = stats.chainLen >= 3;
   const timeCritical = stats.timeLeft <= 10 && (phase === 'playing' || phase === 'storm');
   const slowActive = slowTimeUntil > now;
+  const targetActive = target.active && target.color && now < target.expiresAt;
+  const targetHit = now < targetHitAt;
+  const perfectActive = now < perfectFlashUntil;
 
   const formattedTime = useMemo(() => {
     const seconds = Math.max(0, stats.timeLeft);
@@ -34,6 +49,9 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
     if (stats.chainLen < 3) return '×' + stats.chainLen;
     return `×${stats.chainLen}`;
   }, [stats.chainLen]);
+
+  const targetLabel = target.color ? `${target.color.charAt(0).toUpperCase()}${target.color.slice(1)}` : '';
+  const targetBadge = target.color ? TARGET_BADGE_CLASS[target.color] : 'bg-white/80 text-slate-900';
 
   const handleUseOrb = () => {
     const used = consumeBooster();
@@ -48,6 +66,50 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between p-4">
+      <div className="pointer-events-none absolute inset-x-0 top-4 flex flex-col items-center gap-2">
+        <AnimatePresence>
+          {targetActive ? (
+            <motion.div
+              key="target-active"
+              initial={{ y: -8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -8, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className={clsx(
+                'rounded-full px-4 py-1 text-xs font-semibold uppercase tracking-wide shadow-lg shadow-black/30',
+                targetBadge
+              )}
+            >
+              Target · {targetLabel}
+            </motion.div>
+          ) : null}
+          {targetHit ? (
+            <motion.div
+              key="target-hit"
+              initial={{ y: -8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -8, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="rounded-full bg-emerald-400/90 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-slate-900 shadow-lg shadow-emerald-500/40"
+            >
+              Target! ×3 · +2s
+            </motion.div>
+          ) : null}
+          {perfectActive ? (
+            <motion.div
+              key="perfect"
+              initial={{ y: -8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -8, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="rounded-full bg-white/80 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-slate-900 shadow-lg shadow-white/40"
+            >
+              Perfect +5
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
+
       <div className={clsx('flex justify-between gap-3', layoutDirection)}>
         <div className={clsx('pointer-events-auto flex flex-col gap-1.5', infoAlign)}>
           <motion.div
@@ -96,7 +158,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           <button
             type="button"
             onClick={onPause}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/70 text-base font-semibold text-slate-100 transition hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-slate-900/70 text-base font-semibold text-slate-100 transition hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
             aria-label="Pause run"
           >
             ⏸
@@ -108,7 +170,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
         <motion.button
           type="button"
           onClick={handleUseOrb}
-          className="inline-flex items-center justify-center rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center whitespace-nowrap rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
           whileTap={{ scale: 0.95 }}
         >
           {boosterBank.freeOrbs > 0 ? 'Boost · Use Orb' : 'Boost · Shop'}

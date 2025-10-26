@@ -27,6 +27,7 @@ interface Particle {
   radius: number;
   life: number;
   color: string;
+  ripple?: boolean;
 }
 
 export default function GameCanvas() {
@@ -161,13 +162,22 @@ export default function GameCanvas() {
         const alpha = Math.max(0, particle.life);
         if (alpha <= 0) continue;
         ctx.beginPath();
-        ctx.fillStyle = particle.color;
-        ctx.globalAlpha = alpha;
-        ctx.arc(particle.x * ratio, particle.y * ratio, radius, 0, Math.PI * 2);
-        ctx.fill();
+        if (particle.ripple) {
+          ctx.strokeStyle = particle.color;
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = alpha;
+          ctx.arc(particle.x * ratio, particle.y * ratio, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        } else {
+          ctx.fillStyle = particle.color;
+          ctx.globalAlpha = alpha;
+          ctx.arc(particle.x * ratio, particle.y * ratio, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.globalAlpha = 1;
-        particle.life -= dt * 0.0025;
-        particle.radius += dt * 0.04;
+        particle.life -= dt * (particle.ripple ? 0.0018 : 0.0025);
+        particle.radius += dt * (particle.ripple ? 0.06 : 0.04);
         remaining.push(particle);
       }
       particlesRef.current = remaining.slice(0, MAX_PARTICLES);
@@ -229,21 +239,49 @@ export default function GameCanvas() {
       if (allowHaptics && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         if (result.drain) {
           navigator.vibrate(25);
-        } else if (result.energy || (result.combo ?? 0) >= 3) {
+        } else if (result.energy || result.targetHit || (result.combo ?? 0) >= 3) {
           navigator.vibrate([5, 10, 5]);
+        } else if (result.perfect) {
+          navigator.vibrate(12);
         } else {
           navigator.vibrate(8);
         }
       }
       if (result.hit) {
-        const color = result.energy ? 'rgba(56,189,248,0.6)' : result.drain ? 'rgba(248,113,113,0.6)' : 'rgba(255,255,255,0.35)';
+        const baseColor = result.energy
+          ? 'rgba(56,189,248,0.6)'
+          : result.drain
+          ? 'rgba(248,113,113,0.6)'
+          : result.targetHit
+          ? 'rgba(52,211,153,0.65)'
+          : 'rgba(255,255,255,0.35)';
         particlesRef.current.unshift({
           x,
           y,
           radius: 12,
           life: 1,
-          color,
+          color: baseColor,
         });
+        if (result.perfect) {
+          particlesRef.current.unshift({
+            x,
+            y,
+            radius: 16,
+            life: 1,
+            color: 'rgba(255,255,255,0.45)',
+            ripple: true,
+          });
+        }
+        if (result.targetHit) {
+          particlesRef.current.unshift({
+            x,
+            y,
+            radius: 18,
+            life: 1,
+            color: 'rgba(52,211,153,0.5)',
+            ripple: true,
+          });
+        }
         particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
       }
     };
@@ -254,14 +292,21 @@ export default function GameCanvas() {
     };
     canvas.addEventListener('pointerdown', handlePointer, { passive: true });
     canvas.addEventListener('pointermove', handleMove, { passive: true });
+    const handleTouchMove = (event: TouchEvent) => {
+      if (event.touches.length > 0) {
+        event.preventDefault();
+      }
+    };
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
     return () => {
       canvas.removeEventListener('pointerdown', handlePointer);
       canvas.removeEventListener('pointermove', handleMove);
+      canvas.removeEventListener('touchmove', handleTouchMove);
     };
   }, [settings.haptics, settings.reducedMotion]);
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-[32px]">
       <canvas ref={canvasRef} className="h-full w-full touch-none" />
     </div>
   );
