@@ -34,7 +34,7 @@ export default function PauseOverlay({ open, onResume, onExit }: PauseOverlayPro
   }, []);
 
   const toggleSetting = useCallback(
-    (key: 'haptics' | 'reducedMotion' | 'leftHanded') => {
+    (key: 'haptics' | 'reducedMotion' | 'leftHanded' | 'sound') => {
       setSettings({ [key]: !settings[key] } as Partial<typeof settings>);
     },
     [setSettings, settings]
@@ -76,7 +76,16 @@ export default function PauseOverlay({ open, onResume, onExit }: PauseOverlayPro
                 Exit to Menu
               </button>
             </div>
-            <div className="mt-6 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+            <div className="mt-6 grid grid-cols-1 gap-2 text-sm sm:grid-cols-4">
+              <button
+                type="button"
+                onClick={() => toggleSetting('sound')}
+                className={`rounded-2xl border px-3 py-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 ${
+                  settings.sound ? 'border-sky-400/60 bg-sky-500/10 text-sky-100' : 'border-white/15 bg-white/5 text-slate-200'
+                }`}
+              >
+                Sound {settings.sound ? 'On' : 'Off'}
+              </button>
               <button
                 type="button"
                 onClick={() => toggleSetting('haptics')}
