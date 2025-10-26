@@ -9,13 +9,17 @@ import type {
   BoosterBank,
   BubbleColor,
   BurstState,
+  DifficultyState,
   EntryMode,
+  FirstRunProgress,
   GamePhase,
   GameSettings,
   GoldenOrbState,
+  Hazard,
   Mission,
   TargetState,
   RunStats,
+  UnlockState,
 } from '@/types/game';
 
 const COMBO_WINDOW_MS = 5_000;
@@ -33,7 +37,8 @@ const GOLDEN_RESPAWN_MIN_MS = 20_000;
 const GOLDEN_RESPAWN_RANGE_MS = 10_000;
 
 const BOOSTER_KEY = 'rubble:booster-bank';
-const SETTINGS_KEY = 'rubble_settings_v1';
+const SETTINGS_KEY = 'rubble_settings_v2';
+const UNLOCKS_KEY = 'rubble_unlocks_v1';
 const DAILY_RUN_KEY_PREFIX = 'rubble:daily-runs';
 
 const BASE_MAX_BUBBLES = 40;
@@ -41,6 +46,16 @@ const BASE_MAX_STORM_ORBS = 10;
 const BASE_STORM_INTERVAL_MS = 30_000;
 const BASE_STORM_DURATION_MS = 7_000;
 const BASE_SPEED_FACTOR = 1;
+const LEVEL_SCORE_STEP = 300;
+const LEVEL_SURVIVAL_STEP_MS = 45_000;
+const BASE_TRAP_CHANCE = 0.04;
+const TRAP_CHANCE_INCREMENT = 0.025;
+const EASE_THRESHOLD = 10;
+const EASE_WINDOW_MS = 10_000;
+const EASE_DURATION_MS = 8_000;
+const SPAWN_EXCLUSION_RADIUS = 72;
+const SPAWN_MEMORY = 14;
+const MAX_ACTIVE_HAZARDS = 6;
 
 const DEFAULT_PALETTE: BubbleColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
 
@@ -48,8 +63,10 @@ function settingsDefaults(): GameSettings {
   return {
     haptics: true,
     reducedMotion: false,
-    sfx: true,
+    sound: true,
     leftHanded: false,
+    theme: 'classic',
+    sparkleFx: false,
   };
 }
 
@@ -62,13 +79,18 @@ function readSettings(): GameSettings {
     if (!raw) {
       return settingsDefaults();
     }
-    const parsed = JSON.parse(raw) as Partial<GameSettings>;
+    const parsed = JSON.parse(raw) as Partial<GameSettings> & { sfx?: boolean };
     const defaults = settingsDefaults();
+    const legacySound = typeof parsed.sfx === 'boolean' ? parsed.sfx : defaults.sound;
+    const theme = parsed.theme === 'soothing-skies' ? 'soothing-skies' : defaults.theme;
+    const sparkle = typeof parsed.sparkleFx === 'boolean' ? parsed.sparkleFx : defaults.sparkleFx;
     return {
       haptics: typeof parsed.haptics === 'boolean' ? parsed.haptics : defaults.haptics,
       reducedMotion: typeof parsed.reducedMotion === 'boolean' ? parsed.reducedMotion : defaults.reducedMotion,
-      sfx: typeof parsed.sfx === 'boolean' ? parsed.sfx : defaults.sfx,
+      sound: typeof parsed.sound === 'boolean' ? parsed.sound : legacySound,
       leftHanded: typeof parsed.leftHanded === 'boolean' ? parsed.leftHanded : defaults.leftHanded,
+      theme,
+      sparkleFx: sparkle,
     };
   } catch {
     return settingsDefaults();
@@ -81,6 +103,72 @@ function persistSettings(settings: GameSettings) {
     window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
     // ignore persistence errors
+  }
+}
+
+function unlockDefaults(): UnlockState {
+  return {
+    themeSkies: false,
+    fxSparkle: false,
+  };
+}
+
+function readUnlocks(): UnlockState {
+  if (typeof window === 'undefined') {
+    return unlockDefaults();
+  }
+  try {
+    const raw = window.localStorage.getItem(UNLOCKS_KEY);
+    if (!raw) return unlockDefaults();
+    const parsed = JSON.parse(raw) as Partial<UnlockState>;
+    return {
+      themeSkies: parsed?.themeSkies === true,
+      fxSparkle: parsed?.fxSparkle === true,
+    };
+  } catch {
+    return unlockDefaults();
+  }
+}
+
+function persistUnlocks(unlocks: UnlockState) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(UNLOCKS_KEY, JSON.stringify(unlocks));
+  } catch {
+    // ignore persistence errors
+  }
+}
+
+const FIRST_RUN_KEY = 'rubble_first_run_v1';
+
+function firstRunDefaults(): FirstRunProgress {
+  return { tapped: false, perfect: false, burst: false };
+}
+
+function readFirstRunProgress(): FirstRunProgress {
+  if (typeof window === 'undefined') {
+    return firstRunDefaults();
+  }
+  try {
+    const raw = window.localStorage.getItem(FIRST_RUN_KEY);
+    if (!raw) return firstRunDefaults();
+    const parsed = JSON.parse(raw) as Partial<FirstRunProgress>;
+    return {
+      tapped: parsed?.tapped === true,
+      perfect: parsed?.perfect === true,
+      burst: parsed?.burst === true,
+    };
+  } catch {
+    return firstRunDefaults();
+  }
+}
+
+function persistFirstRunProgress(progress: FirstRunProgress) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(FIRST_RUN_KEY, JSON.stringify(progress));
+  } catch {
+    // ignore persistence
   }
 }
 
@@ -178,11 +266,65 @@ function persistBooster(bank: BoosterBank) {
   );
 }
 
-function randomColor(rng: () => number, palette: BubbleColor[]): BubbleColor {
-  if (palette.length === 0) {
-    return DEFAULT_PALETTE[Math.floor(rng() * DEFAULT_PALETTE.length) % DEFAULT_PALETTE.length];
+type RecentSpawn = { x: number; y: number; at: number };
+
+function pickColor(rng: () => number, palette: BubbleColor[], paletteSize: number): BubbleColor {
+  const usable = Math.min(Math.max(1, paletteSize), palette.length > 0 ? palette.length : DEFAULT_PALETTE.length);
+  const source = palette.length > 0 ? palette : DEFAULT_PALETTE;
+  const index = Math.floor(rng() * usable) % usable;
+  return source[index];
+}
+
+type SpawnEdge = 'top' | 'left' | 'right';
+
+function chooseEdge(rng: () => number): SpawnEdge {
+  const roll = rng();
+  if (roll < 0.6) return 'top';
+  if (roll < 0.8) return 'left';
+  return 'right';
+}
+
+function spawnFromEdge(
+  edge: SpawnEdge,
+  radius: number,
+  rng: () => number,
+  width: number,
+  height: number,
+  speedFactor: number,
+  easingFactor: number
+) {
+  const jitter = (min: number, max: number) => min + rng() * (max - min);
+  let x = width / 2;
+  let y = height / 2;
+  let vx = 0;
+  let vy = 0;
+  const baseSpeed = 0.06 + rng() * 0.08;
+  const speedMultiplier = Math.max(0.45, Math.min(speedFactor * easingFactor, 1.6));
+  switch (edge) {
+    case 'top': {
+      x = radius + rng() * Math.max(width - radius * 2, radius);
+      y = -radius - jitter(8, 32);
+      vx = (rng() - 0.5) * 0.18 * width * 0.0015 * speedMultiplier;
+      vy = baseSpeed * height * speedMultiplier;
+      break;
+    }
+    case 'left': {
+      x = -radius - jitter(8, 24);
+      y = radius + rng() * Math.max(height - radius * 2, radius);
+      vx = baseSpeed * width * 0.6 * speedMultiplier;
+      vy = (rng() - 0.5) * 0.25 * height * 0.001 * speedMultiplier;
+      break;
+    }
+    case 'right':
+    default: {
+      x = width + radius + jitter(8, 24);
+      y = radius + rng() * Math.max(height - radius * 2, radius);
+      vx = -baseSpeed * width * 0.6 * speedMultiplier;
+      vy = (rng() - 0.5) * 0.25 * height * 0.001 * speedMultiplier;
+      break;
+    }
   }
-  return palette[Math.floor(rng() * palette.length) % palette.length];
+  return { x, y, vx, vy };
 }
 
 function createBubble(
@@ -191,30 +333,91 @@ function createBubble(
   height: number,
   now: number,
   palette: BubbleColor[],
+  paletteSize: number,
   speedFactor: number,
+  recentSpawns: RecentSpawn[],
+  easingFactor: number,
   options?: { storm?: boolean; poison?: boolean; energy?: boolean }
 ): Bubble {
-  const radius = 24 + rng() * 18;
-  const x = radius + rng() * (Math.max(width - radius * 2, radius));
-  const y = height + radius + rng() * height * 0.4;
-  const speedY = -((0.08 + rng() * 0.12) * height * speedFactor);
-  const speedX = (rng() - 0.5) * 0.12 * width * Math.max(0.6, Math.min(speedFactor, 1.4));
+  const radius = (options?.storm ? 20 : 24) + rng() * (options?.storm ? 12 : 18);
+  const edge = chooseEdge(rng);
+  let spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+  const attempts = 4;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const nearest = recentSpawns.reduce((min, entry) => {
+      const dx = entry.x - spawn.x;
+      const dy = entry.y - spawn.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      return Math.min(min, dist);
+    }, Number.POSITIVE_INFINITY);
+    if (nearest > SPAWN_EXCLUSION_RADIUS) {
+      break;
+    }
+    spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+  }
   const color = options?.storm
     ? options?.energy
       ? 'blue'
       : 'orange'
-    : randomColor(rng, palette);
+    : pickColor(rng, palette, paletteSize);
   return {
     id: `${now}-${Math.floor(rng() * 1_000_000)}`,
-    x,
-    y,
+    x: spawn.x,
+    y: spawn.y,
     r: options?.storm ? radius * 0.85 : radius,
     color,
-    vx: speedX,
-    vy: options?.storm ? speedY * 1.35 : speedY,
+    vx: options?.storm ? spawn.vx * 1.15 : spawn.vx,
+    vy: options?.storm ? spawn.vy * 1.25 : spawn.vy,
     storm: options?.storm ?? false,
     poison: options?.poison ?? false,
     createdAt: now,
+  };
+}
+
+function createSpikeMine(
+  rng: () => number,
+  width: number,
+  height: number,
+  now: number,
+  speedFactor: number,
+  easingFactor: number
+): Hazard {
+  const radius = 26 + rng() * 12;
+  const edge = chooseEdge(rng);
+  const spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor * 0.7, easingFactor);
+  return {
+    id: `spike-${now}-${Math.floor(rng() * 1_000_000)}`,
+    kind: 'spike-mine',
+    x: spawn.x,
+    y: spawn.y,
+    r: radius,
+    vx: spawn.vx * 0.35,
+    vy: spawn.vy * 0.35,
+    createdAt: now,
+  };
+}
+
+function createPoisonCloud(
+  rng: () => number,
+  width: number,
+  height: number,
+  now: number
+): Hazard {
+  const radius = 60 + rng() * 22;
+  const x = radius + rng() * Math.max(width - radius * 2, radius);
+  const y = radius + rng() * Math.max(height - radius * 2, radius);
+  const vx = (rng() - 0.5) * 0.02 * width * 0.001;
+  const vy = (rng() - 0.5) * 0.02 * height * 0.001;
+  return {
+    id: `cloud-${now}-${Math.floor(rng() * 1_000_000)}`,
+    kind: 'poison-cloud',
+    x,
+    y,
+    r: radius,
+    vx,
+    vy,
+    createdAt: now,
+    expiresAt: now + 4_000 + rng() * 1_000,
   };
 }
 
@@ -272,6 +475,7 @@ type GameStore = {
   stats: RunStats;
   entryMode: EntryMode | null;
   bubbles: Bubble[];
+  hazards: Hazard[];
   missions: Mission[];
   boosterBank: BoosterBank;
   stormAt: number;
@@ -298,6 +502,7 @@ type GameStore = {
   dailyTuning: DailyTuning | null;
   palette: BubbleColor[];
   settings: GameSettings;
+  unlocks: UnlockState;
   lastRunOfficialDaily: boolean;
   survivalAccumulator: number;
   currentStreak: number;
@@ -308,6 +513,12 @@ type GameStore = {
   lastComboFrame: number;
   timeGainWindowStart: number;
   timeGainAccumulated: number;
+  difficulty: DifficultyState;
+  recentSpawns: RecentSpawn[];
+  timeLossEvents: { at: number; amount: number }[];
+  firstRun: FirstRunProgress;
+  lastPerfectAt: number;
+  lastBurstAt: number;
   burst: BurstState;
   burstPointer: { x: number; y: number } | null;
   golden: GoldenOrbState;
@@ -331,6 +542,8 @@ type GameStore = {
   loadDaily: (seed?: string | number) => void;
   setBoardKind: (board: BoardKind) => void;
   setSettings: (patch: Partial<GameSettings>) => void;
+  unlockFeature: (key: keyof UnlockState) => void;
+  markFirstRun: (patch: Partial<FirstRunProgress>) => void;
   setStageSize: (width: number, height: number) => void;
   claimMission: (id: string) => void;
   progressColor: (color: BubbleColor) => void;
@@ -380,6 +593,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     let lastComboFrame = state.lastComboFrame;
     let timeGainWindowStart = state.timeGainWindowStart;
     let timeGainAccumulated = state.timeGainAccumulated;
+    let cloudPenalty = false;
 
     if (now - timeGainWindowStart >= 1_000) {
       timeGainWindowStart = now;
@@ -391,8 +605,21 @@ export const useGameStore = create<GameStore>((set, get) => {
     const timeMultiplier = options?.timeMultiplier ?? scoreMultiplier;
     const source = options?.source ?? 'tap';
 
+    for (const hazard of state.hazards) {
+      if (hazard.kind !== 'poison-cloud') continue;
+      const expires = typeof hazard.expiresAt === 'number' && now > hazard.expiresAt;
+      if (expires) continue;
+      const dx = bubble.x - hazard.x;
+      const dy = bubble.y - hazard.y;
+      if (dx * dx + dy * dy <= hazard.r * hazard.r) {
+        cloudPenalty = true;
+        break;
+      }
+    }
+
     if (isDrainOrb(bubble)) {
       stats.timeLeft = Math.max(0, stats.timeLeft - DRAIN_PENALTY_TIME);
+      registerTimeLoss(DRAIN_PENALTY_TIME, now);
       stats.score = Math.max(0, stats.score - DRAIN_PENALTY_SCORE);
       stats.chainLen = 0;
       stats.lastColor = undefined;
@@ -432,7 +659,8 @@ export const useGameStore = create<GameStore>((set, get) => {
         const multiplier = Math.min(1 + 0.25 * Math.max(chainLen - 2, 0), 4);
         const baseAward = Math.round(BASE_POINTS * multiplier);
         let awarded = matchesTarget ? baseAward * 3 : baseAward;
-        awarded = Math.round(awarded * scoreMultiplier);
+        const hazardFactor = cloudPenalty ? 0.5 : 1;
+        awarded = Math.round(awarded * scoreMultiplier * hazardFactor);
         if (awarded > 0) {
           stats.score += awarded;
         }
@@ -469,6 +697,9 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     if (stats.timeLeft < 0) stats.timeLeft = 0;
 
+    const markTap = source === 'tap' && !state.firstRun.tapped;
+    const markPerfect = perfect && !state.firstRun.perfect;
+
     set({
       stats,
       bubbles: remaining,
@@ -484,16 +715,24 @@ export const useGameStore = create<GameStore>((set, get) => {
       nextTargetAt,
       targetCelebrationUntil: celebrationUntil,
       perfectUntil,
+      lastPerfectAt: perfect ? now : state.lastPerfectAt,
     });
 
     if (energy) {
       get().grantBooster(1, 'energy');
     }
 
+    if (markTap) {
+      get().markFirstRun({ tapped: true });
+    }
+    if (markPerfect) {
+      get().markFirstRun({ perfect: true });
+    }
+
     return {
       hit: true,
       energy,
-      drain,
+      drain: drain || cloudPenalty,
       combo: get().stats.chainLen,
       perfect,
       targetHit,
@@ -518,6 +757,7 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     if (toxic) {
       stats.timeLeft = Math.max(0, stats.timeLeft - 5);
+      registerTimeLoss(5, state.now);
       stats.chainLen = 0;
       stats.lastColor = undefined;
       stats.streak = Math.max(stats.streak, state.currentStreak);
@@ -557,6 +797,26 @@ export const useGameStore = create<GameStore>((set, get) => {
   };
 
   const scheduleNextGolden = (now: number) => now + GOLDEN_RESPAWN_MIN_MS + get().rng() * GOLDEN_RESPAWN_RANGE_MS;
+
+  const registerTimeLoss = (amount: number, at: number) => {
+    if (amount <= 0) return;
+    set((current) => {
+      const events = [...current.timeLossEvents, { at, amount }];
+      const cutoff = at - EASE_WINDOW_MS;
+      const filtered = events.filter((event) => event.at >= cutoff);
+      let difficulty = current.difficulty;
+      const totalLoss = filtered.reduce((sum, event) => sum + event.amount, 0);
+      if (totalLoss >= EASE_THRESHOLD) {
+        const easingUntil = Math.max(difficulty.easingUntil, at + EASE_DURATION_MS);
+        difficulty = { ...difficulty, easingUntil };
+        return { timeLossEvents: filtered, difficulty };
+      }
+      if (filtered.length !== events.length) {
+        return { timeLossEvents: filtered };
+      }
+      return { timeLossEvents: filtered };
+    });
+  };
 
   const spawnGoldenOrb = (now?: number) => {
     const state = get();
@@ -606,6 +866,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   stats: defaultStats(),
   entryMode: null,
   bubbles: [],
+  hazards: [],
   missions: [],
   boosterBank: initialBoosterBank(),
   stormAt: BASE_STORM_INTERVAL_MS,
@@ -632,6 +893,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   dailyTuning: null,
   palette: DEFAULT_PALETTE,
   settings: readSettings(),
+  unlocks: readUnlocks(),
   lastRunOfficialDaily: false,
   survivalAccumulator: 0,
   currentStreak: 0,
@@ -642,6 +904,20 @@ export const useGameStore = create<GameStore>((set, get) => {
   lastComboFrame: -Infinity,
   timeGainWindowStart: 0,
   timeGainAccumulated: 0,
+  difficulty: {
+    tier: 0,
+    nextScoreThreshold: LEVEL_SCORE_STEP,
+    nextSurvivalThreshold: LEVEL_SURVIVAL_STEP_MS,
+    trapChance: BASE_TRAP_CHANCE,
+    speedMultiplier: 1,
+    easingUntil: 0,
+    paletteSize: 3,
+  },
+  recentSpawns: [],
+  timeLossEvents: [],
+  firstRun: readFirstRunProgress(),
+  lastPerfectAt: 0,
+  lastBurstAt: 0,
   burst: defaultBurstState(),
   burstPointer: null,
   golden: defaultGoldenState(),
@@ -692,6 +968,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       stats: { ...defaultStats(), timeLeft: 60, entryMode: mode },
       entryMode: mode,
       bubbles: [],
+      hazards: [],
       stormAt: stormInterval,
       stormInterval,
       stormDuration,
@@ -716,6 +993,17 @@ export const useGameStore = create<GameStore>((set, get) => {
       officialDailyEligible,
       dailyTuning: tuning,
       palette,
+      difficulty: {
+        tier: 0,
+        nextScoreThreshold: LEVEL_SCORE_STEP,
+        nextSurvivalThreshold: LEVEL_SURVIVAL_STEP_MS,
+        trapChance: BASE_TRAP_CHANCE,
+        speedMultiplier: 1,
+        easingUntil: 0,
+        paletteSize: Math.min(3, palette.length || DEFAULT_PALETTE.length),
+      },
+      recentSpawns: [],
+      timeLossEvents: [],
       lastRunOfficialDaily: false,
       lastTapAt: 0,
       lastTapX: 0,
@@ -723,6 +1011,9 @@ export const useGameStore = create<GameStore>((set, get) => {
       lastComboFrame: -Infinity,
       timeGainWindowStart: 0,
       timeGainAccumulated: 0,
+      firstRun: get().firstRun,
+      lastPerfectAt: 0,
+      lastBurstAt: 0,
       burst: burstDefaults,
       burstPointer: null,
       golden: defaultGoldenState(),
@@ -787,6 +1078,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       stats: defaultStats(),
       entryMode: null,
       bubbles: [],
+      hazards: [],
       now: 0,
       comboWindowUntil: 0,
       slowTimeUntil: 0,
@@ -810,6 +1102,20 @@ export const useGameStore = create<GameStore>((set, get) => {
       lastComboFrame: -Infinity,
       timeGainWindowStart: 0,
       timeGainAccumulated: 0,
+      difficulty: {
+        tier: 0,
+        nextScoreThreshold: LEVEL_SCORE_STEP,
+        nextSurvivalThreshold: LEVEL_SURVIVAL_STEP_MS,
+        trapChance: BASE_TRAP_CHANCE,
+        speedMultiplier: 1,
+        easingUntil: 0,
+        paletteSize: Math.min(3, palette.length || DEFAULT_PALETTE.length),
+      },
+      recentSpawns: [],
+      timeLossEvents: [],
+      firstRun: get().firstRun,
+      lastPerfectAt: 0,
+      lastBurstAt: 0,
       burst: { ...defaultBurstState(), cooldownMs: state.burst.cooldownMs, minHoldMs: state.burst.minHoldMs, maxHoldMs: state.burst.maxHoldMs },
       burstPointer: null,
       golden: defaultGoldenState(),
@@ -856,6 +1162,8 @@ export const useGameStore = create<GameStore>((set, get) => {
     let nextTargetAt = state.nextTargetAt;
     let celebrationUntil = state.targetCelebrationUntil;
     const perfectUntil = state.perfectUntil;
+    let difficulty = state.difficulty;
+    const easingFactor = now < difficulty.easingUntil ? 0.85 : 1;
 
     updateGoldenOrb(now);
     spawnGoldenOrb(now);
@@ -865,23 +1173,41 @@ export const useGameStore = create<GameStore>((set, get) => {
     }
 
     if (!targetState.active && now >= nextTargetAt) {
-      const color = randomColor(state.rng, state.palette);
+      const color = pickColor(state.rng, state.palette, difficulty.paletteSize);
       targetState = { color, active: true, expiresAt: now + 3_000 };
       nextTargetAt = now + 9_000 + state.rng() * 3_000;
     }
 
     const updatedBubbles: Bubble[] = [];
+    const dtSeconds = (clampedDt / 1000) * factor * easingFactor;
     for (const bubble of state.bubbles) {
-      const nextX = bubble.x + bubble.vx * (clampedDt / 1000) * factor;
-      const nextY = bubble.y + bubble.vy * (clampedDt / 1000) * factor;
-      if (nextY < -bubble.r * 1.2) {
+      const nextX = bubble.x + bubble.vx * dtSeconds;
+      const nextY = bubble.y + bubble.vy * dtSeconds;
+      const outside =
+        nextX < -bubble.r * 1.5 ||
+        nextX > width + bubble.r * 1.5 ||
+        nextY < -bubble.r * 1.5 ||
+        nextY > height + bubble.r * 1.5;
+      if (outside) {
         continue;
       }
-      let clampedX = nextX;
-      if (clampedX < bubble.r) clampedX = bubble.r;
-      if (clampedX > width - bubble.r) clampedX = width - bubble.r;
-      const clampedY = Math.min(nextY, height + bubble.r * 2);
-      updatedBubbles.push({ ...bubble, x: clampedX, y: clampedY });
+      updatedBubbles.push({ ...bubble, x: nextX, y: nextY });
+    }
+
+    const updatedHazards: Hazard[] = [];
+    for (const hazard of state.hazards) {
+      const nextX = hazard.x + hazard.vx * dtSeconds;
+      const nextY = hazard.y + hazard.vy * dtSeconds;
+      const expired = typeof hazard.expiresAt === 'number' && now >= hazard.expiresAt;
+      const outside =
+        nextX < -hazard.r * 1.5 ||
+        nextX > width + hazard.r * 1.5 ||
+        nextY < -hazard.r * 1.5 ||
+        nextY > height + hazard.r * 1.5;
+      if (expired || outside) {
+        continue;
+      }
+      updatedHazards.push({ ...hazard, x: nextX, y: nextY });
     }
 
     const stats = { ...state.stats };
@@ -892,6 +1218,32 @@ export const useGameStore = create<GameStore>((set, get) => {
     const runSeconds = (now - state.now) / 1000;
     if (runSeconds > 0) {
       get().progressSurvival(runSeconds);
+    }
+
+    let leveled = false;
+    if (stats.score >= difficulty.nextScoreThreshold) {
+      difficulty = {
+        ...difficulty,
+        tier: difficulty.tier + 1,
+        nextScoreThreshold: difficulty.nextScoreThreshold + LEVEL_SCORE_STEP,
+        paletteSize: Math.min(
+          (state.palette.length || DEFAULT_PALETTE.length),
+          difficulty.paletteSize + 1
+        ),
+        trapChance: Math.min(0.35, difficulty.trapChance + TRAP_CHANCE_INCREMENT),
+        speedMultiplier: Math.min(1.6, difficulty.speedMultiplier + 0.08),
+      };
+      leveled = true;
+    }
+    if (now >= difficulty.nextSurvivalThreshold) {
+      difficulty = {
+        ...difficulty,
+        tier: difficulty.tier + (leveled ? 0 : 1),
+        nextSurvivalThreshold: difficulty.nextSurvivalThreshold + LEVEL_SURVIVAL_STEP_MS,
+        trapChance: Math.min(0.35, difficulty.trapChance + TRAP_CHANCE_INCREMENT * 0.75),
+        speedMultiplier: Math.min(1.6, difficulty.speedMultiplier + 0.05),
+      };
+      leveled = true;
     }
 
     if (stats.timeLeft <= 0) {
@@ -915,8 +1267,11 @@ export const useGameStore = create<GameStore>((set, get) => {
       celebrationUntil = Math.min(celebrationUntil, now);
     }
 
+    const trimmedSpawns = state.recentSpawns.filter((entry) => now - entry.at < 5_000);
+
     set({
       bubbles: updatedBubbles,
+      hazards: updatedHazards,
       stats,
       now,
       phase,
@@ -924,6 +1279,8 @@ export const useGameStore = create<GameStore>((set, get) => {
       nextTargetAt,
       targetCelebrationUntil: celebrationUntil,
       perfectUntil,
+      difficulty,
+      recentSpawns: trimmedSpawns,
     });
 
     const desiredCount = phase === 'storm' ? state.maxBubbles + state.maxStormOrbs : state.maxBubbles;
@@ -935,11 +1292,34 @@ export const useGameStore = create<GameStore>((set, get) => {
     const state = get();
     if (state.phase === 'summary') return;
     const { rng, width, height, now, palette, bubbleSpeedFactor, maxBubbles, maxStormOrbs } = state;
+    const paletteSize = state.difficulty.paletteSize;
+    const speedFactor = bubbleSpeedFactor * state.difficulty.speedMultiplier;
+    const easingFactor = now < state.difficulty.easingUntil ? 0.85 : 1;
+    const recent = [...state.recentSpawns];
     const next: Bubble[] = [];
+    const newHazards: Hazard[] = [];
     for (let index = 0; index < count; index += 1) {
-      next.push(createBubble(rng, width, height, now, palette, bubbleSpeedFactor));
+      const bubble = createBubble(rng, width, height, now, palette, paletteSize, speedFactor, recent, easingFactor);
+      next.push(bubble);
+      recent.push({ x: bubble.x, y: bubble.y, at: now });
+      if (recent.length > SPAWN_MEMORY) {
+        recent.shift();
+      }
+      const canSpawnTrap = state.phase === 'playing' && state.hazards.length + newHazards.length < MAX_ACTIVE_HAZARDS;
+      if (canSpawnTrap && rng() < state.difficulty.trapChance) {
+        if (rng() < 0.55) {
+          newHazards.push(createSpikeMine(rng, width, height, now, speedFactor, easingFactor));
+        } else {
+          newHazards.push(createPoisonCloud(rng, width, height, now));
+        }
+      }
     }
-    set({ bubbles: [...state.bubbles, ...next].slice(0, maxBubbles + maxStormOrbs) });
+    const trimmedHazards = [...state.hazards, ...newHazards].slice(-MAX_ACTIVE_HAZARDS);
+    set({
+      bubbles: [...state.bubbles, ...next].slice(0, maxBubbles + maxStormOrbs),
+      recentSpawns: recent,
+      hazards: trimmedHazards,
+    });
   },
   spawnStormOrbs: () => {
     const state = get();
@@ -949,12 +1329,46 @@ export const useGameStore = create<GameStore>((set, get) => {
     const energyCount = 3 + Math.floor(rng() * 3);
     const drainCount = 2 + Math.floor(rng() * 2);
     for (let i = 0; i < energyCount; i += 1) {
-      payload.push(createBubble(rng, width, height, now, palette, bubbleSpeedFactor, { storm: true, energy: true }));
+      payload.push(
+        createBubble(
+          rng,
+          width,
+          height,
+          now,
+          palette,
+          state.difficulty.paletteSize,
+          bubbleSpeedFactor * state.difficulty.speedMultiplier,
+          state.recentSpawns,
+          now < state.difficulty.easingUntil ? 0.85 : 1,
+          { storm: true, energy: true }
+        )
+      );
     }
     for (let i = 0; i < drainCount; i += 1) {
-      payload.push(createBubble(rng, width, height, now, palette, bubbleSpeedFactor, { storm: true, poison: true }));
+      payload.push(
+        createBubble(
+          rng,
+          width,
+          height,
+          now,
+          palette,
+          state.difficulty.paletteSize,
+          bubbleSpeedFactor * state.difficulty.speedMultiplier,
+          state.recentSpawns,
+          now < state.difficulty.easingUntil ? 0.85 : 1,
+          { storm: true, poison: true }
+        )
+      );
     }
-    set({ bubbles: [...state.bubbles, ...payload].slice(0, maxBubbles + maxStormOrbs) });
+    const newSpawns = payload.map((bubble) => ({ x: bubble.x, y: bubble.y, at: now }));
+    const recent = [...state.recentSpawns, ...newSpawns];
+    while (recent.length > SPAWN_MEMORY) {
+      recent.shift();
+    }
+    set({
+      bubbles: [...state.bubbles, ...payload].slice(0, maxBubbles + maxStormOrbs),
+      recentSpawns: recent,
+    });
   },
   beginBurstCharge: (x, y) => {
     const state = get();
@@ -1086,7 +1500,11 @@ export const useGameStore = create<GameStore>((set, get) => {
       patch.boosterBank = updatedBank;
     }
 
-    set(patch);
+    set({ ...patch, lastBurstAt: state.now });
+
+    if (!state.firstRun.burst) {
+      get().markFirstRun({ burst: true });
+    }
 
     const nextState = get();
     return {
@@ -1104,6 +1522,34 @@ export const useGameStore = create<GameStore>((set, get) => {
     const now = state.now;
     if (now - state.lastTapAt < 10 && Math.abs(x - state.lastTapX) < 6 && Math.abs(y - state.lastTapY) < 6) {
       return { hit: false };
+    }
+
+    for (let index = state.hazards.length - 1; index >= 0; index -= 1) {
+      const hazard = state.hazards[index];
+      const dx = x - hazard.x;
+      const dy = y - hazard.y;
+      if (dx * dx + dy * dy > hazard.r * hazard.r) continue;
+      const bestStreak = Math.max(state.stats.streak, state.currentStreak);
+      const stats = { ...state.stats, chainLen: 0, lastColor: undefined, streak: bestStreak };
+      let hazards = state.hazards;
+      if (hazard.kind === 'spike-mine') {
+        stats.timeLeft = Math.max(0, stats.timeLeft - 3);
+        registerTimeLoss(3, now);
+        hazards = [...state.hazards.slice(0, index), ...state.hazards.slice(index + 1)];
+      } else {
+        stats.timeLeft = Math.max(0, stats.timeLeft - 2);
+        registerTimeLoss(2, now);
+      }
+      set({
+        stats,
+        hazards,
+        comboWindowUntil: 0,
+        currentStreak: 0,
+        lastTapAt: now,
+        lastTapX: x,
+        lastTapY: y,
+      });
+      return { hit: false, drain: true };
     }
 
     const golden = state.golden;
@@ -1139,6 +1585,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       const bestStreak = Math.max(state.stats.streak, state.currentStreak);
       const stats = { ...state.stats, chainLen: 0, lastColor: undefined, streak: bestStreak };
       stats.timeLeft = Math.max(0, stats.timeLeft - WRONG_TAP_PENALTY);
+      registerTimeLoss(WRONG_TAP_PENALTY, now);
       set({
         stats,
         comboWindowUntil: 0,
@@ -1277,11 +1724,34 @@ export const useGameStore = create<GameStore>((set, get) => {
       const next: GameSettings = {
         haptics: patch.haptics ?? state.settings.haptics,
         reducedMotion: patch.reducedMotion ?? state.settings.reducedMotion,
-        sfx: patch.sfx ?? state.settings.sfx,
+        sound: patch.sound ?? state.settings.sound,
         leftHanded: patch.leftHanded ?? state.settings.leftHanded,
+        theme: patch.theme ?? state.settings.theme,
+        sparkleFx: patch.sparkleFx ?? state.settings.sparkleFx,
       };
       persistSettings(next);
       return { settings: next };
+    });
+  },
+  unlockFeature: (key) => {
+    set((state) => {
+      if (state.unlocks[key]) {
+        return {};
+      }
+      const unlocks: UnlockState = { ...state.unlocks, [key]: true };
+      persistUnlocks(unlocks);
+      return { unlocks };
+    });
+  },
+  markFirstRun: (patch) => {
+    set((state) => {
+      const next: FirstRunProgress = {
+        tapped: patch.tapped ?? state.firstRun.tapped,
+        perfect: patch.perfect ?? state.firstRun.perfect,
+        burst: patch.burst ?? state.firstRun.burst,
+      };
+      persistFirstRunProgress(next);
+      return { firstRun: next };
     });
   },
   setStageSize: (width, height) => {

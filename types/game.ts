@@ -40,8 +40,10 @@ export type BoosterBank = {
 export interface GameSettings {
   haptics: boolean;
   reducedMotion: boolean;
-  sfx: boolean;
+  sound: boolean;
   leftHanded: boolean;
+  theme: 'classic' | 'soothing-skies';
+  sparkleFx: boolean;
 }
 
 export type RunStats = {
@@ -83,3 +85,38 @@ export type GoldenOrbState = {
   r: number;
   toxic: boolean;
 };
+
+export type HazardKind = 'spike-mine' | 'poison-cloud';
+
+export interface Hazard {
+  id: string;
+  kind: HazardKind;
+  x: number;
+  y: number;
+  r: number;
+  vx: number;
+  vy: number;
+  createdAt: number;
+  expiresAt?: number;
+}
+
+export interface UnlockState {
+  themeSkies: boolean;
+  fxSparkle: boolean;
+}
+
+export interface FirstRunProgress {
+  tapped: boolean;
+  perfect: boolean;
+  burst: boolean;
+}
+
+export interface DifficultyState {
+  tier: number;
+  nextScoreThreshold: number;
+  nextSurvivalThreshold: number;
+  trapChance: number;
+  speedMultiplier: number;
+  easingUntil: number;
+  paletteSize: number;
+}

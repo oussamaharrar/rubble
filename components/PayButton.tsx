@@ -48,6 +48,9 @@ interface PayButtonProps {
   disabled?: boolean;
   label?: string;
   icon?: ReactNode;
+  onGranted?: () => void;
+  grantBooster?: boolean;
+  successMessage?: string;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -229,6 +232,9 @@ export default function PayButton({
   disabled = false,
   label,
   icon,
+  onGranted,
+  grantBooster: shouldGrantBooster = true,
+  successMessage,
 }: PayButtonProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -251,6 +257,13 @@ export default function PayButton({
     [amountWei, label]
   );
 
+  const resolvedSuccessMessage = useMemo(() => {
+    if (successMessage) return successMessage;
+    return shouldGrantBooster
+      ? 'Payment confirmed! Time Freeze engaged.'
+      : 'Payment confirmed!';
+  }, [shouldGrantBooster, successMessage]);
+
   useEffect(() => {
     if (!toast) return undefined;
     const timeout = window.setTimeout(() => setToast(null), 3500);
@@ -260,6 +273,13 @@ export default function PayButton({
   const showToast = useCallback((next: Toast) => {
     setToast(next);
   }, []);
+
+  const handleGrant = useCallback(() => {
+    if (shouldGrantBooster) {
+      dispatchBooster(boosterType, durationMs);
+    }
+    onGranted?.();
+  }, [boosterType, durationMs, onGranted, shouldGrantBooster]);
 
   const handleNativeIntent = useCallback(
     async (intent: PayIntent, fromAddress: string) => {
@@ -287,18 +307,18 @@ export default function PayButton({
         params: [tx],
       });
 
-      dispatchBooster(boosterType, durationMs);
-      showToast({ type: 'success', message: 'Boost activated on Base!' });
+      handleGrant();
+      showToast({ type: 'success', message: resolvedSuccessMessage });
       setInfoMessage(null);
     },
-    [boosterType, durationMs, showToast]
+    [handleGrant, resolvedSuccessMessage, showToast]
   );
 
   const handleCommerceSession = useCallback(
     async (session: UnknownRecord) => {
       if (readBooleanField(session, 'mock')) {
-        dispatchBooster(boosterType, durationMs);
-        showToast({ type: 'success', message: 'Mock payment confirmed. Boost active!' });
+        handleGrant();
+        showToast({ type: 'success', message: resolvedSuccessMessage });
         return;
       }
 
@@ -322,10 +342,10 @@ export default function PayButton({
         return;
       }
 
-      dispatchBooster(boosterType, durationMs);
-      showToast({ type: 'success', message: 'Payment confirmed! Time Freeze engaged.' });
+      handleGrant();
+      showToast({ type: 'success', message: resolvedSuccessMessage });
     },
-    [boosterType, durationMs, isMounted, showToast]
+    [handleGrant, isMounted, resolvedSuccessMessage, showToast]
   );
 
   const handlePay = useCallback(async () => {
@@ -335,7 +355,7 @@ export default function PayButton({
 
     try {
       setIsSubmitting(true);
-      setInfoMessage('Preparing Base boost…');
+      setInfoMessage('Preparing Base checkout…');
 
       dispatchWalletModalOpen();
       const account = await ensureBaseNetwork();
@@ -377,9 +397,9 @@ export default function PayButton({
     handleNativeIntent,
     isSubmitting,
     setWallet,
-    showToast,
-    sku,
-  ]);
+      showToast,
+      sku,
+    ]);
 
   return (
     <div className="space-y-2">

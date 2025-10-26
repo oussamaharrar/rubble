@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import MiniAppShell from './MiniAppShell';
 import WalletBar from './WalletBar';
@@ -11,6 +11,8 @@ import HomeScreen from './stages/HomeScreen';
 import IntroScreen from './stages/IntroScreen';
 import SummaryScreen from './stages/SummaryScreen';
 import type { LifetimeStats } from './StatsModal';
+import SettingsModal from './SettingsModal';
+import TutorialOverlay, { shouldShowTutorial } from './TutorialOverlay';
 import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
@@ -87,6 +89,9 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [highlight, setHighlight] = useState<HighlightEntry | null>(null);
   const [lastSavedRun, setLastSavedRun] = useState<number | null>(null);
   const [backdropPhase, setBackdropPhase] = useState<GamePhase>('home');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const tutorialAutoRef = useRef(shouldShowTutorial());
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -97,6 +102,19 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   useEffect(() => {
     loadDaily();
   }, [loadDaily]);
+
+  useEffect(() => {
+    if (phase !== 'home' && phase !== 'summary') {
+      setSettingsOpen(false);
+    }
+  }, [phase]);
+
+  useEffect(() => {
+    if ((phase === 'home' || phase === 'intro') && tutorialAutoRef.current) {
+      setTutorialOpen(true);
+      tutorialAutoRef.current = false;
+    }
+  }, [phase, tutorialAutoRef]);
 
   useEffect(() => {
     if (phase === 'summary') {
@@ -260,6 +278,16 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
         )}
       </div>
       <div className="flex items-center gap-2 text-xs text-slate-300">
+        {(displayPhase === 'home' || displayPhase === 'summary') && (
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="button-tap flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-base text-slate-100 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            aria-label="Open settings"
+          >
+            ⚙
+          </button>
+        )}
         <span className="rounded-full border border-white/10 px-3 py-1">Base Mini</span>
       </div>
     </div>
@@ -358,6 +386,18 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
           onSelect={setDrawerView}
           highlight={highlight}
           lifetimeStats={lifetime}
+          onShowTutorial={() => {
+            setDrawerOpen(false);
+            setTutorialOpen(true);
+          }}
+        />
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <TutorialOverlay
+          open={tutorialOpen}
+          onClose={() => {
+            setTutorialOpen(false);
+            tutorialAutoRef.current = false;
+          }}
         />
       </div>
     </MiniAppShell>

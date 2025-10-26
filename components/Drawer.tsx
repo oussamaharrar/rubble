@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import PayButton from '@/components/PayButton';
@@ -25,6 +25,7 @@ interface DrawerProps {
     official?: boolean;
   } | null;
   lifetimeStats: LifetimeStats;
+  onShowTutorial: () => void;
 }
 
 const VIEW_TABS: { label: string; value: DrawerView }[] = [
@@ -78,10 +79,29 @@ function MissionsView() {
 function ShopView() {
   const freeOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
   const consumeBooster = useGameStore((state) => state.consumeBooster);
+  const grantBoosterOrbs = useGameStore((state) => state.grantBooster);
+  const unlockFeature = useGameStore((state) => state.unlockFeature);
+  const unlocks = useGameStore((state) => state.unlocks);
+  const settings = useGameStore((state) => state.settings);
+  const setSettings = useGameStore((state) => state.setSettings);
 
   const handleUseOrb = () => {
     void consumeBooster();
   };
+
+  const handleThemeGranted = useCallback(() => {
+    unlockFeature('themeSkies');
+    setSettings({ theme: 'soothing-skies' });
+  }, [setSettings, unlockFeature]);
+
+  const handleSparkleGranted = useCallback(() => {
+    unlockFeature('fxSparkle');
+    setSettings({ sparkleFx: true });
+  }, [setSettings, unlockFeature]);
+
+  const handleOrbBundleGranted = useCallback(() => {
+    grantBoosterOrbs(3, 'paid');
+  }, [grantBoosterOrbs]);
 
   return (
     <div className="space-y-4 text-sm text-slate-200">
@@ -105,6 +125,97 @@ function ShopView() {
         <p className="text-xs text-slate-300/80">Pay 1 wei to trigger a 5s slow-time boost using the Base rail.</p>
         <div className="mt-3 max-w-xs">
           <PayButton label="Boost on Base · 1 wei" />
+        </div>
+      </div>
+      <div className="rounded-2xl border border-sky-400/30 bg-slate-900/70 p-4 shadow-inner shadow-black/40">
+        <p className="text-sm font-semibold text-slate-100">Theme Pack · Soothing Skies</p>
+        <p className="text-xs text-slate-300/80">Unlock a calming gradient backdrop and switch anytime.</p>
+        {unlocks.themeSkies ? (
+          <div className="mt-4 space-y-3">
+            <p className="text-xs text-emerald-300/90">Unlocked. Choose your vibe:</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSettings({ theme: 'classic' })}
+                className={clsx(
+                  'button-tap flex-1 rounded-2xl px-3 py-2 text-xs font-semibold uppercase tracking-wide',
+                  settings.theme === 'classic'
+                    ? 'border border-emerald-400/60 bg-emerald-500/20 text-emerald-100'
+                    : 'border border-white/10 bg-slate-900/60 text-slate-200'
+                )}
+                disabled={settings.theme === 'classic'}
+              >
+                Classic
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettings({ theme: 'soothing-skies' })}
+                className={clsx(
+                  'button-tap flex-1 rounded-2xl px-3 py-2 text-xs font-semibold uppercase tracking-wide',
+                  settings.theme === 'soothing-skies'
+                    ? 'border border-sky-400/60 bg-sky-500/25 text-sky-100'
+                    : 'border border-white/10 bg-slate-900/60 text-slate-200'
+                )}
+                disabled={settings.theme === 'soothing-skies'}
+              >
+                Soothing Skies
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 max-w-xs">
+            <PayButton
+              sku="feature_theme_soothing_skies"
+              label="Unlock Theme · 1 wei"
+              grantBooster={false}
+              onGranted={handleThemeGranted}
+              successMessage="Theme unlocked! Soothing Skies applied."
+            />
+          </div>
+        )}
+      </div>
+      <div className="rounded-2xl border border-violet-400/30 bg-slate-900/70 p-4 shadow-inner shadow-black/40">
+        <p className="text-sm font-semibold text-slate-100">Particle Pack · Sparkle FX</p>
+        <p className="text-xs text-slate-300/80">Add shimmering bursts to Perfect pops and charge releases.</p>
+        {unlocks.fxSparkle ? (
+          <div className="mt-4 space-y-2">
+            <p className="text-xs text-emerald-300/90">Sparkle FX unlocked. Toggle anytime:</p>
+            <button
+              type="button"
+              onClick={() => setSettings({ sparkleFx: !settings.sparkleFx })}
+              className={clsx(
+                'button-tap w-full rounded-2xl px-4 py-2 text-xs font-semibold uppercase tracking-wide',
+                settings.sparkleFx
+                  ? 'border border-violet-400/60 bg-violet-500/20 text-violet-100'
+                  : 'border border-white/10 bg-slate-900/60 text-slate-200'
+              )}
+            >
+              {settings.sparkleFx ? 'Disable Sparkle FX' : 'Enable Sparkle FX'}
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 max-w-xs">
+            <PayButton
+              sku="feature_fx_sparkle"
+              label="Unlock Sparkle FX · 1 wei"
+              grantBooster={false}
+              onGranted={handleSparkleGranted}
+              successMessage="Sparkle FX unlocked!"
+            />
+          </div>
+        )}
+      </div>
+      <div className="rounded-2xl border border-amber-400/30 bg-slate-900/70 p-4 shadow-inner shadow-black/30">
+        <p className="text-sm font-semibold text-slate-100">Starter Orb Bundle</p>
+        <p className="text-xs text-slate-300/80">Top up with +3 Energy Orbs instantly.</p>
+        <div className="mt-3 max-w-xs">
+          <PayButton
+            sku="bundle_energy_orbs"
+            label="Buy +3 Orbs · 1 wei"
+            grantBooster={false}
+            onGranted={handleOrbBundleGranted}
+            successMessage="Added +3 Energy Orbs to your bank!"
+          />
         </div>
       </div>
     </div>
@@ -221,7 +332,7 @@ const HOW_TO = [
   'Use Booster Orbs or Base boosts to slow time during hectic waves.',
 ];
 
-function HowToView() {
+function HowToView({ onShowTutorial }: { onShowTutorial: () => void }) {
   return (
     <div className="space-y-3 text-left text-sm text-slate-200">
       {HOW_TO.map((tip, index) => (
@@ -230,6 +341,13 @@ function HowToView() {
           <p className="mt-1 text-sm text-slate-200">{tip}</p>
         </div>
       ))}
+      <button
+        type="button"
+        onClick={onShowTutorial}
+        className="button-tap mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-400/40 bg-sky-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+      >
+        <span aria-hidden>▶</span> Replay Tutorial
+      </button>
     </div>
   );
 }
@@ -258,7 +376,7 @@ function StatsView({ stats }: { stats: LifetimeStats }) {
   );
 }
 
-export default function Drawer({ open, view, onClose, onSelect, highlight, lifetimeStats }: DrawerProps) {
+export default function Drawer({ open, view, onClose, onSelect, highlight, lifetimeStats, onShowTutorial }: DrawerProps) {
   return (
     <AnimatePresence>
       {open ? (
@@ -309,7 +427,7 @@ export default function Drawer({ open, view, onClose, onSelect, highlight, lifet
                 {view === 'missions' ? <MissionsView /> : null}
                 {view === 'shop' ? <ShopView /> : null}
                 {view === 'leaderboard' ? <LeaderboardView highlight={highlight} /> : null}
-                {view === 'howto' ? <HowToView /> : null}
+                {view === 'howto' ? <HowToView onShowTutorial={onShowTutorial} /> : null}
                 {view === 'stats' ? <StatsView stats={lifetimeStats} /> : null}
               </div>
               <button

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
+import { playTapChime } from '@/lib/audio';
 
 const COLOR_MAP = {
   yellow: '#facc15',
@@ -34,13 +35,26 @@ interface Particle {
   y: number;
   radius: number;
   life: number;
+  maxLife: number;
   color: string;
+  vx: number;
+  vy: number;
+  gravity: number;
 }
+
+type AmbientDot = {
+  x: number;
+  y: number;
+  radius: number;
+  depth: number;
+  phase: number;
+};
 
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
+  const particlePoolRef = useRef<Particle[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
@@ -48,10 +62,21 @@ export default function GameCanvas() {
   const sizeRef = useRef({ width: 0, height: 0 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
+  const ambientDotsRef = useRef<AmbientDot[]>([]);
+  if (ambientDotsRef.current.length === 0) {
+    ambientDotsRef.current = Array.from({ length: 18 }, () => ({
+      x: Math.random(),
+      y: Math.random(),
+      radius: 18 + Math.random() * 28,
+      depth: 0.25 + Math.random() * 0.75,
+      phase: Math.random() * Math.PI * 2,
+    }));
+  }
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
   const settings = useGameStore((state) => state.settings);
+  const unlocks = useGameStore((state) => state.unlocks);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -102,7 +127,7 @@ export default function GameCanvas() {
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
-      const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden } = state;
+      const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
       const measuredWidth = sizeRef.current.width || state.width || canvas.clientWidth || 0;
       const measuredHeight = sizeRef.current.height || state.height || canvas.clientHeight || 0;
       const dpr = dprRef.current;
@@ -115,8 +140,18 @@ export default function GameCanvas() {
       const gradient = ctx.createLinearGradient(0, 0, 0, measuredHeight);
       const topAlpha = playingPhase ? 0.72 : 0.85;
       const bottomAlpha = playingPhase ? 0.88 : 0.94;
-      gradient.addColorStop(0, `rgba(${18 + comboIntensity * 40},${24 + comboIntensity * 20},${43 + comboIntensity * 32},${topAlpha})`);
-      gradient.addColorStop(1, `rgba(10,13,23,${bottomAlpha})`);
+      const themeActive = state.settings.theme === 'soothing-skies' && state.unlocks.themeSkies;
+      if (themeActive) {
+        const skyBase = 120 + comboIntensity * 30;
+        gradient.addColorStop(0, `rgba(${skyBase},${178 + comboIntensity * 12},255,${topAlpha})`);
+        gradient.addColorStop(1, `rgba(36,68,122,${bottomAlpha})`);
+      } else {
+        gradient.addColorStop(
+          0,
+          `rgba(${18 + comboIntensity * 40},${24 + comboIntensity * 20},${43 + comboIntensity * 32},${topAlpha})`
+        );
+        gradient.addColorStop(1, `rgba(10,13,23,${bottomAlpha})`);
+      }
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, measuredWidth, measuredHeight);
 
@@ -137,6 +172,23 @@ export default function GameCanvas() {
         ctx.fillRect(0, 0, measuredWidth, measuredHeight);
       }
 
+      if (!prefersReducedMotion.current) {
+        const dots = ambientDotsRef.current;
+        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.07)';
+        for (const dot of dots) {
+          const offsetX = Math.sin(now / 16000 + dot.phase) * dot.depth * 36;
+          const offsetY = Math.cos(now / 18000 + dot.phase) * dot.depth * 42;
+          const x = dot.x * measuredWidth + offsetX;
+          const y = dot.y * measuredHeight + offsetY;
+          ctx.beginPath();
+          ctx.fillStyle = dotColor;
+          ctx.globalAlpha = 0.45;
+          ctx.arc(x, y, dot.radius * (0.7 + comboIntensity * 0.25), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      }
+
       const wobble = prefersReducedMotion.current ? 0 : Math.sin(now / 420) * 4;
       ctx.translate(0, wobble);
 
@@ -148,6 +200,43 @@ export default function GameCanvas() {
         burstShakeRef.current = Math.max(0, shake - dt * 0.08);
       } else {
         burstShakeRef.current = Math.max(0, burstShakeRef.current - dt * 0.06);
+      }
+
+      for (const hazard of hazards) {
+        if (hazard.kind === 'poison-cloud') {
+          const remaining =
+            typeof hazard.expiresAt === 'number' && hazard.expiresAt > 0
+              ? Math.max(0, Math.min(1, (hazard.expiresAt - now) / 4_000))
+              : 1;
+          const inner = ctx.createRadialGradient(hazard.x, hazard.y, hazard.r * 0.1, hazard.x, hazard.y, hazard.r);
+          inner.addColorStop(0, `rgba(76,196,255,${0.16 * remaining})`);
+          inner.addColorStop(1, `rgba(30,58,138,0)`);
+          ctx.beginPath();
+          ctx.fillStyle = inner;
+          ctx.arc(hazard.x, hazard.y, hazard.r, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          const spin = prefersReducedMotion.current ? 0 : now / 900 + (hazard.createdAt % 2000) / 200;
+          ctx.save();
+          ctx.translate(hazard.x, hazard.y);
+          ctx.rotate(spin);
+          ctx.beginPath();
+          const spikes = 8;
+          for (let i = 0; i < spikes; i += 1) {
+            const angle = (i / spikes) * Math.PI * 2;
+            const inner = hazard.r * 0.45;
+            const outer = hazard.r;
+            ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+            ctx.lineTo(Math.cos(angle + Math.PI / spikes) * inner, Math.sin(angle + Math.PI / spikes) * inner);
+          }
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(248,113,113,0.18)';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'rgba(248,113,113,0.55)';
+          ctx.stroke();
+          ctx.restore();
+        }
       }
 
       for (const bubble of bubbles) {
@@ -236,20 +325,25 @@ export default function GameCanvas() {
       const particles = particlesRef.current;
       const remaining: Particle[] = [];
       for (const particle of particles) {
-        const radius = particle.radius;
-        const alpha = Math.max(0, particle.life);
-        if (alpha <= 0) continue;
+        particle.life -= dt;
+        if (particle.life <= 0) {
+          particlePoolRef.current.push(particle);
+          continue;
+        }
+        const progress = Math.max(0, particle.life / particle.maxLife);
+        const easedAlpha = Math.pow(progress, 0.7);
+        particle.x += particle.vx * (dt / 16);
+        particle.y += particle.vy * (dt / 16);
+        particle.vy += particle.gravity * (dt / 16);
         ctx.beginPath();
+        ctx.globalAlpha = Math.min(1, easedAlpha);
         ctx.fillStyle = particle.color;
-        ctx.globalAlpha = alpha;
-        ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
+        ctx.arc(particle.x, particle.y, Math.max(1.2, particle.radius * (0.75 + (1 - progress) * 0.35)), 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
-        particle.life -= dt * 0.0025;
-        particle.radius += dt * 0.04;
         remaining.push(particle);
       }
-      particlesRef.current = remaining.slice(0, MAX_PARTICLES);
+      particlesRef.current = remaining;
 
       const ripples = ripplesRef.current;
       const rippleRemaining: Ripple[] = [];
@@ -337,6 +431,8 @@ export default function GameCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const allowHaptics = settings.haptics && !settings.reducedMotion;
+    const allowSound = settings.sound;
+    const sparkleEnabled = unlocks.fxSparkle && settings.sparkleFx && !settings.reducedMotion;
 
     const vibrate = (pattern: number | number[]) => {
       if (!allowHaptics) return;
@@ -344,63 +440,134 @@ export default function GameCanvas() {
       navigator.vibrate(pattern);
     };
 
+    const spawnParticle = ({
+      x,
+      y,
+      color,
+      radius,
+      life,
+      vx = 0,
+      vy = 0,
+      gravity = 0.001,
+    }: {
+      x: number;
+      y: number;
+      color: string;
+      radius: number;
+      life: number;
+      vx?: number;
+      vy?: number;
+      gravity?: number;
+    }) => {
+      const pool = particlePoolRef.current;
+      const particle = pool.pop() ?? {
+        x: 0,
+        y: 0,
+        radius: 0,
+        life: 0,
+        maxLife: 0,
+        color: '',
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+      };
+      particle.x = x;
+      particle.y = y;
+      particle.radius = radius;
+      particle.life = life;
+      particle.maxLife = life;
+      particle.color = color;
+      particle.vx = vx;
+      particle.vy = vy;
+      particle.gravity = gravity;
+      particlesRef.current.unshift(particle);
+      if (particlesRef.current.length > MAX_PARTICLES) {
+        const removed = particlesRef.current.pop();
+        if (removed) {
+          pool.push(removed);
+        }
+      }
+    };
+
+    const pushRipple = (ripple: Ripple) => {
+      ripplesRef.current.unshift(ripple);
+      if (ripplesRef.current.length > 10) {
+        ripplesRef.current.length = 10;
+      }
+    };
+
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
       if (result.burst) {
         vibrate([0, 18, 12, 40]);
+        if (allowSound) {
+          playTapChime({ pitch: result.golden ? 840 : 560 });
+        }
         const rippleColor = result.golden
           ? result.goldenToxic
             ? 'rgba(248,113,113,0.45)'
             : 'rgba(253,224,71,0.45)'
           : 'rgba(56,189,248,0.45)';
         const maxRadius = Math.max(result.radius ?? 200, 140);
-        ripplesRef.current.unshift({ x, y, progress: 0, maxRadius, color: rippleColor });
-        ripplesRef.current = ripplesRef.current.slice(0, 10);
+        pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
         if (!prefersReducedMotion.current) {
           burstShakeRef.current = Math.max(burstShakeRef.current, result.hit ? 14 : 8);
         }
-        const burstParticles = Math.max(6, Math.min(16, (result.poppedIds?.length ?? 4) + 4));
+        const burstParticles = Math.max(8, Math.min(18, (result.poppedIds?.length ?? 4) + 6));
         for (let index = 0; index < burstParticles; index += 1) {
           const theta = (Math.PI * 2 * index) / burstParticles;
-          const distance = (result.radius ?? 160) * 0.35;
-          particlesRef.current.unshift({
-            x: x + Math.cos(theta) * distance,
-            y: y + Math.sin(theta) * distance,
-            radius: 10,
-            life: 0.9,
+          const speed = 0.18 + Math.random() * 0.08;
+          spawnParticle({
+            x,
+            y,
+            radius: 7 + Math.random() * 4,
+            life: 420,
             color: rippleColor,
+            vx: Math.cos(theta) * speed,
+            vy: Math.sin(theta) * speed,
+            gravity: 0.0012,
           });
         }
         if (result.golden) {
-          particlesRef.current.unshift({
+          spawnParticle({
             x,
             y,
-            radius: 16,
-            life: 1,
-            color: result.goldenToxic ? 'rgba(248,113,113,0.6)' : 'rgba(253,224,71,0.65)',
+            radius: 18,
+            life: 520,
+            color: result.goldenToxic ? 'rgba(248,113,113,0.6)' : 'rgba(253,224,71,0.7)',
+            vx: 0,
+            vy: -0.08,
+            gravity: 0.001,
           });
         }
-        particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
         return;
       }
 
       if (!result.hit) {
         vibrate(25);
+        if (result.drain && allowSound) {
+          playTapChime({ pitch: 320 });
+        }
         return;
       }
 
       if (result.golden) {
         vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        if (allowSound) {
+          playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
+        }
         const color = result.goldenToxic ? 'rgba(248,113,113,0.6)' : 'rgba(253,224,71,0.65)';
-        particlesRef.current.unshift({ x, y, radius: 14, life: 1, color });
-        particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+        spawnParticle({ x, y, radius: 14, life: 520, color, vy: -0.06, gravity: 0.0012 });
         const rippleColor = result.goldenToxic ? 'rgba(248,113,113,0.45)' : 'rgba(253,224,71,0.45)';
-        ripplesRef.current.unshift({ x, y, progress: 0, maxRadius: 160, color: rippleColor });
-        ripplesRef.current = ripplesRef.current.slice(0, 8);
+        pushRipple({ x, y, progress: 0, maxRadius: 160, color: rippleColor });
         if (!prefersReducedMotion.current && !result.goldenToxic) {
           burstShakeRef.current = Math.max(burstShakeRef.current, 6);
         }
         return;
+      }
+
+      if (allowSound) {
+        playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
       }
 
       if (result.drain) {
@@ -418,19 +585,41 @@ export default function GameCanvas() {
         : result.targetHit
         ? 'rgba(56,189,248,0.65)'
         : 'rgba(255,255,255,0.35)';
-      particlesRef.current.unshift({
-        x,
-        y,
-        radius: 12,
-        life: 1,
-        color,
-      });
-      particlesRef.current = particlesRef.current.slice(0, MAX_PARTICLES);
+      const baseCount = result.perfect ? 8 : 6;
+      for (let index = 0; index < baseCount; index += 1) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 0.12 + Math.random() * 0.08;
+        spawnParticle({
+          x,
+          y,
+          radius: 6 + Math.random() * 3,
+          life: 360,
+          color,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 0.02,
+          gravity: 0.001,
+        });
+      }
       if (result.perfect && !prefersReducedMotion.current) {
         const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
         const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
-        ripplesRef.current.unshift({ x, y, progress: 0, maxRadius, color: rippleColor });
-        ripplesRef.current = ripplesRef.current.slice(0, 8);
+        pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
+      }
+      if (sparkleEnabled && result.perfect) {
+        for (let index = 0; index < 4; index += 1) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 0.16 + Math.random() * 0.05;
+          spawnParticle({
+            x,
+            y,
+            radius: 3,
+            life: 300,
+            color: 'rgba(255,255,255,0.7)',
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            gravity: 0.0008,
+          });
+        }
       }
     };
 
@@ -520,7 +709,7 @@ export default function GameCanvas() {
       canvas.removeEventListener('pointercancel', handlePointerCancel);
       canvas.removeEventListener('pointerleave', handlePointerCancel);
     };
-  }, [settings.haptics, settings.reducedMotion]);
+  }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
