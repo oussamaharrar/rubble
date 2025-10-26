@@ -48,22 +48,20 @@ export default function StartScreen({
           exit={{ opacity: 0 }}
           className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-gradient-to-br from-slate-950/90 via-slate-900/70 to-sky-950/80 px-6 text-center"
         >
-          <motion.div
-            initial={{ scale: 0.9, rotate: -2 }}
+          <motion.section
+            initial={{ scale: 0.94, rotate: -2 }}
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 160, damping: 18 }}
-            className="mx-auto mb-8 max-w-xs space-y-4"
+            className="home-chrome relative mx-auto mb-6 w-full max-w-sm rounded-3xl bg-gradient-to-b from-[#06080f] to-[#0a0d15] p-6 pb-10 text-center shadow-lg shadow-black/40"
           >
             <div className="inline-flex items-center gap-2 rounded-full bg-sky-500/15 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-sky-200/80 shadow-inner shadow-sky-400/20">
               Rubble Rush
             </div>
-            <h1 className="text-3xl font-semibold text-slate-100">
-              Storm &amp; Combos
-            </h1>
-            <p className="text-sm text-slate-300/80">
+            <h1 className="mt-4 text-3xl font-semibold text-white">Storm &amp; Combos</h1>
+            <p className="mt-3 text-sm text-slate-300/80">
               Race the clock, chain color combos, and harness Base storms to bank booster orbs. Ready to rush?
             </p>
-          </motion.div>
+          </motion.section>
           <div className="flex w-full max-w-sm flex-col gap-4">
             <motion.button
               type="button"
