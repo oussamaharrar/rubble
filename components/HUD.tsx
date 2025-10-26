@@ -108,13 +108,13 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
         <motion.button
           type="button"
           onClick={handleUseOrb}
-          className="inline-flex items-center justify-center rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+          className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
           whileTap={{ scale: 0.95 }}
         >
           {boosterBank.freeOrbs > 0 ? 'Boost · Use Orb' : 'Boost · Shop'}
         </motion.button>
         <div className={clsx('flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-200', leftHanded ? 'justify-start' : 'justify-end')}>
-          <span className="rounded-full bg-sky-500/20 px-3 py-1 text-sky-100">Orbs {boosterBank.freeOrbs}</span>
+          <span className="whitespace-nowrap rounded-full bg-sky-500/20 px-3 py-1 text-sky-100">Orbs {boosterBank.freeOrbs}</span>
           {slowActive && <span className="rounded-full bg-sky-500/20 px-3 py-1 text-sky-100">Slow</span>}
         </div>
       </div>
