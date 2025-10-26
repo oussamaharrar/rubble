@@ -1,0 +1,67 @@
+:root {
+  --frame-w: 424px;
+  --frame-h: 695px;
+  --header-h: 64px;
+  --footer-h: 44px;
+}
+
+@supports (padding: max(0px)) {
+  .safe-top {
+    padding-top: max(var(--header-h), env(safe-area-inset-top));
+  }
+  .safe-bottom {
+    padding-bottom: max(var(--footer-h), env(safe-area-inset-bottom));
+  }
+}
+
+.app-viewport {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: #06080f;
+  overflow: hidden;
+}
+
+html,
+body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+.miniapp-frame {
+  margin: 0 auto;
+  width: 100%;
+  max-width: var(--frame-w);
+}
+
+.app-main {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.frame-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: stretch;
+  overflow: hidden;
+}
+
+[data-playing='1'] header,
+[data-playing='1'] footer,
+[data-playing='1'] .home-chrome {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+header,
+footer,
+.home-chrome {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
