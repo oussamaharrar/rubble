@@ -52,14 +52,13 @@ type AmbientDot = {
 
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const particlePoolRef = useRef<Particle[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
-  const dprRef = useRef(1);
-  const sizeRef = useRef({ width: 0, height: 0 });
+  const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
@@ -101,38 +100,68 @@ export default function GameCanvas() {
   }, [settings.reducedMotion]);
 
   useEffect(() => {
-    const container = containerRef.current;
+    const frameEl = frameRef.current;
     const canvas = canvasRef.current;
-    if (!container || !canvas) return;
-    const ctx = canvas.getContext('2d');
+    if (!frameEl || !canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-      canvas.width = Math.max(1, Math.floor(width * dpr));
-      canvas.height = Math.max(1, Math.floor(height * dpr));
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      dprRef.current = dpr;
-      sizeRef.current = { width, height };
+    let resizeFrame: number | null = null;
+
+    const resizeCanvas = () => {
+      const box = frameEl.getBoundingClientRect();
+      const cssW = Math.max(1, Math.floor(box.width));
+      const cssH = Math.max(1, Math.floor(box.height));
+      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      setStageSize(width, height);
-    });
-    observer.observe(container);
+      gameSizeRef.current = { w: cssW, h: cssH, dpr };
+      setStageSize(cssW, cssH);
+    };
+
+    const scheduleResize = () => {
+      if (resizeFrame !== null) return;
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null;
+        resizeCanvas();
+      });
+    };
+
+    resizeCanvas();
+
+    const observer = new ResizeObserver(() => scheduleResize());
+    observer.observe(frameEl);
+
+    const handleViewportResize = () => scheduleResize();
+    window.addEventListener('resize', handleViewportResize, { passive: true });
+    window.addEventListener('orientationchange', handleViewportResize, { passive: true });
+
+    const root = document.getElementById('rubble-root');
+    const mutationObserver = root
+      ? new MutationObserver(scheduleResize)
+      : null;
+    if (mutationObserver && root) {
+      mutationObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
+    }
 
     let frameHandle: number;
 
     const render = (dt: number) => {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
-      const measuredWidth = sizeRef.current.width || state.width || canvas.clientWidth || 0;
-      const measuredHeight = sizeRef.current.height || state.height || canvas.clientHeight || 0;
-      const dpr = dprRef.current;
+      const size = gameSizeRef.current;
+      const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
+      const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
+      const dpr = size.dpr || 1;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
       ctx.clearRect(0, 0, measuredWidth, measuredHeight);
 
       const comboIntensity = Math.min(stats.chainLen / 10, 1);
@@ -172,9 +201,10 @@ export default function GameCanvas() {
         ctx.fillRect(0, 0, measuredWidth, measuredHeight);
       }
 
-      if (!prefersReducedMotion.current) {
+      const allowAmbient = !prefersReducedMotion.current && !playingPhase;
+      if (allowAmbient) {
         const dots = ambientDotsRef.current;
-        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.07)';
+        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.08)';
         for (const dot of dots) {
           const offsetX = Math.sin(now / 16000 + dot.phase) * dot.depth * 36;
           const offsetY = Math.cos(now / 18000 + dot.phase) * dot.depth * 42;
@@ -182,7 +212,7 @@ export default function GameCanvas() {
           const y = dot.y * measuredHeight + offsetY;
           ctx.beginPath();
           ctx.fillStyle = dotColor;
-          ctx.globalAlpha = 0.45;
+          ctx.globalAlpha = 0.08;
           ctx.arc(x, y, dot.radius * (0.7 + comboIntensity * 0.25), 0, Math.PI * 2);
           ctx.fill();
           ctx.globalAlpha = 1;
@@ -413,6 +443,14 @@ export default function GameCanvas() {
 
     return () => {
       observer.disconnect();
+      if (mutationObserver) {
+        mutationObserver.disconnect();
+      }
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+      window.removeEventListener('resize', handleViewportResize);
+      window.removeEventListener('orientationchange', handleViewportResize);
       window.cancelAnimationFrame(frameHandle);
     };
   }, [setStageSize]);
@@ -421,9 +459,13 @@ export default function GameCanvas() {
     if (phase === 'home') {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { alpha: true });
       if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const { w, h, dpr } = gameSizeRef.current;
+      ctx.setTransform(dpr || 1, 0, 0, dpr || 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, w || canvas.clientWidth || canvas.width, h || canvas.clientHeight || canvas.height);
     }
   }, [phase]);
 
@@ -600,6 +642,10 @@ export default function GameCanvas() {
           gravity: 0.001,
         });
       }
+      if (allowSound && result.hit && !result.burst) {
+        playTapChime({ perfect: result.perfect });
+      }
+
       if (result.perfect && !prefersReducedMotion.current) {
         const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
         const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
@@ -712,8 +758,12 @@ export default function GameCanvas() {
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-3xl">
-      <canvas ref={canvasRef} className="h-full w-full touch-none" />
+    <div ref={frameRef} className="relative h-full w-full overflow-hidden rounded-3xl">
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 block touch-none"
+        style={{ width: '100%', height: '100%' }}
+      />
     </div>
   );
 }
