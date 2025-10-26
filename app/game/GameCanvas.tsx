@@ -234,7 +234,7 @@ export default function GameCanvas() {
   }, [setStageSize]);
 
   useEffect(() => {
-    if (phase === 'start') {
+    if (phase === 'home' || phase === 'gate' || phase === 'intro') {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');

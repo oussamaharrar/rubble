@@ -296,10 +296,11 @@ type GameStore = {
   progressCombo: (combo: number) => void;
   progressSurvival: (seconds: number) => void;
   activateSlowTime: (durationMs: number) => void;
+  setPhase: (phase: GamePhase) => void;
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
-  phase: 'start',
+  phase: 'home',
   boardKind: 'normal',
   stats: defaultStats(),
   entryMode: null,
@@ -459,7 +460,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       bubbleSpeedFactor = tuning.spawn.speedFactor || BASE_SPEED_FACTOR;
     }
     set({
-      phase: 'start',
+      phase: 'home',
       stats: defaultStats(),
       entryMode: null,
       bubbles: [],
@@ -820,6 +821,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     const until = Math.max(state.slowTimeUntil, state.now) + durationMs;
     set({ slowTimeUntil: until });
+  },
+  setPhase: (phase) => {
+    if (phase === 'home') {
+      get().resetToStart();
+      return;
+    }
+    set({ phase });
   },
   loadDaily: (seed = 'rubble-daily') => {
     const key = getDailyKeyUTC();
