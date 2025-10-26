@@ -1,5 +1,9 @@
 export type BubbleColor = 'yellow' | 'blue' | 'green' | 'pink' | 'orange';
 
+export type EntryMode = 'trial' | 'paid';
+
+export type BoardKind = 'normal' | 'daily';
+
 export type Bubble = {
   id: string;
   x: number;
@@ -33,6 +37,13 @@ export type BoosterBank = {
   lastDailyKey: string;
 };
 
+export interface GameSettings {
+  haptics: boolean;
+  reducedMotion: boolean;
+  sfx: boolean;
+  leftHanded: boolean;
+}
+
 export type RunStats = {
   score: number;
   bestCombo: number;
@@ -42,5 +53,5 @@ export type RunStats = {
   chainLen: number;
   energyOrbsCollected: number;
   paidEntryOrbs: number;
-  entryMode: 'trial' | 'paid' | null;
+  entryMode: EntryMode | null;
 };

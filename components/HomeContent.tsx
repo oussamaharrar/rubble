@@ -13,10 +13,14 @@ import ShopModal from './ShopModal';
 import StatsModal, { type LifetimeStats } from './StatsModal';
 import PauseOverlay from './PauseOverlay';
 import PrePlayModal from './PrePlayModal';
-import FullscreenToggle from './FullscreenToggle';
 import GameCanvas from '@/app/game/GameCanvas';
 import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
+import LeaderboardModal from './LeaderboardModal';
+import SettingsModal from './SettingsModal';
+import StoryIntro from './StoryIntro';
+import { saveScore } from '@/lib/leaderboard';
+import type { BoardKind } from '@/types/game';
 
 const HOW_TO_PLAY = [
   'Tap matching color bubbles quickly to build combo chains. Three or more unlock multipliers.',
@@ -26,6 +30,7 @@ const HOW_TO_PLAY = [
 ];
 
 const LIFETIME_KEY = 'rubble:lifetime-stats';
+const STORY_KEY = 'rubble:story_seen';
 
 function readLifetime(): LifetimeStats {
   if (typeof window === 'undefined') {
@@ -55,7 +60,21 @@ function writeLifetime(stats: LifetimeStats) {
   window.localStorage.setItem(LIFETIME_KEY, JSON.stringify(stats));
 }
 
-export default function HomeContent() {
+type HighlightEntry = {
+  board: BoardKind;
+  score: number;
+  combo: number;
+  streak: number;
+  dailyKey?: string;
+  official?: boolean;
+};
+
+interface HomeContentProps {
+  shareScore?: number;
+  shareBoard?: BoardKind;
+}
+
+export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeContentProps) {
   const phase = useGameStore((state) => state.phase);
   const startRun = useGameStore((state) => state.startRun);
   const resetToStart = useGameStore((state) => state.resetToStart);
@@ -66,6 +85,11 @@ export default function HomeContent() {
   const stats = useGameStore((state) => state.stats);
   const now = useGameStore((state) => state.now);
   const missions = useGameStore((state) => state.missions);
+  const setBoardKind = useGameStore((state) => state.setBoardKind);
+  const boardKind = useGameStore((state) => state.boardKind);
+  const lastRunOfficialDaily = useGameStore((state) => state.lastRunOfficialDaily);
+  const dailyKey = useGameStore((state) => state.dailyKey);
+  const startedAt = useGameStore((state) => state.startedAt);
 
   const [missionsOpen, setMissionsOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -73,17 +97,32 @@ export default function HomeContent() {
   const [howOpen, setHowOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [prePlayOpen, setPrePlayOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [storyOpen, setStoryOpen] = useState(false);
   const [lifetime, setLifetime] = useState<LifetimeStats>(() => readLifetime());
+  const [leaderboardHighlight, setLeaderboardHighlight] = useState<HighlightEntry | null>(null);
+  const [shareDismissed, setShareDismissed] = useState(false);
+  const [lastSavedRun, setLastSavedRun] = useState<number | null>(null);
 
   const playing = phase === 'playing' || phase === 'storm';
   const hideChrome = playing || phase === 'paused';
   const showHud = playing;
   const showStartScreen = phase === 'start';
   const showPauseOverlay = phase === 'paused';
+  const showShareBanner = Boolean(shareScore) && !shareDismissed && phase === 'start';
 
   useEffect(() => {
     loadDaily();
   }, [loadDaily]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const seen = window.localStorage.getItem(STORY_KEY);
+    if (!seen) {
+      setStoryOpen(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -101,18 +140,50 @@ export default function HomeContent() {
     if (phase === 'summary') {
       setSummaryOpen(true);
       setLifetime((current) => {
-        const elapsed = Math.max(0, Math.round(now / 1000));
+        const elapsedSeconds = Math.max(0, Math.round(now / 1000));
         const next: LifetimeStats = {
           bestScore: Math.max(current.bestScore, stats.score),
           bestCombo: Math.max(current.bestCombo, stats.bestCombo),
           runs: current.runs + 1,
-          totalSeconds: current.totalSeconds + elapsed,
+          totalSeconds: current.totalSeconds + elapsedSeconds,
         };
         writeLifetime(next);
         return next;
       });
+      const marker = startedAt || Date.now();
+      if (lastSavedRun !== marker) {
+        if (boardKind !== 'daily' || lastRunOfficialDaily) {
+          saveScore({
+            board: boardKind,
+            score: stats.score,
+            combo: stats.bestCombo,
+            streak: stats.streak,
+            date: new Date().toISOString(),
+            dailyKey: boardKind === 'daily' ? dailyKey : undefined,
+            entryMode: stats.entryMode ?? undefined,
+          });
+          setLeaderboardHighlight({
+            board: boardKind,
+            score: stats.score,
+            combo: stats.bestCombo,
+            streak: stats.streak,
+            dailyKey,
+            official: boardKind === 'daily' ? lastRunOfficialDaily : true,
+          });
+        } else {
+          setLeaderboardHighlight({
+            board: boardKind,
+            score: stats.score,
+            combo: stats.bestCombo,
+            streak: stats.streak,
+            dailyKey,
+            official: false,
+          });
+        }
+        setLastSavedRun(marker);
+      }
     }
-  }, [phase, stats.score, stats.bestCombo, now]);
+  }, [phase, stats.score, stats.bestCombo, stats.streak, stats.entryMode, now, boardKind, dailyKey, lastRunOfficialDaily, startedAt, lastSavedRun]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -142,8 +213,14 @@ export default function HomeContent() {
   );
 
   const requestPlay = useCallback(() => {
+    setBoardKind('normal');
     setPrePlayOpen(true);
-  }, []);
+  }, [setBoardKind]);
+
+  const requestDaily = useCallback(() => {
+    setBoardKind('daily');
+    setPrePlayOpen(true);
+  }, [setBoardKind]);
 
   const handleStartSession = useCallback(
     (mode: 'trial' | 'paid') => {
@@ -161,6 +238,8 @@ export default function HomeContent() {
     setShopOpen(false);
     setHowOpen(false);
     setStatsOpen(false);
+    setLeaderboardOpen(false);
+    setSettingsOpen(false);
     resetToStart();
   }, [resetToStart]);
 
@@ -172,6 +251,13 @@ export default function HomeContent() {
   const handleReplay = useCallback(() => {
     setSummaryOpen(false);
     setPrePlayOpen(true);
+  }, []);
+
+  const handleDismissStory = useCallback(() => {
+    setStoryOpen(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORY_KEY, '1');
+    }
   }, []);
 
   return (
@@ -203,23 +289,59 @@ export default function HomeContent() {
                 >
                   Missions {missions.length > 0 ? `(${completedMissions}/${missions.length})` : ''}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setLeaderboardOpen(true)}
+                  className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                >
+                  Leaderboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(true)}
+                  className="rounded-full border border-white/10 px-3 py-1 font-semibold text-slate-100 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                >
+                  Settings
+                </button>
               </div>
             </motion.header>
           ) : null}
         </AnimatePresence>
+        {showShareBanner ? (
+          <div className="bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                Shared score: {shareScore} ({shareBoard === 'daily' ? 'Daily Challenge' : 'Arcade'})
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLeaderboardOpen(true)}
+                  className="rounded-full border border-emerald-400/40 px-3 py-1 font-semibold text-emerald-100 transition hover:bg-emerald-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"
+                >
+                  View Board
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShareDismissed(true)}
+                  className="rounded-full border border-emerald-400/40 px-3 py-1 font-semibold text-emerald-100 transition hover:bg-emerald-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <div className="relative flex-1 overflow-hidden p-4">
           <motion.div
             className="relative h-full w-full overflow-hidden rounded-3xl border border-white/10 shadow-inner shadow-black/40"
             animate={{
               backgroundColor: playing ? 'rgba(2,6,23,0.92)' : 'rgba(7,12,24,0.7)',
-              boxShadow: playing
-                ? '0 22px 48px rgba(1,3,11,0.65)'
-                : '0 32px 64px rgba(3,7,18,0.55)',
+              boxShadow: playing ? '0 22px 48px rgba(1,3,11,0.65)' : '0 32px 64px rgba(3,7,18,0.55)',
             }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
           >
             <GameCanvas />
-            <FullscreenToggle />
             <AnimatePresence>
               {showHud ? (
                 <motion.div
@@ -233,19 +355,19 @@ export default function HomeContent() {
                 </motion.div>
               ) : null}
             </AnimatePresence>
-            <PauseOverlay
-              open={showPauseOverlay}
-              onResume={resumeRun}
-              onExit={exitToMenu}
-            />
+            <PauseOverlay open={showPauseOverlay} onResume={resumeRun} onExit={exitToMenu} />
             <StartScreen
               open={showStartScreen}
               onPlay={requestPlay}
+              onDailyChallenge={requestDaily}
               onOpenMissions={() => setMissionsOpen(true)}
               onOpenHowTo={() => setHowOpen(true)}
               onOpenStats={() => setStatsOpen(true)}
               onOpenShop={() => setShopOpen(true)}
+              onOpenLeaderboard={() => setLeaderboardOpen(true)}
+              onOpenSettings={() => setSettingsOpen(true)}
             />
+            <StoryIntro open={storyOpen} onDismiss={handleDismissStory} />
           </motion.div>
         </div>
         <AnimatePresence initial={false}>
@@ -278,9 +400,18 @@ export default function HomeContent() {
       </div>
       <MissionsModal open={missionsOpen} onClose={() => setMissionsOpen(false)} />
       <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} />
-      <SummaryModal open={summaryOpen} onClose={handleSummaryClose} onReplay={handleReplay} />
+      <SummaryModal
+        open={summaryOpen}
+        onClose={handleSummaryClose}
+        onReplay={handleReplay}
+        onOpenLeaderboard={() => setLeaderboardOpen(true)}
+        board={boardKind}
+        officialDaily={lastRunOfficialDaily}
+      />
       <StatsModal open={statsOpen} onClose={() => setStatsOpen(false)} stats={lifetime} />
       <PrePlayModal open={prePlayOpen} onClose={() => setPrePlayOpen(false)} onStart={handleStartSession} />
+      <LeaderboardModal open={leaderboardOpen} onClose={() => setLeaderboardOpen(false)} highlight={leaderboardHighlight} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <Modal
         open={howOpen}
         onClose={() => setHowOpen(false)}

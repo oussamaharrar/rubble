@@ -8,15 +8,12 @@ import { useWallet } from '@/lib/hooks/useWallet';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import { useWalletStore } from '@/lib/wallet-store';
+import { getDailyKeyUTC } from '@/lib/daily';
 
 const TRIAL_PREFIX = 'trial_used_';
 
 function todayKey() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = `${now.getMonth() + 1}`.padStart(2, '0');
-  const d = `${now.getDate()}`.padStart(2, '0');
-  return `${TRIAL_PREFIX}${y}${m}${d}`;
+  return `${TRIAL_PREFIX}${getDailyKeyUTC()}`;
 }
 
 function hasUsedTrial() {
@@ -50,7 +47,10 @@ interface PrePlayModalProps {
 export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalProps) {
   const { walletConnected } = useWallet();
   const setWallet = useWalletStore((state) => state.setWallet);
-  const grantBooster = useGameStore((state) => state.grantBooster);
+  const grantPaidOrb = useGameStore((state) => state.grantOrbOnPaidEntry);
+  const boardKind = useGameStore((state) => state.boardKind);
+  const dailyEligible = useGameStore((state) => state.officialDailyEligible);
+  const dailyRunCount = useGameStore((state) => state.dailyRunCount);
   const { payToPlay, loading, error, status, resetError } = useBoost();
 
   const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
@@ -103,18 +103,28 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
       return;
     }
     onStart('paid');
-    grantBooster(1, 'paid');
-  }, [grantBooster, onStart, payToPlay]);
+    grantPaidOrb();
+  }, [grantPaidOrb, onStart, payToPlay]);
 
   const description = useMemo(() => {
     if (!walletConnected) {
       return 'Connect a Base-compatible wallet to unlock paid entries and booster rewards.';
     }
     if (!trialUnavailable) {
-      return 'Take a free trial run (once per day) or boost-in for full rewards.';
+      return boardKind === 'daily'
+        ? 'Your free trial counts toward today’s Daily Challenge—make it count!'
+        : 'Take a free trial run (once per day) or boost-in for full rewards.';
     }
     return 'Daily trial used. Pay to play and earn an Energy Orb bonus on entry.';
-  }, [trialUnavailable, walletConnected]);
+  }, [boardKind, trialUnavailable, walletConnected]);
+
+  const dailyStatus = useMemo(() => {
+    if (boardKind !== 'daily') return null;
+    if (dailyEligible) {
+      return 'First Daily Challenge run of the day qualifies for the leaderboard.';
+    }
+    return `Daily Challenge already attempted today (${dailyRunCount}). Additional runs are for practice.`;
+  }, [boardKind, dailyEligible, dailyRunCount]);
 
   return (
     <Modal
@@ -156,6 +166,7 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
       {status ? <p className="text-xs text-sky-200">{status}</p> : null}
       {error ? <p className="text-xs text-rose-200">{error}</p> : null}
       {connectError ? <p className="text-xs text-rose-200">{connectError}</p> : null}
+      {dailyStatus ? <p className="text-xs text-amber-200">{dailyStatus}</p> : null}
       <p className="text-xs text-slate-300">
         Paid entries grant +1 Energy Orb instantly. Free trials refresh daily at 00:00 UTC.
       </p>

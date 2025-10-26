@@ -2,14 +2,18 @@
 
 import Modal from './Modal';
 import { useGameStore } from '@/lib/store';
+import type { BoardKind } from '@/types/game';
 
 interface SummaryModalProps {
   open: boolean;
   onClose: () => void;
   onReplay: () => void;
+  onOpenLeaderboard: () => void;
+  board: BoardKind;
+  officialDaily: boolean;
 }
 
-export default function SummaryModal({ open, onClose, onReplay }: SummaryModalProps) {
+export default function SummaryModal({ open, onClose, onReplay, onOpenLeaderboard, board, officialDaily }: SummaryModalProps) {
   const stats = useGameStore((state) => state.stats);
   const missions = useGameStore((state) => state.missions);
   const now = useGameStore((state) => state.now);
@@ -18,6 +22,7 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
   const elapsed = Math.max(0, Math.round(now / 1000));
   const retryLabel = boosterBank.freeOrbs > 0 ? 'Retry now (Boost active)' : 'Retry (free if Boost active)';
   const entryModeLabel = stats.entryMode === 'paid' ? 'Paid Entry' : 'Daily Trial';
+  const boardLabel = board === 'daily' ? 'Daily Challenge' : 'Arcade Run';
 
   return (
     <Modal
@@ -25,6 +30,14 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
       onClose={onClose}
       title="Run Summary"
       footer={[
+        <button
+          key="leaderboard"
+          type="button"
+          onClick={onOpenLeaderboard}
+          className="rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          View Leaderboard
+        </button>,
         <button
           key="replay"
           type="button"
@@ -43,7 +56,15 @@ export default function SummaryModal({ open, onClose, onReplay }: SummaryModalPr
         </button>,
       ]}
     >
-      <div className="grid grid-cols-2 gap-4 text-center">
+      <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-center text-xs uppercase tracking-wide text-slate-300">
+        <span>{boardLabel}</span>
+        {board === 'daily' ? (
+          <span className={`ml-2 rounded-full px-2 py-1 text-[11px] font-semibold ${officialDaily ? 'bg-emerald-400/20 text-emerald-200' : 'bg-amber-400/20 text-amber-200'}`}>
+            {officialDaily ? 'Official Score Logged' : 'Practice Run'}
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-4 text-center">
         <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-300/80">Score</p>
           <p className="text-2xl font-semibold text-sky-200">{stats.score}</p>
