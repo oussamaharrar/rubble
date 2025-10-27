@@ -595,8 +595,12 @@ export default function GameCanvas() {
 
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
+      const rewardHit = Boolean(result.energy || result.golden);
+      const perfectHit = Boolean(result.perfect);
+      if (rewardHit || perfectHit) {
+        vibrate(25);
+      }
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
         if (allowSound) {
           playTapChime({ pitch: result.golden ? 840 : 560 });
         }
@@ -641,7 +645,6 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,7 +652,6 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
         if (allowSound) {
           playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
         }
@@ -665,14 +667,6 @@ export default function GameCanvas() {
 
       if (allowSound) {
         playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
-      }
-
-      if (result.drain) {
-        vibrate(25);
-      } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
-      } else {
-        vibrate(8);
       }
 
       const color = result.energy
@@ -705,6 +699,30 @@ export default function GameCanvas() {
         const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
         const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
         pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
+      }
+      if (rewardHit && !result.burst) {
+        const pulseColor = result.energy
+          ? 'rgba(56,189,248,0.35)'
+          : result.golden
+            ? result.goldenToxic
+              ? 'rgba(248,113,113,0.35)'
+              : 'rgba(253,224,71,0.35)'
+            : 'rgba(56,189,248,0.25)';
+        pushRipple({ x, y, progress: 0, maxRadius: (result.radius ?? 48) * 3.2, color: pulseColor });
+      }
+      const comboValue = result.combo ?? 0;
+      if (comboValue >= 3) {
+        const glowStrength = Math.min(comboValue / 18, 1);
+        spawnParticle({
+          x,
+          y,
+          radius: 10 + glowStrength * 14,
+          life: 420,
+          color: `rgba(56,189,248,${0.18 + glowStrength * 0.45})`,
+          vx: 0,
+          vy: -0.04,
+          gravity: 0.0006,
+        });
       }
       if (sparkleEnabled && result.perfect) {
         for (let index = 0; index < 4; index += 1) {

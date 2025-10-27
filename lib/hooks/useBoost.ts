@@ -58,6 +58,13 @@ function getProvider(): EthereumProvider {
 const SESSION_ID_KEYS: readonly string[] = ['sessionId', 'id', 'referenceId', 'paymentIntentId', 'checkoutId'];
 const CHECKOUT_URL_KEYS: readonly string[] = ['redirectUrl', 'hostedCheckoutUrl', 'checkoutUrl', 'url'];
 
+const PAY_TO_ADDRESS = (() => {
+  const fallback = process.env.NEXT_PUBLIC_PAY_TO_ADDRESS ?? process.env.PAY_TO_ADDRESS;
+  return typeof fallback === 'string' && fallback.trim().length > 0
+    ? fallback.trim()
+    : '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0';
+})();
+
 function readStringField(record: UnknownRecord, key: string) {
   const value = record[key];
   if (typeof value === 'string' && value.trim().length > 0) {
@@ -156,6 +163,12 @@ async function pollForGrant(sessionId: string, isMounted: () => boolean) {
   return false;
 }
 
+type PayOptions = {
+  sku?: string;
+  itemId?: string;
+  memo?: string;
+};
+
 export function useBoost() {
   const setWallet = useWalletStore((state) => state.setWallet);
   const mountedRef = useRef(true);
@@ -221,7 +234,7 @@ export function useBoost() {
   );
 
   const payToPlay = useCallback(
-    async (amountWei: bigint) => {
+    async (amountWei: bigint, options?: PayOptions) => {
       if (loading) {
         return false;
       }
@@ -233,11 +246,20 @@ export function useBoost() {
         const account = await ensureBaseNetwork();
         setWallet(account, BASE_CHAIN_ID_HEX);
         setStatus('Confirm in your wallet…');
+        const payloadSku = options?.sku ?? 'game_run_entry';
+        const payloadItem = options?.itemId ?? payloadSku;
         const response = await fetch('/api/pay/session', {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           cache: 'no-store',
-          body: JSON.stringify({ sku: 'game_run_entry', amountWei: amountWei.toString() }),
+          body: JSON.stringify({
+            sku: payloadSku,
+            itemId: payloadItem,
+            amountWei: amountWei.toString(),
+            priceWei: amountWei.toString(),
+            to: PAY_TO_ADDRESS,
+            memo: options?.memo,
+          }),
         });
         const payload = (await response.json()) as PaySessionResponse;
         const message = mapErrorMessage(payload, response.status);

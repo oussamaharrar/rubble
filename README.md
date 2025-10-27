@@ -38,9 +38,14 @@ Create a `.env.local` (and mirror it to `.env.example`) with the following value
 | `NEXT_PUBLIC_WEBHOOK_URL` | ✅ | Relative or absolute URL to the payment webhook (defaults to `/api/pay/webhook`). | `/api/pay/webhook` |
 | `NEXT_PUBLIC_BASE_RPC_URL` | ✅ | Coinbase Developer Platform RPC for Base (client-safe). | `https://api.developer.coinbase.com/rpc/v1/base/YOUR_KEY` |
 | `NEXT_PUBLIC_MIN_PRICE_WEI` | ✅ | Minimum payment amount exposed to the client, in wei. | `1` |
+| `NEXT_PUBLIC_PAY_TO_ADDRESS` | ✅ | Public recipient address used to initialise Base payments. | `0xabc123...` |
 | `BASE_RPC_URL` | ✅ | Server-side Coinbase Base RPC URL. | `https://api.developer.coinbase.com/rpc/v1/base/YOUR_KEY` |
 | `PAY_TO_ADDRESS` | ✅ | Recipient address that must receive the boost payment. | `0xabc123...` |
 | `MIN_PRICE_WEI` | ✅ | Server-enforced minimum payment amount in wei. | `1` |
+| `USD_WEI_EXCHANGE_RATE` | ➖ | Optional override for the USD→wei conversion rate (1 USD in wei). | `333333333333333` |
+| `PRICE_WEI_BOOST` | ➖ | Optional explicit wei price for Boost purchases (capped at $0.02). | `6000000000000` |
+| `PRICE_WEI_COMBO` | ➖ | Optional explicit wei price for Extra Combo purchases (capped at $0.01). | `3000000000000` |
+| `PRICE_WEI_RETRY` | ➖ | Optional explicit wei price for Retry/Extra Life purchases (capped at $0.05). | `16000000000000` |
 | `FARCASTER_ACCOUNT_HEADER` | ➖ | Optional Farcaster account association header. | `...` |
 | `FARCASTER_ACCOUNT_PAYLOAD` | ➖ | Optional Farcaster account association payload. | `...` |
 | `FARCASTER_ACCOUNT_SIGNATURE` | ➖ | Optional Farcaster account association signature. | `...` |

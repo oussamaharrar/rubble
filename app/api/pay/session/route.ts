@@ -3,16 +3,22 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
 import { createPaymentCommerce, createPaymentNativeBase } from '@/lib/pay';
+import { getServerPriceEntry } from '@/lib/pricing-server';
+import type { EconomyItemId } from '@/lib/pricing';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
 
 type SessionRequestBody = {
   sku?: unknown;
   amountWei?: unknown;
+  itemId?: unknown;
+  priceWei?: unknown;
+  to?: unknown;
 };
 
 type ParsedBody = {
   sku: string;
+  itemId: string;
   amountWei: bigint;
 };
 
@@ -33,18 +39,48 @@ function parseAmount(value: unknown): bigint | null {
   return null;
 }
 
+function normaliseItemId(value: unknown): EconomyItemId | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === 'boost' || trimmed === 'combo' || trimmed === 'retry') {
+    return trimmed;
+  }
+  return null;
+}
+
 function parseBody(input: SessionRequestBody): ParsedBody | null {
   const skuValue =
     typeof input.sku === 'string' && input.sku.trim().length > 0
       ? input.sku.trim()
-      : 'booster_time_freeze';
+      : typeof input.itemId === 'string' && input.itemId.trim().length > 0
+        ? input.itemId.trim()
+        : 'booster_time_freeze';
 
-  const amountSource = input.amountWei ?? ENV.MIN_PRICE_WEI;
-  const amount = parseAmount(amountSource);
+  const itemId =
+    normaliseItemId(input.itemId) ?? (skuValue === 'boost' || skuValue === 'combo' || skuValue === 'retry'
+      ? (skuValue as EconomyItemId)
+      : null);
+
+  let amount: bigint | null = null;
+  if (itemId) {
+    const expected = getServerPriceEntry(itemId);
+    amount = expected.wei;
+    const provided = parseAmount(input.priceWei ?? input.amountWei ?? amount);
+    if (provided === null || provided !== amount) {
+      return null;
+    }
+  } else {
+    const amountSource = input.priceWei ?? input.amountWei ?? ENV.MIN_PRICE_WEI;
+    amount = parseAmount(amountSource);
+  }
+
   if (amount === null) {
     return null;
   }
-  return { sku: skuValue, amountWei: amount };
+
+  return { sku: skuValue, itemId: itemId ?? skuValue, amountWei: amount };
 }
 
 export async function POST(req: Request) {
@@ -56,6 +92,15 @@ export async function POST(req: Request) {
       { ok: false, reason: 'BAD_REQUEST', error: 'Invalid amount' },
       { status: 400, headers: NO_STORE_HEADERS }
     );
+  }
+
+  if (typeof body.to === 'string' && body.to.trim().length > 0) {
+    if (body.to.trim().toLowerCase() !== ENV.PAY_TO_ADDRESS.toLowerCase()) {
+      return NextResponse.json(
+        { ok: false, reason: 'BAD_REQUEST', error: 'Recipient mismatch' },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
   }
 
   if (parsed.amountWei < ENV.MIN_PRICE_WEI) {

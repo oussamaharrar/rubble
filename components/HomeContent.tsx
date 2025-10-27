@@ -15,6 +15,8 @@ import SettingsModal from './SettingsModal';
 import TutorialOverlay, { shouldShowTutorial } from './TutorialOverlay';
 import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
+import { useEconomyStore } from '@/lib/economy-store';
+import { useWalletStore } from '@/lib/wallet-store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
 
@@ -32,6 +34,7 @@ type HighlightEntry = {
 interface HomeContentProps {
   shareScore?: number;
   shareBoard?: BoardKind;
+  referralCode?: string;
 }
 
 function readLifetime(): LifetimeStats {
@@ -66,7 +69,7 @@ function writeLifetime(stats: LifetimeStats) {
   }
 }
 
-export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeContentProps) {
+export default function HomeContent({ shareScore, shareBoard = 'normal', referralCode }: HomeContentProps) {
   const phase = useGameStore((state) => state.phase);
   const boardKind = useGameStore((state) => state.boardKind);
   const setBoardKind = useGameStore((state) => state.setBoardKind);
@@ -93,6 +96,26 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const tutorialAutoRef = useRef(shouldShowTutorial());
   const autoStartRef = useRef(false);
+
+  const walletAddress = useWalletStore((state) => state.address);
+  const economyAddress = useEconomyStore((state) => state.address);
+  const connectEconomy = useEconomyStore((state) => state.connect);
+  const addInvite = useEconomyStore((state) => state.addInvite);
+  const markTrial = useEconomyStore((state) => state.markTrialToday);
+
+  useEffect(() => {
+    if (walletAddress && walletAddress !== economyAddress) {
+      connectEconomy(walletAddress);
+    }
+  }, [connectEconomy, economyAddress, walletAddress]);
+
+  const referralAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!referralCode) return;
+    if (referralAppliedRef.current === referralCode) return;
+    addInvite(referralCode);
+    referralAppliedRef.current = referralCode;
+  }, [addInvite, referralCode]);
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -228,9 +251,12 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
 
   const handleGateComplete = useCallback(
     (mode: EntryMode) => {
+      if (mode === 'trial') {
+        markTrial();
+      }
       startRun(mode);
     },
-    [startRun]
+    [markTrial, startRun]
   );
 
   const handleIntroComplete = useCallback(() => {
@@ -356,6 +382,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
                 shareBoard={shareBoard}
                 onPlay={(board) => openGate(board)}
                 onOpenDrawer={() => openDrawer('missions')}
+                shareHref={shareHref}
               />
             </motion.div>
           ) : null}
