@@ -70,7 +70,9 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
             animate={{ opacity: 1, y: 0 }}
           >
             <span className="text-[11px] text-slate-400">Score</span>
-            <span className="ml-2 text-base text-sky-200">{stats.score}</span>
+            <span className="ml-2 text-base text-sky-200" data-testid="hud-score">
+              {stats.score}
+            </span>
           </motion.div>
           <motion.div
             className="flex items-center gap-2 rounded-full bg-slate-950/75 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-200 shadow-lg shadow-black/40"
@@ -85,6 +87,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: -8, opacity: 0 }}
                 className={clsx('text-base font-semibold', comboActive ? 'text-amber-300' : 'text-slate-100')}
+                data-testid="hud-combo"
               >
                 {comboLabel}
               </motion.span>
@@ -92,7 +95,9 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           </motion.div>
           <div className="rounded-full bg-slate-950/75 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-200 shadow-lg shadow-black/40">
             <span className="text-[11px] text-slate-400">Streak</span>
-            <span className="ml-2 text-base text-emerald-200">{stats.streak}</span>
+            <span className="ml-2 text-base text-emerald-200" data-testid="hud-streak">
+              {stats.streak}
+            </span>
           </div>
         </div>
         <div className={clsx('pointer-events-auto flex flex-col gap-2', leftHanded ? 'items-start' : 'items-end')}>
@@ -122,7 +127,10 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
               <span className="absolute inset-[4px] rounded-full bg-slate-950/90" />
               <span className="relative z-10 flex flex-col items-center leading-tight">
                 <span>Burst</span>
-                <span className={clsx('text-[0.55rem]', burstReady ? 'text-sky-200' : 'text-slate-300')}>
+                <span
+                  className={clsx('text-[0.55rem]', burstReady ? 'text-sky-200' : 'text-slate-300')}
+                  data-testid="hud-burst"
+                >
                   {burstReady ? 'Ready' : `${Math.ceil(burstCooldownMs / 1000)}s`}
                 </span>
               </span>
@@ -135,6 +143,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
                 timeCritical && 'border-red-400/50'
               )}
               aria-live="polite"
+              data-testid="hud-timer"
             >
               {formattedTime}
             </motion.div>

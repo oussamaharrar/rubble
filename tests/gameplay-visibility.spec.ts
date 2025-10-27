@@ -35,6 +35,27 @@ test.describe('Rubble gameplay visibility', () => {
 
     await page.waitForFunction(() => document.getElementById('rubble-root')?.getAttribute('data-playing') === '1');
 
+    const score = page.locator('[data-testid="hud-score"]');
+    await expect(score).toBeVisible();
+    await expect(score).toHaveText(/\d+/);
+
+    const combo = page.locator('[data-testid="hud-combo"]');
+    await expect(combo).toBeVisible();
+    await expect(combo).toHaveText(/\S+/);
+
+    const streak = page.locator('[data-testid="hud-streak"]');
+    await expect(streak).toBeVisible();
+    await expect(streak).toHaveText(/\d+/);
+
+    const timer = page.locator('[data-testid="hud-timer"]');
+    await expect(timer).toBeVisible();
+    await expect(await timer.textContent()).toMatch(/^\d{2}\.\d$/);
+
+    const burst = page.locator('[data-testid="hud-burst"]');
+    await expect(burst).toBeVisible();
+    const burstText = (await burst.textContent())?.trim() || '';
+    expect(/Ready|s$/.test(burstText)).toBeTruthy();
+
     const overflowY = await page.evaluate(() => window.getComputedStyle(document.body).overflowY);
     expect(overflowY).toBe('hidden');
 
@@ -46,7 +67,7 @@ test.describe('Rubble gameplay visibility', () => {
     const diag = page.locator('.rbl-diag');
     await expect(diag).toBeVisible();
     const diagText = await diag.textContent();
-    console.log('DIAG:', diagText);
+    console.log('DIAG:', (diagText || '').trim());
 
     expect(diagText || '').toMatch(/DPR/i);
     expect(diagText || '').toMatch(/CSS/i);
