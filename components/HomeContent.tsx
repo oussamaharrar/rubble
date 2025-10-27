@@ -104,6 +104,20 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   }, [loadDaily]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (window.localStorage.getItem('rubble:auto-start') === '1') {
+        window.localStorage.removeItem('rubble:auto-start');
+        setBoardKind('normal');
+        startRun('trial');
+        beginGameplay();
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [beginGameplay, setBoardKind, startRun]);
+
+  useEffect(() => {
     if (phase !== 'home' && phase !== 'summary') {
       setSettingsOpen(false);
     }

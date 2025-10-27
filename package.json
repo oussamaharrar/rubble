@@ -9,7 +9,8 @@
     "start": "next start",
     "postbuild": "node scripts/postbuild.js",
     "verify:manifest": "node scripts/verify-manifest.mjs",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:e2e": "playwright test --reporter=list"
   },
   "dependencies": {
     "@base-org/account": "^2.4.0",
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
+    "@playwright/test": "^1.47.2",
     "@next/eslint-plugin-next": "^15.3.4",
     "@types/node": "^20.17.9",
     "@types/react": "^19.0.3",
