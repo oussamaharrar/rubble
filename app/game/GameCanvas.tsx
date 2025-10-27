@@ -3,52 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
-
-const COLOR_MAP = {
-  yellow: '#facc15',
-  blue: '#38bdf8',
-  green: '#4ade80',
-  pink: '#f472b6',
-  orange: '#fb923c',
-} as const;
-
-const GLOW_MAP = {
-  yellow: 'rgba(250,204,21,0.45)',
-  blue: 'rgba(56,189,248,0.45)',
-  green: 'rgba(74,222,128,0.45)',
-  pink: 'rgba(244,114,182,0.45)',
-  orange: 'rgba(251,146,60,0.45)',
-} as const;
+import { renderBackground } from './renderers/background';
+import { renderWorld } from './renderers/world';
+import { renderEffects } from './renderers/effects';
+import type { AmbientDot, Particle, Ripple } from './renderers/types';
 
 const MAX_PARTICLES = 32;
-
-interface Ripple {
-  x: number;
-  y: number;
-  progress: number;
-  maxRadius: number;
-  color: string;
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  radius: number;
-  life: number;
-  maxLife: number;
-  color: string;
-  vx: number;
-  vy: number;
-  gravity: number;
-}
-
-type AmbientDot = {
-  x: number;
-  y: number;
-  radius: number;
-  depth: number;
-  phase: number;
-};
 
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -73,6 +33,7 @@ export default function GameCanvas() {
   });
   const [diagOn, setDiagOn] = useState(false);
   const statsRef = useRef(frameStats);
+  const renderLoggedRef = useRef(false);
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -128,6 +89,15 @@ export default function GameCanvas() {
     if (!frameEl || !canvas) return;
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
+
+    if (!renderLoggedRef.current && process.env.NODE_ENV !== 'production') {
+      renderLoggedRef.current = true;
+      console.debug('[Rubble] RENDER PATHS:', {
+        bg: Boolean(renderBackground),
+        world: Boolean(renderWorld),
+        fx: Boolean(renderEffects),
+      });
+    }
 
     let resizeFrame: number | null = null;
 
@@ -201,7 +171,7 @@ export default function GameCanvas() {
         setFrameStats((prev) => (Math.abs(prev.fps - smoothFps) > 0.25 ? { ...prev, fps: smoothFps } : prev));
       }
       const state = useGameStore.getState();
-      const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
+      const { bubbles, stats, slowTimeUntil, now, phase } = state;
       const bubbleCount = bubbles.length;
       if (statsRef.current.bubbles !== bubbleCount) {
         statsRef.current.bubbles = bubbleCount;
@@ -210,9 +180,10 @@ export default function GameCanvas() {
         );
       }
       const size = gameSizeRef.current;
-      const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
-      const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
       const dpr = size.dpr || 1;
+      const rect = canvas.getBoundingClientRect();
+      const measuredWidth = Math.max(1, rect.width || size.w || canvas.clientWidth || 1);
+      const measuredHeight = Math.max(1, rect.height || size.h || canvas.clientHeight || 1);
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalAlpha = 1;
@@ -221,58 +192,19 @@ export default function GameCanvas() {
 
       const comboIntensity = Math.min(stats.chainLen / 10, 1);
       const playingPhase = phase === 'playing' || phase === 'storm';
-      const gradient = ctx.createLinearGradient(0, 0, 0, measuredHeight);
-      const topAlpha = playingPhase ? 0.72 : 0.85;
-      const bottomAlpha = playingPhase ? 0.88 : 0.94;
       const themeActive = state.settings.theme === 'soothing-skies' && state.unlocks.themeSkies;
-      if (themeActive) {
-        const skyBase = 120 + comboIntensity * 30;
-        gradient.addColorStop(0, `rgba(${skyBase},${178 + comboIntensity * 12},255,${topAlpha})`);
-        gradient.addColorStop(1, `rgba(36,68,122,${bottomAlpha})`);
-      } else {
-        gradient.addColorStop(
-          0,
-          `rgba(${18 + comboIntensity * 40},${24 + comboIntensity * 20},${43 + comboIntensity * 32},${topAlpha})`
-        );
-        gradient.addColorStop(1, `rgba(10,13,23,${bottomAlpha})`);
-      }
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, measuredWidth, measuredHeight);
-
       const slowFactor = now < slowTimeUntil ? Math.cos((now / 180) % Math.PI) : 0;
-      if (slowFactor > 0) {
-        const maxDim = Math.max(measuredWidth, measuredHeight);
-        const vignette = ctx.createRadialGradient(
-          measuredWidth / 2,
-          measuredHeight / 2,
-          maxDim * 0.15,
-          measuredWidth / 2,
-          measuredHeight / 2,
-          maxDim * 0.65
-        );
-        vignette.addColorStop(0, 'rgba(56,189,248,0.12)');
-        vignette.addColorStop(1, 'rgba(15,23,42,0.65)');
-        ctx.fillStyle = vignette;
-        ctx.fillRect(0, 0, measuredWidth, measuredHeight);
-      }
-
       const allowAmbient = !prefersReducedMotion.current && !playingPhase;
-      if (allowAmbient) {
-        const dots = ambientDotsRef.current;
-        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.08)';
-        for (const dot of dots) {
-          const offsetX = Math.sin(now / 16000 + dot.phase) * dot.depth * 36;
-          const offsetY = Math.cos(now / 18000 + dot.phase) * dot.depth * 42;
-          const x = dot.x * measuredWidth + offsetX;
-          const y = dot.y * measuredHeight + offsetY;
-          ctx.beginPath();
-          ctx.fillStyle = dotColor;
-          ctx.globalAlpha = 0.08;
-          ctx.arc(x, y, dot.radius * (0.7 + comboIntensity * 0.25), 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 1;
-        }
-      }
+
+      renderBackground(ctx, rect, state, {
+        comboIntensity,
+        playingPhase,
+        themeActive,
+        slowFactor,
+        allowAmbient,
+        ambientDots: ambientDotsRef.current,
+        now,
+      });
 
       const wobble = prefersReducedMotion.current ? 0 : Math.sin(now / 420) * 4;
       ctx.translate(0, wobble);
@@ -287,187 +219,20 @@ export default function GameCanvas() {
         burstShakeRef.current = Math.max(0, burstShakeRef.current - dt * 0.06);
       }
 
-      for (const hazard of hazards) {
-        if (hazard.kind === 'poison-cloud') {
-          const remaining =
-            typeof hazard.expiresAt === 'number' && hazard.expiresAt > 0
-              ? Math.max(0, Math.min(1, (hazard.expiresAt - now) / 4_000))
-              : 1;
-          const inner = ctx.createRadialGradient(hazard.x, hazard.y, hazard.r * 0.1, hazard.x, hazard.y, hazard.r);
-          inner.addColorStop(0, `rgba(76,196,255,${0.16 * remaining})`);
-          inner.addColorStop(1, `rgba(30,58,138,0)`);
-          ctx.beginPath();
-          ctx.fillStyle = inner;
-          ctx.arc(hazard.x, hazard.y, hazard.r, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          const spin = prefersReducedMotion.current ? 0 : now / 900 + (hazard.createdAt % 2000) / 200;
-          ctx.save();
-          ctx.translate(hazard.x, hazard.y);
-          ctx.rotate(spin);
-          ctx.beginPath();
-          const spikes = 8;
-          for (let i = 0; i < spikes; i += 1) {
-            const angle = (i / spikes) * Math.PI * 2;
-            const inner = hazard.r * 0.45;
-            const outer = hazard.r;
-            ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
-            ctx.lineTo(Math.cos(angle + Math.PI / spikes) * inner, Math.sin(angle + Math.PI / spikes) * inner);
-          }
-          ctx.closePath();
-          ctx.fillStyle = 'rgba(248,113,113,0.18)';
-          ctx.fill();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = 'rgba(248,113,113,0.55)';
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
+      renderWorld(ctx, rect, state, {
+        prefersReducedMotion: prefersReducedMotion.current,
+      });
 
-      for (const bubble of bubbles) {
-        const x = bubble.x;
-        const y = bubble.y;
-        const r = bubble.r;
-        const fill = COLOR_MAP[bubble.color];
-        ctx.beginPath();
-        ctx.fillStyle = fill;
-        ctx.globalAlpha = bubble.storm ? 0.95 : 0.88;
-        ctx.shadowBlur = bubble.storm ? 35 : 16;
-        ctx.shadowColor = bubble.storm
-          ? bubble.poison
-            ? 'rgba(248,113,113,0.55)'
-            : 'rgba(59,130,246,0.55)'
-          : GLOW_MAP[bubble.color];
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1;
+      const effectsResult = renderEffects(ctx, rect, state, {
+        dt,
+        particles: particlesRef.current,
+        particlePool: particlePoolRef.current,
+        ripples: ripplesRef.current,
+      });
 
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = bubble.storm ? 'rgba(255,255,255,0.3)' : 'rgba(15,23,42,0.25)';
-        ctx.stroke();
-
-        if (bubble.storm && !bubble.poison) {
-          ctx.beginPath();
-          ctx.strokeStyle = 'rgba(148,232,255,0.6)';
-          ctx.lineWidth = 1.2;
-          ctx.setLineDash([6, 10]);
-          ctx.arc(x, y, r * 1.25, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-      }
-
-      if (golden.active) {
-        const progress = Math.min(1, Math.max(0, (now - golden.spawnedAt) / golden.graceMs));
-        ctx.save();
-        ctx.translate(golden.x, golden.y);
-        const coreColor = golden.toxic ? 'rgba(248,113,113,0.85)' : 'rgba(253,224,71,0.88)';
-        const strokeColor = golden.toxic ? 'rgba(248,113,113,0.95)' : 'rgba(253,224,71,0.95)';
-        ctx.beginPath();
-        ctx.fillStyle = coreColor;
-        ctx.shadowBlur = 18;
-        ctx.shadowColor = golden.toxic ? 'rgba(248,113,113,0.55)' : 'rgba(253,224,71,0.55)';
-        ctx.arc(0, 0, golden.r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = strokeColor;
-        ctx.stroke();
-
-        if (!golden.toxic) {
-          const ringRadius = golden.r + 10;
-          ctx.beginPath();
-          ctx.lineWidth = 4;
-          ctx.strokeStyle = 'rgba(253,224,71,0.65)';
-          ctx.globalAlpha = 0.85;
-          ctx.arc(
-            0,
-            0,
-            ringRadius,
-            -Math.PI / 2,
-            -Math.PI / 2 + Math.PI * 2 * (1 - progress)
-          );
-          ctx.stroke();
-          ctx.globalAlpha = 0.35;
-          ctx.beginPath();
-          ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-        } else {
-          ctx.setLineDash([6, 6]);
-          ctx.beginPath();
-          ctx.strokeStyle = 'rgba(248,113,113,0.6)';
-          ctx.lineWidth = 3;
-          ctx.arc(0, 0, golden.r + 10, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-
-        ctx.restore();
-      }
-
-      const particles = particlesRef.current;
-      const remaining: Particle[] = [];
-      for (const particle of particles) {
-        particle.life -= dt;
-        if (particle.life <= 0) {
-          particlePoolRef.current.push(particle);
-          continue;
-        }
-        const progress = Math.max(0, particle.life / particle.maxLife);
-        const easedAlpha = Math.pow(progress, 0.7);
-        particle.x += particle.vx * (dt / 16);
-        particle.y += particle.vy * (dt / 16);
-        particle.vy += particle.gravity * (dt / 16);
-        ctx.beginPath();
-        ctx.globalAlpha = Math.min(1, easedAlpha);
-        ctx.fillStyle = particle.color;
-        ctx.arc(particle.x, particle.y, Math.max(1.2, particle.radius * (0.75 + (1 - progress) * 0.35)), 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        remaining.push(particle);
-      }
-      particlesRef.current = remaining;
-
-      const ripples = ripplesRef.current;
-      const rippleRemaining: Ripple[] = [];
-      for (const ripple of ripples) {
-        ripple.progress += dt * 0.0015;
-        if (ripple.progress >= 1) {
-          continue;
-        }
-        const radius = ripple.maxRadius * ripple.progress;
-        ctx.beginPath();
-        ctx.lineWidth = Math.max(1.2, 3 - ripple.progress * 2.4);
-        ctx.strokeStyle = ripple.color;
-        ctx.globalAlpha = Math.max(0, 0.35 - ripple.progress * 0.3);
-        ctx.arc(ripple.x, ripple.y, Math.max(12, radius), 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        rippleRemaining.push(ripple);
-      }
-      ripplesRef.current = rippleRemaining.slice(0, 8);
-
-      if (burst.charging && burstPointer) {
-        const chargeElapsed = Math.max(0, Date.now() - burst.chargeStartAt);
-        const progress = Math.min(chargeElapsed / burst.maxHoldMs, 1);
-        const readiness = Math.min(chargeElapsed / burst.minHoldMs, 1);
-        const ringRadius = 36 + 90 * progress;
-        ctx.beginPath();
-        ctx.lineWidth = 3.5;
-        ctx.strokeStyle = burst.overcharge ? 'rgba(96,165,250,0.75)' : 'rgba(148,232,255,0.75)';
-        ctx.globalAlpha = 0.95;
-        ctx.arc(burstPointer.x, burstPointer.y, ringRadius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-
-        const innerRadius = Math.max(18, ringRadius * readiness * 0.4);
-        ctx.beginPath();
-        ctx.fillStyle = burst.overcharge ? 'rgba(56,189,248,0.2)' : 'rgba(148,232,255,0.2)';
-        ctx.arc(burstPointer.x, burstPointer.y, innerRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      particlesRef.current = effectsResult.particles;
+      particlePoolRef.current = effectsResult.particlePool;
+      ripplesRef.current = effectsResult.ripples;
 
       ctx.restore();
     };
