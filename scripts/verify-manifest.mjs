@@ -124,7 +124,7 @@ try {
 
   assert(version === '1', 'manifest.version must be "1"');
   assert(miniapp?.version === '1', 'miniapp.version must be "1"');
-  assert(miniapp?.name === 'Rubble (Bubble Hunt)', 'miniapp.name mismatch');
+  assert(miniapp?.name === "Bubble’it!", 'miniapp.name mismatch');
 
   const manifestHomeRaw = String(miniapp?.homeUrl ?? '');
   let manifestHomeUrl;

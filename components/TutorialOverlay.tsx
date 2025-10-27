@@ -117,7 +117,7 @@ export default function TutorialOverlay({ open, onClose }: TutorialOverlayProps)
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.25em] text-sky-200">How to play</p>
-                <h2 className="mt-1 text-2xl font-semibold text-white">Rubble tutorial</h2>
+                <h2 className="mt-1 text-2xl font-semibold text-white">Bubble’it! tutorial</h2>
               </div>
               <button
                 type="button"

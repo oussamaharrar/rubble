@@ -25,54 +25,38 @@ export default function GameplayHud({ accent, glassBg, glassBorder, onPause }: G
 
   const comboLabel = useMemo(() => `×${stats.chainLen}`, [stats.chainLen]);
   const timeCritical = stats.timeLeft <= 10 && (phase === 'playing' || phase === 'storm');
+  const comboHigh = stats.chainLen >= 10;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between p-4 sm:p-5">
       <div className="flex items-start justify-between gap-4">
-        <div
-          className="pointer-events-auto flex flex-col gap-2 text-left"
-          style={{ color: 'rgba(255,255,255,0.82)' }}
-        >
+        <div className="pointer-events-auto flex flex-col gap-3 text-left text-white/90">
           <div
-            className="rounded-full px-4 py-2 text-xs uppercase tracking-[0.18em]"
-            style={{
-              background: `${glassBg}`,
-              border: `1px solid ${glassBorder}`,
-              color: 'rgba(255,255,255,0.78)',
-            }}
+            className="rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em]"
+            style={{ background: glassBg, border: `1px solid ${glassBorder}` }}
             data-testid="hud-score"
           >
             <span className="text-[0.7rem] font-semibold">Score</span>
-            <span className="ml-2 text-lg font-bold" style={{ color: '#fff' }}>
-              {stats.score}
-            </span>
+            <span className="ml-2 text-lg font-bold text-white">{stats.score}</span>
           </div>
           <div
-            className="rounded-full px-4 py-2 text-xs uppercase tracking-[0.18em]"
+            className={clsx(
+              'rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em]',
+              comboHigh ? 'shadow-[0_0_16px_rgba(56,189,248,0.5)]' : null
+            )}
             style={{
-              background: `${glassBg}`,
+              background: glassBg,
               border: `1px solid ${glassBorder}`,
-              color: 'rgba(255,255,255,0.78)',
+              color: comboHigh ? accent : 'rgba(255,255,255,0.82)',
             }}
             data-testid="hud-combo"
           >
             <span className="text-[0.7rem] font-semibold">Combo</span>
-            <span className="ml-2 text-lg font-bold" style={{ color: accent }}>
+            <span className="ml-2 text-lg font-bold" style={{ color: comboHigh ? accent : '#ffffff' }}>
               {comboLabel}
             </span>
-          </div>
-          <div
-            className="rounded-full px-4 py-2 text-xs uppercase tracking-[0.18em]"
-            style={{
-              background: `${glassBg}`,
-              border: `1px solid ${glassBorder}`,
-              color: 'rgba(255,255,255,0.78)',
-            }}
-            data-testid="hud-burst"
-          >
-            <span className="text-[0.7rem] font-semibold">Streak</span>
-            <span className="ml-2 text-lg font-bold" style={{ color: '#fff' }}>
-              {stats.streak}
+            <span data-testid="hud-burst" className="sr-only">
+              {stats.chainLen}
             </span>
           </div>
         </div>
@@ -103,7 +87,7 @@ export default function GameplayHud({ accent, glassBg, glassBorder, onPause }: G
               border: `1px solid ${glassBorder}`,
               color: '#ffffff',
             }}
-            whileTap={{ scale: 0.95 }}
+            whileTap={{ scale: 0.94 }}
           >
             ⏸
           </motion.button>

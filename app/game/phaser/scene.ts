@@ -8,7 +8,7 @@ export class BubbleScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     this.add.rectangle(width / 2, height / 2, width, height, 0x05070c);
-    this.add.text(width / 2, height / 2, 'Bubble Hunt', {
+    this.add.text(width / 2, height / 2, 'Bubble’it!', {
       fontFamily: 'sans-serif',
       fontSize: '32px',
       color: '#f8fafc',

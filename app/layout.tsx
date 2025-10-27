@@ -5,7 +5,7 @@ import '@/styles/mobile-frame.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000'),
-  title: 'Rubble — Bubble Hunt',
+  title: 'Bubble’it! — Base mini-game',
   description: 'A Farcaster mini app arcade built for Base.',
 };
 
