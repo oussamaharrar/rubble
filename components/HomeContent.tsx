@@ -92,6 +92,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const tutorialAutoRef = useRef(shouldShowTutorial());
+  const autoStartRef = useRef(false);
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -115,6 +116,25 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
       tutorialAutoRef.current = false;
     }
   }, [phase, tutorialAutoRef]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const autoPlay = window.localStorage.getItem('rubble:autoplay') === 'true';
+    if (!autoPlay) {
+      return;
+    }
+    if (!autoStartRef.current && phase === 'home') {
+      autoStartRef.current = true;
+      setBoardKind('normal');
+      startRun('trial');
+      return;
+    }
+    if (autoStartRef.current && phase === 'intro') {
+      beginGameplay();
+    }
+  }, [beginGameplay, phase, setBoardKind, startRun]);
 
   useEffect(() => {
     if (phase === 'summary') {
