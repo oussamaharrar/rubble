@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
 
@@ -50,7 +50,7 @@ type AmbientDot = {
   phase: number;
 };
 
-export default function GameCanvas() {
+export default function GameCanvas({ children }: { children?: ReactNode }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
@@ -62,8 +62,8 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
-  const [frameStats, setFrameStats] = useState({ width: 0, height: 0, dpr: 1, bubbles: 0 });
-  const statsRef = useRef(frameStats);
+  const statsRef = useRef({ cssW: 0, cssH: 0, bufW: 0, bufH: 0, dpr: 1, fps: 0, bubbles: 0 });
+  const [, force] = useState(0);
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -74,14 +74,31 @@ export default function GameCanvas() {
     }));
   }
 
-  useEffect(() => {
-    statsRef.current = frameStats;
-  }, [frameStats]);
-
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
   const settings = useGameStore((state) => state.settings);
   const unlocks = useGameStore((state) => state.unlocks);
+
+  const [diagOn, setDiagOn] = useState(false);
+  const diagOnRef = useRef(diagOn);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const sync = () => {
+      setDiagOn(localStorage.getItem('rubble:diag') === 'true');
+    };
+    sync();
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    diagOnRef.current = diagOn;
+  }, [diagOn]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -127,11 +144,15 @@ export default function GameCanvas() {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
-      setFrameStats((prev) =>
-        prev.width !== cssW || prev.height !== cssH || prev.dpr !== dpr
-          ? { ...prev, width: cssW, height: cssH, dpr }
-          : prev
-      );
+      const stats = statsRef.current;
+      stats.cssW = cssW;
+      stats.cssH = cssH;
+      stats.bufW = canvas.width;
+      stats.bufH = canvas.height;
+      stats.dpr = dpr;
+      if (diagOnRef.current) {
+        force((n) => n + 1);
+      }
       setStageSize(cssW, cssH);
     };
 
@@ -149,7 +170,7 @@ export default function GameCanvas() {
     observer.observe(frameEl);
 
     const handleViewportResize = () => scheduleResize();
-    window.addEventListener('resize', handleViewportResize, { passive: true });
+    window.visualViewport?.addEventListener('resize', handleViewportResize);
     window.addEventListener('orientationchange', handleViewportResize, { passive: true });
 
     const root = document.getElementById('rubble-root');
@@ -166,15 +187,14 @@ export default function GameCanvas() {
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
       const bubbleCount = bubbles.length;
-      if (statsRef.current.bubbles !== bubbleCount) {
-        setFrameStats((prev) =>
-          prev.bubbles !== bubbleCount ? { ...prev, bubbles: bubbleCount } : prev
-        );
-      }
       const size = gameSizeRef.current;
       const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
       const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
       const dpr = size.dpr || 1;
+      const statsSnapshot = statsRef.current;
+      statsSnapshot.bubbles = bubbleCount;
+      const instFps = dt > 0 ? 1000 / Math.max(dt, 1) : 0;
+      statsSnapshot.fps = statsSnapshot.fps ? statsSnapshot.fps * 0.9 + instFps * 0.1 : instFps;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalAlpha = 1;
@@ -432,6 +452,9 @@ export default function GameCanvas() {
       }
 
       ctx.restore();
+      if (diagOnRef.current) {
+        force((n) => n + 1);
+      }
     };
 
     const step = (time: number) => {
@@ -466,7 +489,7 @@ export default function GameCanvas() {
       if (resizeFrame !== null) {
         window.cancelAnimationFrame(resizeFrame);
       }
-      window.removeEventListener('resize', handleViewportResize);
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
       window.removeEventListener('orientationchange', handleViewportResize);
       window.cancelAnimationFrame(frameHandle);
     };
@@ -774,26 +797,16 @@ export default function GameCanvas() {
     };
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
+  const stats = statsRef.current;
+
   return (
-    <div ref={frameRef} className="relative h-full w-full">
+    <div className="app-frame__inner" ref={frameRef} aria-label="Gameplay area">
       <canvas ref={canvasRef} className="app-canvas" />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 8,
-          background: 'rgba(0,0,0,0.55)',
-          color: '#4ade80',
-          fontSize: 10,
-          padding: '4px 6px',
-          borderRadius: 4,
-          zIndex: 99,
-          fontFamily: 'monospace',
-          pointerEvents: 'none',
-        }}
-      >
-        w:{Math.round(frameStats.width)} h:{Math.round(frameStats.height)} DPR:
-        {frameStats.dpr.toFixed(2)} bubbles:{frameStats.bubbles}
+      <div className="app-hud">{children}</div>
+      <div className={`rbl-diag ${diagOn ? 'rbl-diag--on' : ''}`} role="status" aria-live="polite">
+        {diagOn
+          ? `DPR ${stats.dpr.toFixed(2)} | CSS ${stats.cssW.toFixed(0)}×${stats.cssH.toFixed(0)}\nBUF ${stats.bufW}×${stats.bufH} | FPS ${stats.fps.toFixed(1)} | BUB ${stats.bubbles}`
+          : ''}
       </div>
     </div>
   );
