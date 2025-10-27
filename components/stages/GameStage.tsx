@@ -50,7 +50,7 @@ export default function GameStage({ onPause, onResume, onExit, onRequestDrawer }
   const handleRequestShop = () => onRequestDrawer('shop');
 
   return (
-    <div className="relative h-full w-full">
+    <>
       <GameCanvas />
       <div className="app-hud">
         <HUD onPause={onPause} onRequestShop={handleRequestShop} />
@@ -101,7 +101,7 @@ export default function GameStage({ onPause, onResume, onExit, onRequestDrawer }
         <FirstRunPrompts />
         <PauseOverlay open={paused} onResume={onResume} onExit={onExit} />
       </div>
-    </div>
+    </>
   );
 }
 

@@ -117,6 +117,20 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   }, [phase, tutorialAutoRef]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const api = {
+      start: (mode: EntryMode = 'trial') => startRun(mode),
+      begin: () => beginGameplay(),
+      reset: () => resetToStart(),
+      phase: () => useGameStore.getState().phase,
+    };
+    (window as typeof window & { __rubbleTest?: typeof api }).__rubbleTest = api;
+    return () => {
+      delete (window as typeof window & { __rubbleTest?: typeof api }).__rubbleTest;
+    };
+  }, [startRun, beginGameplay, resetToStart]);
+
+  useEffect(() => {
     if (phase === 'summary') {
       setLifetime((current) => {
         const elapsedSeconds = Math.max(0, Math.round(now / 1000));
