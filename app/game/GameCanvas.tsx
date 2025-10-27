@@ -62,8 +62,17 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
-  const [frameStats, setFrameStats] = useState({ width: 0, height: 0, dpr: 1, bubbles: 0 });
+  const [frameStats, setFrameStats] = useState({
+    cssW: 0,
+    cssH: 0,
+    bufW: 0,
+    bufH: 0,
+    dpr: 1,
+    fps: 0,
+    bubbles: 0,
+  });
   const statsRef = useRef(frameStats);
+  const [diagOn, setDiagOn] = useState(false);
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -77,6 +86,11 @@ export default function GameCanvas() {
   useEffect(() => {
     statsRef.current = frameStats;
   }, [frameStats]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setDiagOn(localStorage.getItem('rubble:diag') === 'true');
+  }, []);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
@@ -127,11 +141,25 @@ export default function GameCanvas() {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
-      setFrameStats((prev) =>
-        prev.width !== cssW || prev.height !== cssH || prev.dpr !== dpr
-          ? { ...prev, width: cssW, height: cssH, dpr }
-          : prev
-      );
+      setFrameStats((prev) => {
+        if (
+          prev.cssW === cssW &&
+          prev.cssH === cssH &&
+          prev.dpr === dpr &&
+          prev.bufW === canvas.width &&
+          prev.bufH === canvas.height
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          cssW: cssW,
+          cssH: cssH,
+          dpr,
+          bufW: canvas.width,
+          bufH: canvas.height,
+        };
+      });
       setStageSize(cssW, cssH);
     };
 
@@ -170,16 +198,25 @@ export default function GameCanvas() {
         setFrameStats((prev) =>
           prev.bubbles !== bubbleCount ? { ...prev, bubbles: bubbleCount } : prev
         );
+        statsRef.current.bubbles = bubbleCount;
       }
+      const statsSnapshot = statsRef.current;
+      const instFps = dt > 0 ? 1000 / Math.max(dt, 1) : 0;
+      const smoothFps = statsSnapshot.fps ? statsSnapshot.fps * 0.9 + instFps * 0.1 : instFps;
+      if (Math.abs(smoothFps - statsSnapshot.fps) > 0.1) {
+        setFrameStats((prev) => (Math.abs(prev.fps - smoothFps) > 0.1 ? { ...prev, fps: smoothFps } : prev));
+      }
+      statsSnapshot.fps = smoothFps;
       const size = gameSizeRef.current;
-      const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
-      const measuredHeight = size.h || state.height || canvas.clientHeight || 1;
+      const rect = canvas.getBoundingClientRect();
+      const measuredWidth = rect.width || size.w || state.width || canvas.clientWidth || 1;
+      const measuredHeight = rect.height || size.h || state.height || canvas.clientHeight || 1;
       const dpr = size.dpr || 1;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
-      ctx.clearRect(0, 0, measuredWidth, measuredHeight);
+      ctx.clearRect(0, 0, rect.width || measuredWidth, rect.height || measuredHeight);
 
       const comboIntensity = Math.min(stats.chainLen / 10, 1);
       const playingPhase = phase === 'playing' || phase === 'storm';
@@ -775,25 +812,12 @@ export default function GameCanvas() {
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
-    <div ref={frameRef} className="relative h-full w-full">
+    <div ref={frameRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
       <canvas ref={canvasRef} className="app-canvas" />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 8,
-          background: 'rgba(0,0,0,0.55)',
-          color: '#4ade80',
-          fontSize: 10,
-          padding: '4px 6px',
-          borderRadius: 4,
-          zIndex: 99,
-          fontFamily: 'monospace',
-          pointerEvents: 'none',
-        }}
-      >
-        w:{Math.round(frameStats.width)} h:{Math.round(frameStats.height)} DPR:
-        {frameStats.dpr.toFixed(2)} bubbles:{frameStats.bubbles}
+      <div className={`rbl-diag ${diagOn ? 'rbl-diag--on' : ''}`} role="status" aria-live="polite">
+        {diagOn
+          ? `DPR ${frameStats.dpr.toFixed(2)} | CSS ${frameStats.cssW.toFixed(0)}×${frameStats.cssH.toFixed(0)}\nBUF ${frameStats.bufW}×${frameStats.bufH} | FPS ${frameStats.fps.toFixed(1)} | BUB ${frameStats.bubbles}`
+          : ''}
       </div>
     </div>
   );
