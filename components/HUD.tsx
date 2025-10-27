@@ -70,7 +70,9 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
             animate={{ opacity: 1, y: 0 }}
           >
             <span className="text-[11px] text-slate-400">Score</span>
-            <span className="ml-2 text-base text-sky-200">{stats.score}</span>
+            <span className="ml-2 text-base text-sky-200" data-testid="hud-score">
+              {stats.score}
+            </span>
           </motion.div>
           <motion.div
             className="flex items-center gap-2 rounded-full bg-slate-950/75 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-200 shadow-lg shadow-black/40"
@@ -85,6 +87,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: -8, opacity: 0 }}
                 className={clsx('text-base font-semibold', comboActive ? 'text-amber-300' : 'text-slate-100')}
+                data-testid="hud-combo"
               >
                 {comboLabel}
               </motion.span>
@@ -92,7 +95,9 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           </motion.div>
           <div className="rounded-full bg-slate-950/75 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-200 shadow-lg shadow-black/40">
             <span className="text-[11px] text-slate-400">Streak</span>
-            <span className="ml-2 text-base text-emerald-200">{stats.streak}</span>
+            <span className="ml-2 text-base text-emerald-200" data-testid="hud-streak">
+              {stats.streak}
+            </span>
           </div>
         </div>
         <div className={clsx('pointer-events-auto flex flex-col gap-2', leftHanded ? 'items-start' : 'items-end')}>
@@ -127,18 +132,19 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
                 </span>
               </span>
             </button>
-            <motion.div
-              animate={timeCritical ? { scale: [1, 1.05, 1], color: ['#f8fafc', '#f87171', '#f8fafc'] } : { scale: 1, color: '#f8fafc' }}
-              transition={{ duration: 0.8, repeat: timeCritical ? Infinity : 0 }}
-              className={clsx(
-                'rounded-full border border-white/10 bg-slate-950/85 px-5 py-2 text-xl font-semibold tracking-tight text-slate-100 shadow-lg shadow-black/40',
-                timeCritical && 'border-red-400/50'
-              )}
-              aria-live="polite"
-            >
-              {formattedTime}
-            </motion.div>
-          </div>
+          <motion.div
+            animate={timeCritical ? { scale: [1, 1.05, 1], color: ['#f8fafc', '#f87171', '#f8fafc'] } : { scale: 1, color: '#f8fafc' }}
+            transition={{ duration: 0.8, repeat: timeCritical ? Infinity : 0 }}
+            className={clsx(
+              'rounded-full border border-white/10 bg-slate-950/85 px-5 py-2 text-xl font-semibold tracking-tight text-slate-100 shadow-lg shadow-black/40',
+              timeCritical && 'border-red-400/50'
+            )}
+            data-testid="hud-timer"
+            aria-live="polite"
+          >
+            {formattedTime}
+          </motion.div>
+        </div>
           {burst.overcharge && (
             <span className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-sky-300">×1.3 radius</span>
           )}
@@ -164,6 +170,7 @@ export default function HUD({ onPause, onRequestShop }: HudProps) {
           onClick={handleUseOrb}
           className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-sky-400/40 bg-slate-950/80 px-6 py-2 text-sm font-semibold text-sky-200 shadow-lg shadow-sky-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
           whileTap={{ scale: 0.95 }}
+          data-testid="hud-burst"
         >
           {boosterBank.freeOrbs > 0 ? 'Boost · Use Orb' : 'Boost · Shop'}
         </motion.button>

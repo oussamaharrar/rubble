@@ -36,6 +36,18 @@ const rawEnv = {
     process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
     process.env.MIN_PRICE_WEI ??
     '1',
+  NEXT_PUBLIC_PRICE_WEI_BOOST:
+    process.env.NEXT_PUBLIC_PRICE_WEI_BOOST ??
+    process.env.PRICE_WEI_BOOST ??
+    undefined,
+  NEXT_PUBLIC_PRICE_WEI_COMBO:
+    process.env.NEXT_PUBLIC_PRICE_WEI_COMBO ??
+    process.env.PRICE_WEI_COMBO ??
+    undefined,
+  NEXT_PUBLIC_PRICE_WEI_RETRY:
+    process.env.NEXT_PUBLIC_PRICE_WEI_RETRY ??
+    process.env.PRICE_WEI_RETRY ??
+    undefined,
   BASE_RPC_URL:
     process.env.BASE_RPC_URL ??
     process.env.NEXT_PUBLIC_BASE_RPC_URL ??
@@ -46,6 +58,18 @@ const rawEnv = {
     process.env.MIN_PRICE_WEI ??
     process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
     '1',
+  PRICE_WEI_BOOST:
+    process.env.PRICE_WEI_BOOST ??
+    process.env.NEXT_PUBLIC_PRICE_WEI_BOOST ??
+    undefined,
+  PRICE_WEI_COMBO:
+    process.env.PRICE_WEI_COMBO ??
+    process.env.NEXT_PUBLIC_PRICE_WEI_COMBO ??
+    undefined,
+  PRICE_WEI_RETRY:
+    process.env.PRICE_WEI_RETRY ??
+    process.env.NEXT_PUBLIC_PRICE_WEI_RETRY ??
+    undefined,
   FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE,
@@ -66,9 +90,15 @@ const EnvSchema = z
     NEXT_PUBLIC_WEBHOOK_URL: relativeOrAbsolute,
     NEXT_PUBLIC_BASE_RPC_URL: url,
     NEXT_PUBLIC_MIN_PRICE_WEI: integerString,
+    NEXT_PUBLIC_PRICE_WEI_BOOST: integerString.optional(),
+    NEXT_PUBLIC_PRICE_WEI_COMBO: integerString.optional(),
+    NEXT_PUBLIC_PRICE_WEI_RETRY: integerString.optional(),
     BASE_RPC_URL: url,
     PAY_TO_ADDRESS: evmAddress,
     MIN_PRICE_WEI: integerString,
+    PRICE_WEI_BOOST: integerString.optional(),
+    PRICE_WEI_COMBO: integerString.optional(),
+    PRICE_WEI_RETRY: integerString.optional(),
     FARCASTER_ACCOUNT_HEADER: optionalString,
     FARCASTER_ACCOUNT_PAYLOAD: optionalString,
     FARCASTER_ACCOUNT_SIGNATURE: optionalString,
@@ -117,6 +147,27 @@ const MIN_PRICE_WEI = BigInt(parsed.MIN_PRICE_WEI);
 const NEXT_PUBLIC_MIN_PRICE_WEI =
   parsed.NEXT_PUBLIC_MIN_PRICE_WEI ?? parsed.MIN_PRICE_WEI;
 
+function parseOptionalPrice(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return BigInt(value);
+  } catch {
+    return undefined;
+  }
+}
+
+const PRICE_WEI_BOOST =
+  parseOptionalPrice(parsed.PRICE_WEI_BOOST) ??
+  parseOptionalPrice(parsed.NEXT_PUBLIC_PRICE_WEI_BOOST);
+const PRICE_WEI_COMBO =
+  parseOptionalPrice(parsed.PRICE_WEI_COMBO) ??
+  parseOptionalPrice(parsed.NEXT_PUBLIC_PRICE_WEI_COMBO);
+const PRICE_WEI_RETRY =
+  parseOptionalPrice(parsed.PRICE_WEI_RETRY) ??
+  parseOptionalPrice(parsed.NEXT_PUBLIC_PRICE_WEI_RETRY);
+
 const modeBEnabled = Boolean(
   parsed.PAYMENTS_API_BASE &&
   parsed.PAYMENTS_API_KEY_ID &&
@@ -129,6 +180,9 @@ export const ENV = {
   PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
   MIN_PRICE_WEI,
   MIN_PRICE_WEI_RAW: parsed.MIN_PRICE_WEI,
+  PRICE_WEI_BOOST,
+  PRICE_WEI_COMBO,
+  PRICE_WEI_RETRY,
   FARCASTER_ACCOUNT_HEADER: parsed.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: parsed.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: parsed.FARCASTER_ACCOUNT_SIGNATURE,
@@ -146,12 +200,19 @@ export const ENV = {
   NEXT_PUBLIC_MIN_PRICE_WEI,
 } as const;
 
+const optionalPublicPrices = {
+  ...(PRICE_WEI_BOOST !== undefined ? { NEXT_PUBLIC_PRICE_WEI_BOOST: PRICE_WEI_BOOST.toString() } : {}),
+  ...(PRICE_WEI_COMBO !== undefined ? { NEXT_PUBLIC_PRICE_WEI_COMBO: PRICE_WEI_COMBO.toString() } : {}),
+  ...(PRICE_WEI_RETRY !== undefined ? { NEXT_PUBLIC_PRICE_WEI_RETRY: PRICE_WEI_RETRY.toString() } : {}),
+} as const;
+
 export const PUBLIC_ENV = {
   NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
   NEXT_PUBLIC_MIN_PRICE_WEI,
   PAYMENTS_MODE_B_ENABLED: modeBEnabled ? '1' : '0',
+  ...optionalPublicPrices,
 } as const;
 
 export type Env = typeof ENV;
