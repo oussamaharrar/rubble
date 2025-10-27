@@ -35,6 +35,33 @@ test.describe('Rubble gameplay visibility', () => {
 
     await page.waitForFunction(() => document.getElementById('rubble-root')?.getAttribute('data-playing') === '1');
 
+    const score = page.locator('[data-testid="hud-score"]');
+    const combo = page.locator('[data-testid="hud-combo"]');
+    const streak = page.locator('[data-testid="hud-streak"]');
+    const timer = page.locator('[data-testid="hud-timer"]');
+    const burst = page.locator('[data-testid="hud-burst"]');
+
+    await expect(score).toBeVisible();
+    await expect(score).toHaveText(/^[0-9]+$/);
+    await expect(combo).toBeVisible();
+    await expect(combo).toHaveText(/^×?\d+$/);
+    await expect(streak).toBeVisible();
+    await expect(streak).toHaveText(/^[0-9]+$/);
+    await expect(timer).toBeVisible();
+    await expect(timer).toHaveText(/^\d{2}\.\d$/);
+    await expect(burst).toBeVisible();
+    const burstText = (await burst.textContent())?.trim() ?? '';
+    expect(/Ready|s$/.test(burstText)).toBeTruthy();
+
+    const hudSnapshot = {
+      score: (await score.textContent())?.trim() ?? '',
+      combo: (await combo.textContent())?.trim() ?? '',
+      streak: (await streak.textContent())?.trim() ?? '',
+      timer: (await timer.textContent())?.trim() ?? '',
+      burst: burstText,
+    };
+    console.log('HUD:', hudSnapshot);
+
     const overflowY = await page.evaluate(() => window.getComputedStyle(document.body).overflowY);
     expect(overflowY).toBe('hidden');
 
