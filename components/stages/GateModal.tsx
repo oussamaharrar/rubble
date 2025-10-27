@@ -3,35 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
-import { getDailyKeyUTC } from '@/lib/daily';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWalletStore } from '@/lib/wallet-store';
+import { useEconomyStore } from '@/lib/economy-store';
 import type { EntryMode } from '@/types/game';
-
-const TRIAL_PREFIX = 'trial_used_';
-
-function todayKey() {
-  return `${TRIAL_PREFIX}${getDailyKeyUTC()}`;
-}
-
-function hasUsedTrial() {
-  if (typeof window === 'undefined') return true;
-  try {
-    return window.localStorage.getItem(todayKey()) === '1';
-  } catch {
-    return true;
-  }
-}
-
-function markTrialUsed() {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(todayKey(), '1');
-  } catch {
-    // ignore errors
-  }
-}
 
 interface GateModalProps {
   open: boolean;
@@ -47,8 +23,12 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
   const dailyRunCount = useGameStore((state) => state.dailyRunCount);
   const address = useWalletStore((state) => state.address);
   const setWallet = useWalletStore((state) => state.setWallet);
+  const trialUsedToday = useEconomyStore((state) => state.trialUsedToday);
+  const bonusTrials = useEconomyStore((state) => state.bonusTrials);
+  const markTrialToday = useEconomyStore((state) => state.markTrialToday);
+  const consumeBonusTrial = useEconomyStore((state) => state.consumeBonusTrial);
 
-  const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
+  const [trialUnavailable, setTrialUnavailable] = useState(trialUsedToday);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
@@ -56,7 +36,7 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
 
   useEffect(() => {
     if (!open) return;
-    setTrialUnavailable(hasUsedTrial());
+    setTrialUnavailable(useEconomyStore.getState().trialUsedToday);
     setConnectError(null);
     resetError();
   }, [open, resetError]);
@@ -88,10 +68,20 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
   }, [connecting, setWallet]);
 
   const handleTrial = useCallback(() => {
-    markTrialUsed();
+    if (bonusTrials > 0) {
+      const consumed = consumeBonusTrial();
+      if (!consumed) {
+        return;
+      }
+    } else if (!useEconomyStore.getState().trialUsedToday) {
+      markTrialToday();
+    } else {
+      setTrialUnavailable(true);
+      return;
+    }
     setTrialUnavailable(true);
     onComplete('trial');
-  }, [onComplete]);
+  }, [bonusTrials, consumeBonusTrial, markTrialToday, onComplete]);
 
   const handlePaid = useCallback(async () => {
     const success = await payToPlay(1n);
@@ -165,9 +155,9 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
                 type="button"
                 onClick={handleTrial}
                 className="button-tap inline-flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!connected || trialUnavailable || loading}
+                disabled={!connected || (trialUnavailable && bonusTrials === 0) || loading}
               >
-                {trialUnavailable ? 'Trial used today' : 'Play free trial'}
+                {bonusTrials > 0 ? `Use bonus run (${bonusTrials})` : trialUnavailable ? 'Trial used today' : 'Play free trial'}
               </button>
               <button
                 type="button"

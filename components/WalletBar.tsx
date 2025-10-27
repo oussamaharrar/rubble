@@ -6,6 +6,7 @@ import { PrimaryButton, GhostButton } from './Buttons';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
+import { useEconomyStore } from '@/lib/economy-store';
 
 const STATUS_VARIANTS = {
   initial: { opacity: 0, y: -4 },
@@ -32,6 +33,12 @@ export default function WalletBar() {
   const [switching, setSwitching] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [hasProvider, setHasProvider] = useState(false);
+
+  const economyConnect = useEconomyStore((state) => state.connect);
+  const economyDisconnect = useEconomyStore((state) => state.disconnect);
+  const boosts = useEconomyStore((state) => state.boosts);
+  const retriesInventory = useEconomyStore((state) => state.retries);
+  const bubbles = useEconomyStore((state) => state.bubbles);
 
   const normalisedChainId = normalizeChainId(chainId);
   const onBase = normalisedChainId === BASE_CHAIN_ID_HEX;
@@ -97,6 +104,14 @@ export default function WalletBar() {
       provider.removeListener?.('chainChanged', handleChainChanged);
     };
   }, [resetWallet, setChainId, setWallet]);
+
+  useEffect(() => {
+    if (address) {
+      economyConnect(address);
+    } else {
+      economyDisconnect();
+    }
+  }, [address, economyConnect, economyDisconnect]);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -172,7 +187,7 @@ export default function WalletBar() {
             {connected && address ? formatAddress(address) : 'Not connected'}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
           {connected && onBase ? (
             <motion.span
               className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100"
@@ -193,6 +208,11 @@ export default function WalletBar() {
               {connecting ? 'Connecting…' : 'Connect Wallet'}
             </PrimaryButton>
           ) : null}
+        </div>
+        <div className="flex flex-col items-end gap-1 text-[11px] text-slate-300/90">
+          <span>Bubbles · {bubbles}</span>
+          <span>Boosts · {boosts}</span>
+          <span>Retries · {retriesInventory}</span>
         </div>
       </div>
       <AnimatePresence mode="wait">

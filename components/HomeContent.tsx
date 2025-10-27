@@ -17,6 +17,7 @@ import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
+import { useEconomyStore } from '@/lib/economy-store';
 
 const LIFETIME_KEY = 'rubble:lifetime-stats';
 
@@ -32,6 +33,7 @@ type HighlightEntry = {
 interface HomeContentProps {
   shareScore?: number;
   shareBoard?: BoardKind;
+  referralCode?: string | null;
 }
 
 function readLifetime(): LifetimeStats {
@@ -66,7 +68,7 @@ function writeLifetime(stats: LifetimeStats) {
   }
 }
 
-export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeContentProps) {
+export default function HomeContent({ shareScore, shareBoard = 'normal', referralCode }: HomeContentProps) {
   const phase = useGameStore((state) => state.phase);
   const boardKind = useGameStore((state) => state.boardKind);
   const setBoardKind = useGameStore((state) => state.setBoardKind);
@@ -93,6 +95,8 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const tutorialAutoRef = useRef(shouldShowTutorial());
   const autoStartRef = useRef(false);
+  const addInvite = useEconomyStore((state) => state.addInvite);
+  const setPendingReferral = useEconomyStore((state) => state.setPendingReferral);
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -103,6 +107,14 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   useEffect(() => {
     loadDaily();
   }, [loadDaily]);
+
+  useEffect(() => {
+    if (referralCode && referralCode.trim().length > 0) {
+      addInvite(referralCode);
+    } else {
+      setPendingReferral(null);
+    }
+  }, [addInvite, referralCode, setPendingReferral]);
 
   useEffect(() => {
     if (phase !== 'home' && phase !== 'summary') {
@@ -354,6 +366,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
               <HomeScreen
                 shareScore={shareScore}
                 shareBoard={shareBoard}
+                shareHref={shareHref}
                 onPlay={(board) => openGate(board)}
                 onOpenDrawer={() => openDrawer('missions')}
               />

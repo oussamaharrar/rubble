@@ -22,6 +22,7 @@ const relativeOrAbsolute = z
     }
   }, 'Expected a relative path beginning with / or an absolute URL');
 const optionalString = z.string().min(1).optional();
+const optionalIntegerString = integerString.optional();
 const booleanFlag = z.enum(['0', '1']);
 
 const rawEnv = {
@@ -58,6 +59,18 @@ const rawEnv = {
     process.env.BASE_BUILDER_OWNER_ADDRESS ??
     process.env.PAY_TO_ADDRESS ??
     '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
+  WEI_PER_USD: process.env.WEI_PER_USD ?? process.env.NEXT_PUBLIC_WEI_PER_USD,
+  PRICE_WEI_BOOST: process.env.PRICE_WEI_BOOST,
+  PRICE_WEI_COMBO: process.env.PRICE_WEI_COMBO,
+  PRICE_WEI_RETRY: process.env.PRICE_WEI_RETRY,
+  NEXT_PUBLIC_WEI_PER_USD:
+    process.env.NEXT_PUBLIC_WEI_PER_USD ?? process.env.WEI_PER_USD ?? '333333333333333333',
+  NEXT_PUBLIC_PRICE_WEI_BOOST:
+    process.env.NEXT_PUBLIC_PRICE_WEI_BOOST ?? process.env.PRICE_WEI_BOOST ?? '0',
+  NEXT_PUBLIC_PRICE_WEI_COMBO:
+    process.env.NEXT_PUBLIC_PRICE_WEI_COMBO ?? process.env.PRICE_WEI_COMBO ?? '0',
+  NEXT_PUBLIC_PRICE_WEI_RETRY:
+    process.env.NEXT_PUBLIC_PRICE_WEI_RETRY ?? process.env.PRICE_WEI_RETRY ?? '0',
 } as const;
 
 const EnvSchema = z
@@ -78,6 +91,14 @@ const EnvSchema = z
     PAYMENTS_WEBHOOK_SECRET: optionalString,
     BASE_PAY_MOCK: booleanFlag,
     BASE_BUILDER_OWNER_ADDRESS: evmAddress.optional(),
+    WEI_PER_USD: optionalIntegerString,
+    PRICE_WEI_BOOST: optionalIntegerString,
+    PRICE_WEI_COMBO: optionalIntegerString,
+    PRICE_WEI_RETRY: optionalIntegerString,
+    NEXT_PUBLIC_WEI_PER_USD: integerString,
+    NEXT_PUBLIC_PRICE_WEI_BOOST: z.string(),
+    NEXT_PUBLIC_PRICE_WEI_COMBO: z.string(),
+    NEXT_PUBLIC_PRICE_WEI_RETRY: z.string(),
   })
   .superRefine((value, ctx) => {
     const accountFields = [
@@ -144,6 +165,14 @@ export const ENV = {
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
   NEXT_PUBLIC_MIN_PRICE_WEI,
+  WEI_PER_USD: parsed.WEI_PER_USD ? BigInt(parsed.WEI_PER_USD) : BigInt(parsed.NEXT_PUBLIC_WEI_PER_USD),
+  PRICE_WEI_BOOST_RAW: parsed.PRICE_WEI_BOOST ?? null,
+  PRICE_WEI_COMBO_RAW: parsed.PRICE_WEI_COMBO ?? null,
+  PRICE_WEI_RETRY_RAW: parsed.PRICE_WEI_RETRY ?? null,
+  NEXT_PUBLIC_WEI_PER_USD: parsed.NEXT_PUBLIC_WEI_PER_USD,
+  NEXT_PUBLIC_PRICE_WEI_BOOST: parsed.NEXT_PUBLIC_PRICE_WEI_BOOST,
+  NEXT_PUBLIC_PRICE_WEI_COMBO: parsed.NEXT_PUBLIC_PRICE_WEI_COMBO,
+  NEXT_PUBLIC_PRICE_WEI_RETRY: parsed.NEXT_PUBLIC_PRICE_WEI_RETRY,
 } as const;
 
 export const PUBLIC_ENV = {
@@ -152,6 +181,10 @@ export const PUBLIC_ENV = {
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
   NEXT_PUBLIC_MIN_PRICE_WEI,
   PAYMENTS_MODE_B_ENABLED: modeBEnabled ? '1' : '0',
+  NEXT_PUBLIC_WEI_PER_USD: parsed.NEXT_PUBLIC_WEI_PER_USD,
+  NEXT_PUBLIC_PRICE_WEI_BOOST: parsed.NEXT_PUBLIC_PRICE_WEI_BOOST,
+  NEXT_PUBLIC_PRICE_WEI_COMBO: parsed.NEXT_PUBLIC_PRICE_WEI_COMBO,
+  NEXT_PUBLIC_PRICE_WEI_RETRY: parsed.NEXT_PUBLIC_PRICE_WEI_RETRY,
 } as const;
 
 export type Env = typeof ENV;

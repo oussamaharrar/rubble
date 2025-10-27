@@ -19,3 +19,7 @@ export const useWalletStore = create<WalletState>((set) => ({
   setWallet: (address, chainId) => set({ address, chainId }),
   reset: () => set({ address: null, chainId: null }),
 }));
+
+if (typeof window !== 'undefined') {
+  (window as typeof window & { __rubbleWalletStore?: typeof useWalletStore }).__rubbleWalletStore = useWalletStore;
+}
