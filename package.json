@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:e2e": "playwright test --reporter=list",
     "postbuild": "node scripts/postbuild.js",
     "verify:manifest": "node scripts/verify-manifest.mjs",
     "lint": "next lint"
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@next/eslint-plugin-next": "^15.3.4",
+    "@playwright/test": "^1.47.2",
     "@types/node": "^20.17.9",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",

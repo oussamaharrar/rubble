@@ -52,23 +52,23 @@ body {
   position: relative;
   width: 100vw;
   max-width: var(--frame-w);
-  height: 100%;
-  max-height: calc(var(--vh, 1vh) * 100);
+  height: calc(var(--vh, 1vh) * 100);
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: hidden; /* prevent global scroll during play */
   touch-action: none;
 }
 
 .app-frame__inner {
   position: relative;
+  margin: 0 auto;
   aspect-ratio: 424 / 695;
   width: 100%;
   height: 100%;
   max-height: var(--frame-h);
-  display: grid;
+  display: grid; /* children stack via grid-area:1/1 */
   border-radius: 18px;
   overflow: hidden;
   box-shadow: 0 20px 40px rgba(3, 7, 18, 0.65);
@@ -82,8 +82,8 @@ body {
 .app-canvas {
   position: absolute;
   inset: 0;
-  z-index: 1;
   display: block;
+  z-index: 1; /* under HUD */
   width: 100%;
   height: 100%;
   touch-action: none;
@@ -91,9 +91,35 @@ body {
 
 .app-hud {
   position: relative;
-  z-index: 2;
-  width: 100%;
-  height: 100%;
+  z-index: 2; /* above canvas */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-frame * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Diagnostics (hidden by default; toggle via localStorage) */
+.rbl-diag {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #a6ffa6;
+  font: 10px/1.2 monospace;
+  padding: 4px 6px;
+  border-radius: 4px;
+  z-index: 99;
+  user-select: none;
+  pointer-events: none;
+  white-space: pre;
+  display: none;
+}
+
+.rbl-diag--on {
+  display: block;
 }
 
 .app-chrome__inner {
