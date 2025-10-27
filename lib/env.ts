@@ -24,6 +24,11 @@ const relativeOrAbsolute = z
 const optionalString = z.string().min(1).optional();
 const booleanFlag = z.enum(['0', '1']);
 
+const optionalInteger = z
+  .string()
+  .regex(/^\d+$/u, 'Expected a non-negative integer string')
+  .optional();
+
 const rawEnv = {
   NEXT_PUBLIC_URL: process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000',
   NEXT_PUBLIC_WEBHOOK_URL:
@@ -46,6 +51,15 @@ const rawEnv = {
     process.env.MIN_PRICE_WEI ??
     process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
     '1',
+  PRICE_WEI_BOOST: process.env.PRICE_WEI_BOOST,
+  PRICE_WEI_COMBO: process.env.PRICE_WEI_COMBO,
+  PRICE_WEI_RETRY: process.env.PRICE_WEI_RETRY,
+  NEXT_PUBLIC_PRICE_WEI_BOOST:
+    process.env.NEXT_PUBLIC_PRICE_WEI_BOOST ?? process.env.PRICE_WEI_BOOST,
+  NEXT_PUBLIC_PRICE_WEI_COMBO:
+    process.env.NEXT_PUBLIC_PRICE_WEI_COMBO ?? process.env.PRICE_WEI_COMBO,
+  NEXT_PUBLIC_PRICE_WEI_RETRY:
+    process.env.NEXT_PUBLIC_PRICE_WEI_RETRY ?? process.env.PRICE_WEI_RETRY,
   FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE,
@@ -69,6 +83,12 @@ const EnvSchema = z
     BASE_RPC_URL: url,
     PAY_TO_ADDRESS: evmAddress,
     MIN_PRICE_WEI: integerString,
+    PRICE_WEI_BOOST: optionalInteger,
+    PRICE_WEI_COMBO: optionalInteger,
+    PRICE_WEI_RETRY: optionalInteger,
+    NEXT_PUBLIC_PRICE_WEI_BOOST: optionalInteger,
+    NEXT_PUBLIC_PRICE_WEI_COMBO: optionalInteger,
+    NEXT_PUBLIC_PRICE_WEI_RETRY: optionalInteger,
     FARCASTER_ACCOUNT_HEADER: optionalString,
     FARCASTER_ACCOUNT_PAYLOAD: optionalString,
     FARCASTER_ACCOUNT_SIGNATURE: optionalString,
@@ -117,6 +137,48 @@ const MIN_PRICE_WEI = BigInt(parsed.MIN_PRICE_WEI);
 const NEXT_PUBLIC_MIN_PRICE_WEI =
   parsed.NEXT_PUBLIC_MIN_PRICE_WEI ?? parsed.MIN_PRICE_WEI;
 
+function clampPrice(value: bigint, min: bigint) {
+  if (value < min) {
+    return min;
+  }
+  const cap = min * 5n;
+  return value > cap ? cap : value;
+}
+
+function parsePrice(raw: string | undefined, fallback: bigint) {
+  if (!raw) {
+    return clampPrice(fallback, MIN_PRICE_WEI);
+  }
+  try {
+    const parsedValue = BigInt(raw);
+    return clampPrice(parsedValue, MIN_PRICE_WEI);
+  } catch {
+    return clampPrice(fallback, MIN_PRICE_WEI);
+  }
+}
+
+function withMultiplier(base: bigint, multiplier: number) {
+  const scaled = BigInt(Math.round(multiplier * 1_000));
+  return (base * scaled) / 1_000n;
+}
+
+const DEFAULT_PRICE_BOOST = withMultiplier(MIN_PRICE_WEI, 1);
+const DEFAULT_PRICE_COMBO = withMultiplier(MIN_PRICE_WEI, 1.5);
+const DEFAULT_PRICE_RETRY = withMultiplier(MIN_PRICE_WEI, 3);
+
+const PRICE_WEI_BOOST = parsePrice(
+  parsed.PRICE_WEI_BOOST ?? parsed.NEXT_PUBLIC_PRICE_WEI_BOOST,
+  DEFAULT_PRICE_BOOST
+);
+const PRICE_WEI_COMBO = parsePrice(
+  parsed.PRICE_WEI_COMBO ?? parsed.NEXT_PUBLIC_PRICE_WEI_COMBO,
+  DEFAULT_PRICE_COMBO
+);
+const PRICE_WEI_RETRY = parsePrice(
+  parsed.PRICE_WEI_RETRY ?? parsed.NEXT_PUBLIC_PRICE_WEI_RETRY,
+  DEFAULT_PRICE_RETRY
+);
+
 const modeBEnabled = Boolean(
   parsed.PAYMENTS_API_BASE &&
   parsed.PAYMENTS_API_KEY_ID &&
@@ -129,6 +191,9 @@ export const ENV = {
   PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
   MIN_PRICE_WEI,
   MIN_PRICE_WEI_RAW: parsed.MIN_PRICE_WEI,
+  PRICE_WEI_BOOST,
+  PRICE_WEI_COMBO,
+  PRICE_WEI_RETRY,
   FARCASTER_ACCOUNT_HEADER: parsed.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: parsed.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: parsed.FARCASTER_ACCOUNT_SIGNATURE,
@@ -151,6 +216,9 @@ export const PUBLIC_ENV = {
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
   NEXT_PUBLIC_MIN_PRICE_WEI,
+  NEXT_PUBLIC_PRICE_WEI_BOOST: PRICE_WEI_BOOST.toString(),
+  NEXT_PUBLIC_PRICE_WEI_COMBO: PRICE_WEI_COMBO.toString(),
+  NEXT_PUBLIC_PRICE_WEI_RETRY: PRICE_WEI_RETRY.toString(),
   PAYMENTS_MODE_B_ENABLED: modeBEnabled ? '1' : '0',
 } as const;
 

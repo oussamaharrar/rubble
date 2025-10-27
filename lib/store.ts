@@ -523,6 +523,7 @@ type GameStore = {
   burstPointer: { x: number; y: number } | null;
   golden: GoldenOrbState;
   nextGoldenSpawnAt: number;
+  scoreMultiplier: number;
   startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
@@ -558,6 +559,7 @@ type GameStore = {
   spawnGoldenOrb: (now?: number) => void;
   updateGoldenOrb: (now: number) => void;
   hitGoldenOrb: (source: 'tap' | 'burst', position?: { x: number; y: number }) => { hit: boolean; toxic: boolean };
+  applyStartBonuses: (options: { comboBonus?: number; doubleScore?: boolean }) => void;
 };
 
 export const useGameStore = create<GameStore>((set, get) => {
@@ -601,8 +603,10 @@ export const useGameStore = create<GameStore>((set, get) => {
     }
 
     const allowComboContribution = options?.comboContribution !== false;
-    const scoreMultiplier = options?.scoreMultiplier ?? 1;
-    const timeMultiplier = options?.timeMultiplier ?? scoreMultiplier;
+    const baseScoreMultiplier = options?.scoreMultiplier ?? 1;
+    const globalMultiplier = state.scoreMultiplier ?? 1;
+    const scoreMultiplier = baseScoreMultiplier * globalMultiplier;
+    const timeMultiplier = options?.timeMultiplier ?? baseScoreMultiplier;
     const source = options?.source ?? 'tap';
 
     for (const hazard of state.hazards) {
@@ -861,8 +865,8 @@ export const useGameStore = create<GameStore>((set, get) => {
   };
 
   return {
-  phase: 'home',
-  boardKind: 'normal',
+    phase: 'home',
+    boardKind: 'normal',
   stats: defaultStats(),
   entryMode: null,
   bubbles: [],
@@ -922,6 +926,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   burstPointer: null,
   golden: defaultGoldenState(),
   nextGoldenSpawnAt: GOLDEN_RESPAWN_MIN_MS,
+  scoreMultiplier: 1,
   startRun: (mode = 'trial') => {
     const state = get();
     const board = state.boardKind;
@@ -1018,6 +1023,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       burstPointer: null,
       golden: defaultGoldenState(),
       nextGoldenSpawnAt: initialGoldenAt,
+      scoreMultiplier: 1,
     });
     get().spawnBubbles(Math.floor(maxBubbles / 2));
   },
@@ -1866,5 +1872,21 @@ export const useGameStore = create<GameStore>((set, get) => {
   spawnGoldenOrb,
   updateGoldenOrb,
   hitGoldenOrb,
-};
+  applyStartBonuses: ({ comboBonus = 0, doubleScore = false }) => {
+    set((state) => {
+      const nextStats = { ...state.stats };
+      let comboWindowUntil = state.comboWindowUntil;
+      if (comboBonus > 0) {
+        nextStats.chainLen = Math.max(nextStats.chainLen, comboBonus);
+        nextStats.bestCombo = Math.max(nextStats.bestCombo, comboBonus);
+        comboWindowUntil = Math.max(comboWindowUntil, state.now + COMBO_WINDOW_MS);
+      }
+      return {
+        stats: nextStats,
+        comboWindowUntil,
+        scoreMultiplier: doubleScore ? 2 : 1,
+      };
+    });
+  },
+  };
 });
