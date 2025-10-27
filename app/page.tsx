@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import HomeContent from '@/components/HomeContent';
+import EntryExperience from '@/components/EntryExperience';
 
 const description =
   'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
@@ -42,5 +42,5 @@ export default async function Page({ searchParams }: PageProps) {
   const boardParam = Array.isArray(rawBoard) ? rawBoard[0] : rawBoard;
   const shareBoard = boardParam === 'daily' ? 'daily' : 'normal';
 
-  return <HomeContent shareScore={shareScore} shareBoard={shareBoard} />;
+  return <EntryExperience shareScore={shareScore} shareBoard={shareBoard} />;
 }

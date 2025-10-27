@@ -17,6 +17,7 @@ const config: Config = {
       animation: {
         'slow-bounce': 'slow-bounce 2.8s ease-in-out infinite',
         'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'bubble-pulse': 'bubble-pulse 1.8s ease-in-out infinite',
       },
       keyframes: {
         'slow-bounce': {
@@ -26,6 +27,10 @@ const config: Config = {
         'pulse-glow': {
           '0%, 100%': { opacity: '0.65' },
           '50%': { opacity: '1' },
+        },
+        'bubble-pulse': {
+          '0%, 100%': { transform: 'scale(1)' },
+          '50%': { transform: 'scale(1.03)' },
         },
       },
     },
