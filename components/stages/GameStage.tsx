@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import GameCanvas from '@/app/game/GameCanvas';
 import HUD from '@/components/HUD';
 import PauseOverlay from '@/components/PauseOverlay';
 import { useGameStore } from '@/lib/store';
 import type { DrawerView } from '@/components/Drawer';
+import { VhFixProvider } from '@/components/VhFixProvider';
 
 const TARGET_COLOR_LABELS = {
   yellow: 'Yellow',
@@ -49,10 +50,18 @@ export default function GameStage({ onPause, onResume, onExit, onRequestDrawer }
 
   const handleRequestShop = () => onRequestDrawer('shop');
 
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
   return (
-    <div className="relative h-full w-full">
-      <GameCanvas />
-      <div className="app-hud">
+    <div className="app-frame" data-state="play">
+      <VhFixProvider />
+      <GameCanvas>
         <HUD onPause={onPause} onRequestShop={handleRequestShop} />
         <div className="pointer-events-none absolute inset-x-0 top-4 z-40 flex flex-col items-center gap-2 px-4 text-xs font-semibold uppercase tracking-wide">
           <AnimatePresence>
@@ -100,7 +109,7 @@ export default function GameStage({ onPause, onResume, onExit, onRequestDrawer }
         </div>
         <FirstRunPrompts />
         <PauseOverlay open={paused} onResume={onResume} onExit={onExit} />
-      </div>
+      </GameCanvas>
     </div>
   );
 }
