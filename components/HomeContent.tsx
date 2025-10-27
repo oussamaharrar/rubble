@@ -15,6 +15,7 @@ import SettingsModal from './SettingsModal';
 import TutorialOverlay, { shouldShowTutorial } from './TutorialOverlay';
 import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
+import { useEconomyStore } from '@/lib/economy-store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
 
@@ -32,6 +33,7 @@ type HighlightEntry = {
 interface HomeContentProps {
   shareScore?: number;
   shareBoard?: BoardKind;
+  refCode?: string;
 }
 
 function readLifetime(): LifetimeStats {
@@ -66,7 +68,7 @@ function writeLifetime(stats: LifetimeStats) {
   }
 }
 
-export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeContentProps) {
+export default function HomeContent({ shareScore, shareBoard = 'normal', refCode }: HomeContentProps) {
   const phase = useGameStore((state) => state.phase);
   const boardKind = useGameStore((state) => state.boardKind);
   const setBoardKind = useGameStore((state) => state.setBoardKind);
@@ -93,6 +95,12 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const tutorialAutoRef = useRef(shouldShowTutorial());
   const autoStartRef = useRef(false);
+  const addInvite = useEconomyStore((state) => state.addInvite);
+
+  useEffect(() => {
+    if (!refCode) return;
+    addInvite(refCode);
+  }, [addInvite, refCode]);
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -355,7 +363,6 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
                 shareScore={shareScore}
                 shareBoard={shareBoard}
                 onPlay={(board) => openGate(board)}
-                onOpenDrawer={() => openDrawer('missions')}
               />
             </motion.div>
           ) : null}
