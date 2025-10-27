@@ -6,6 +6,7 @@ import { PrimaryButton, GhostButton } from './Buttons';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
+import { useEconomyStore } from '@/lib/economy-store';
 
 const STATUS_VARIANTS = {
   initial: { opacity: 0, y: -4 },
@@ -27,6 +28,8 @@ export default function WalletBar() {
   const setWallet = useWalletStore((state) => state.setWallet);
   const setChainId = useWalletStore((state) => state.setChainId);
   const resetWallet = useWalletStore((state) => state.reset);
+  const connectEconomy = useEconomyStore((state) => state.connect);
+  const markInviteRewarded = useEconomyStore((state) => state.markInviteRewarded);
 
   const [connecting, setConnecting] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -97,6 +100,14 @@ export default function WalletBar() {
       provider.removeListener?.('chainChanged', handleChainChanged);
     };
   }, [resetWallet, setChainId, setWallet]);
+
+  useEffect(() => {
+    if (!address) {
+      return;
+    }
+    connectEconomy(address);
+    markInviteRewarded(address as `0x${string}`);
+  }, [address, connectEconomy, markInviteRewarded]);
 
   useEffect(() => {
     if (!statusMessage) return undefined;

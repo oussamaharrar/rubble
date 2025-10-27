@@ -51,4 +51,22 @@ test.describe('Rubble gameplay visibility', () => {
     expect(diagText || '').toMatch(/DPR/i);
     expect(diagText || '').toMatch(/CSS/i);
   });
+
+  test('home economy actions render', async ({ page }) => {
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3000/';
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByRole('heading', { name: /base storm mini-run/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /connect wallet/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /share/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /copy link/i })).toBeVisible();
+    const shopButtons = page.getByRole('button', { name: /buy/i });
+    await expect(shopButtons).toHaveCount(3);
+    const buttonLabels = await shopButtons.allTextContents();
+    for (const label of buttonLabels) {
+      expect(label).toMatch(/\$0\.0[1-5]/);
+    }
+    await expect(page.getByRole('button', { name: /start arcade/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /daily challenge/i })).toBeVisible();
+  });
 });

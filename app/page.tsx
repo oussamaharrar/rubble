@@ -41,6 +41,8 @@ export default async function Page({ searchParams }: PageProps) {
   const rawBoard = resolvedParams.board;
   const boardParam = Array.isArray(rawBoard) ? rawBoard[0] : rawBoard;
   const shareBoard = boardParam === 'daily' ? 'daily' : 'normal';
+  const rawRef = resolvedParams.ref;
+  const refCode = Array.isArray(rawRef) ? rawRef[0] : rawRef;
 
-  return <HomeContent shareScore={shareScore} shareBoard={shareBoard} />;
+  return <HomeContent shareScore={shareScore} shareBoard={shareBoard} refCode={typeof refCode === 'string' ? refCode : undefined} />;
 }
