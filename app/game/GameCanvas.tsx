@@ -595,8 +595,12 @@ export default function GameCanvas() {
 
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
+      let rewardHaptic = false;
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
+        rewardHaptic = result.hit && !(result.golden && result.goldenToxic);
+        if (rewardHaptic) {
+          vibrate(25);
+        }
         if (allowSound) {
           playTapChime({ pitch: result.golden ? 840 : 560 });
         }
@@ -641,7 +645,6 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,7 +652,10 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        rewardHaptic = !result.goldenToxic;
+        if (rewardHaptic) {
+          vibrate(25);
+        }
         if (allowSound) {
           playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
         }
@@ -667,12 +673,9 @@ export default function GameCanvas() {
         playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
       }
 
-      if (result.drain) {
+      rewardHaptic = Boolean(result.energy || result.targetHit || result.perfect);
+      if (rewardHaptic) {
         vibrate(25);
-      } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
-      } else {
-        vibrate(8);
       }
 
       const color = result.energy

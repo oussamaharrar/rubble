@@ -1,250 +1,175 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import AppExperience from './AppExperience';
-import WalletBar from './WalletBar';
-import Drawer, { type DrawerView } from './Drawer';
 import GameStage from './stages/GameStage';
-import GateModal from './stages/GateModal';
-import HomeScreen from './stages/HomeScreen';
-import IntroScreen from './stages/IntroScreen';
-import SummaryScreen from './stages/SummaryScreen';
-import type { LifetimeStats } from './StatsModal';
-import SettingsModal from './SettingsModal';
-import TutorialOverlay, { shouldShowTutorial } from './TutorialOverlay';
-import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
+import DailyReward from './rewards/DailyReward';
+import ShopPanel from './shop/ShopPanel';
+import InviteCard from './referrals/InviteCard';
+import FarcasterShare from './share/FarcasterShare';
+import WalletBar from './WalletBar';
 import { useGameStore } from '@/lib/store';
-import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
-import { saveScore, shareUrl } from '@/lib/leaderboard';
+import { useEconomyStore } from '@/lib/economy-store';
+import { useWalletStore } from '@/lib/wallet-store';
+import { dispatchWalletModalOpen } from '@/lib/wallet-events';
+import { ensureBaseNetwork } from '@/lib/base';
+import type { BoardKind } from '@/types/game';
 
-const LIFETIME_KEY = 'rubble:lifetime-stats';
+const THEMES = ['ocean', 'purple'] as const;
 
-type HighlightEntry = {
-  board: BoardKind;
-  score: number;
-  combo: number;
-  streak: number;
-  dailyKey?: string;
-  official?: boolean;
-};
+type ThemeName = (typeof THEMES)[number];
 
-interface HomeContentProps {
+type HomeContentProps = {
   shareScore?: number;
   shareBoard?: BoardKind;
-}
+  referralCode?: string;
+};
 
-function readLifetime(): LifetimeStats {
-  if (typeof window === 'undefined') {
-    return { bestScore: 0, bestCombo: 0, runs: 0, totalSeconds: 0 };
-  }
+function decodeReferral(code?: string): string | null {
+  if (!code) return null;
   try {
-    const raw = window.localStorage.getItem(LIFETIME_KEY);
-    if (!raw) return { bestScore: 0, bestCombo: 0, runs: 0, totalSeconds: 0 };
-    const parsed = JSON.parse(raw) as LifetimeStats;
-    if (
-      !parsed ||
-      typeof parsed.bestScore !== 'number' ||
-      typeof parsed.bestCombo !== 'number' ||
-      typeof parsed.runs !== 'number' ||
-      typeof parsed.totalSeconds !== 'number'
-    ) {
-      return { bestScore: 0, bestCombo: 0, runs: 0, totalSeconds: 0 };
+    let input = code.replace(/-/gu, '+').replace(/_/gu, '/');
+    while (input.length % 4 !== 0) {
+      input += '=';
     }
-    return parsed;
+    const decoded = atob(input);
+    return decoded.startsWith('0x') ? decoded : null;
   } catch {
-    return { bestScore: 0, bestCombo: 0, runs: 0, totalSeconds: 0 };
+    return null;
   }
 }
 
-function writeLifetime(stats: LifetimeStats) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(LIFETIME_KEY, JSON.stringify(stats));
-  } catch {
-    // ignore persistence issues
-  }
-}
-
-export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeContentProps) {
+export default function HomeContent({ shareScore, shareBoard = 'normal', referralCode }: HomeContentProps) {
+  const theme = useMemo<ThemeName>(() => THEMES[Math.floor(Math.random() * THEMES.length)], []);
   const phase = useGameStore((state) => state.phase);
+  const stats = useGameStore((state) => state.stats);
   const boardKind = useGameStore((state) => state.boardKind);
-  const setBoardKind = useGameStore((state) => state.setBoardKind);
-  const setPhase = useGameStore((state) => state.setPhase);
   const startRun = useGameStore((state) => state.startRun);
   const beginGameplay = useGameStore((state) => state.beginGameplay);
-  const resetToStart = useGameStore((state) => state.resetToStart);
   const pauseRun = useGameStore((state) => state.pauseRun);
   const resumeRun = useGameStore((state) => state.resumeRun);
-  const stats = useGameStore((state) => state.stats);
-  const now = useGameStore((state) => state.now);
-  const loadDaily = useGameStore((state) => state.loadDaily);
-  const lastRunOfficialDaily = useGameStore((state) => state.lastRunOfficialDaily);
-  const dailyKey = useGameStore((state) => state.dailyKey);
-  const startedAt = useGameStore((state) => state.startedAt);
+  const resetToStart = useGameStore((state) => state.resetToStart);
+  const applyStartBonuses = useGameStore((state) => state.applyStartBonuses);
+  const width = useGameStore((state) => state.width);
+  const height = useGameStore((state) => state.height);
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerView, setDrawerView] = useState<DrawerView>('missions');
-  const [lifetime, setLifetime] = useState<LifetimeStats>(() => readLifetime());
-  const [highlight, setHighlight] = useState<HighlightEntry | null>(null);
-  const [lastSavedRun, setLastSavedRun] = useState<number | null>(null);
-  const [backdropPhase, setBackdropPhase] = useState<GamePhase>('home');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tutorialOpen, setTutorialOpen] = useState(false);
-  const tutorialAutoRef = useRef(shouldShowTutorial());
-  const autoStartRef = useRef(false);
+  const hydrateEconomy = useEconomyStore((state) => state.hydrate);
+  const connectEconomy = useEconomyStore((state) => state.connect);
+  const trialUsedToday = useEconomyStore((state) => state.trialUsedToday);
+  const grantTrialToday = useEconomyStore((state) => state.grantTrialToday);
+  const boosts = useEconomyStore((state) => state.boosts);
+  const bubbles = useEconomyStore((state) => state.bubbles);
+  const consumeComboStart = useEconomyStore((state) => state.consumeComboStart);
+  const consumeDoubleScore = useEconomyStore((state) => state.consumeDoubleScore);
+  const recordInviteUse = useEconomyStore((state) => state.recordInviteUse);
+
+  const walletAddress = useWalletStore((state) => state.address);
+  const setWallet = useWalletStore((state) => state.setWallet);
+
+  const [referralAddress, setReferralAddress] = useState<string | null>(() => decodeReferral(referralCode));
+  const [referralGranted, setReferralGranted] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const playing = phase === 'playing' || phase === 'storm' || phase === 'paused';
+  const showSummary = phase === 'summary';
 
   useEffect(() => {
-    if (phase !== 'gate') {
-      setBackdropPhase(phase);
+    hydrateEconomy();
+  }, [hydrateEconomy]);
+
+  useEffect(() => {
+    if (!referralCode) return;
+    setReferralAddress(decodeReferral(referralCode));
+  }, [referralCode]);
+
+  useEffect(() => {
+    if (walletAddress) {
+      connectEconomy(walletAddress);
     }
-  }, [phase]);
+  }, [connectEconomy, walletAddress]);
 
   useEffect(() => {
-    loadDaily();
-  }, [loadDaily]);
-
-  useEffect(() => {
-    if (phase !== 'home' && phase !== 'summary') {
-      setSettingsOpen(false);
-    }
-  }, [phase]);
-
-  useEffect(() => {
-    if ((phase === 'home' || phase === 'intro') && tutorialAutoRef.current) {
-      setTutorialOpen(true);
-      tutorialAutoRef.current = false;
-    }
-  }, [phase, tutorialAutoRef]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (!walletAddress || !referralAddress || referralGranted) {
       return;
     }
-    const autoPlay = window.localStorage.getItem('rubble:autoplay') === 'true';
-    if (!autoPlay) {
+    const self = walletAddress.toLowerCase();
+    const ref = referralAddress.toLowerCase();
+    if (self === ref) {
+      setReferralGranted(true);
       return;
     }
-    if (!autoStartRef.current && phase === 'home') {
-      autoStartRef.current = true;
-      setBoardKind('normal');
-      startRun('trial');
-      return;
-    }
-    if (autoStartRef.current && phase === 'intro') {
-      beginGameplay();
-    }
-  }, [beginGameplay, phase, setBoardKind, startRun]);
-
-  useEffect(() => {
-    if (phase === 'summary') {
-      setLifetime((current) => {
-        const elapsedSeconds = Math.max(0, Math.round(now / 1000));
-        const next: LifetimeStats = {
-          bestScore: Math.max(current.bestScore, stats.score),
-          bestCombo: Math.max(current.bestCombo, stats.bestCombo),
-          runs: current.runs + 1,
-          totalSeconds: current.totalSeconds + elapsedSeconds,
-        };
-        writeLifetime(next);
-        return next;
-      });
-      const marker = startedAt || Date.now();
-      if (lastSavedRun !== marker) {
-        if (boardKind !== 'daily' || lastRunOfficialDaily) {
-          saveScore({
-            board: boardKind,
-            score: stats.score,
-            combo: stats.bestCombo,
-            streak: stats.streak,
-            date: new Date().toISOString(),
-            dailyKey: boardKind === 'daily' ? dailyKey : undefined,
-            entryMode: stats.entryMode ?? undefined,
-          });
-          setHighlight({
-            board: boardKind,
-            score: stats.score,
-            combo: stats.bestCombo,
-            streak: stats.streak,
-            dailyKey,
-            official: true,
-          });
-        } else {
-          setHighlight({
-            board: boardKind,
-            score: stats.score,
-            combo: stats.bestCombo,
-            streak: stats.streak,
-            dailyKey,
-            official: false,
-          });
-        }
-        setLastSavedRun(marker);
-      }
-    }
-  }, [phase, stats.score, stats.bestCombo, stats.streak, stats.entryMode, now, boardKind, dailyKey, lastRunOfficialDaily, startedAt, lastSavedRun]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const handleVisibility = () => {
-      if (document.hidden) {
-        pauseRun();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [pauseRun]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handleWalletModal = () => {
-      pauseRun();
-    };
-    window.addEventListener(WALLET_MODAL_EVENT, handleWalletModal as EventListener);
-    return () => window.removeEventListener(WALLET_MODAL_EVENT, handleWalletModal as EventListener);
-  }, [pauseRun]);
+    const key = `rubble:referral:${ref}:${self}`;
+    if (window.localStorage.getItem(key) === '1') {
+      setReferralGranted(true);
+      return;
+    }
+    recordInviteUse(ref);
+    grantTrialToday();
+    window.localStorage.setItem(key, '1');
+    setReferralGranted(true);
+  }, [walletAddress, referralAddress, referralGranted, recordInviteUse, grantTrialToday]);
 
-  const playing = phase === 'playing' || phase === 'storm';
+  useEffect(() => {
+    console.log(
+      `ECON: addr=${walletAddress ?? '0x0000'} | boosts=${boosts} | bubbles=${bubbles} | trialUsedToday=${trialUsedToday}`
+    );
+  }, [walletAddress, boosts, bubbles, trialUsedToday]);
 
-  const openDrawer = useCallback((view: DrawerView) => {
-    setDrawerView(view);
-    setDrawerOpen(true);
-  }, []);
+  useEffect(() => {
+    const dpr = Number((typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1).toFixed(2);
+    console.log(`DIAG: DPR ${dpr} | CSS ${width}x${height}`);
+  }, [width, height]);
 
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const connectWallet = useCallback(async () => {
+    if (connecting) return;
+    if (typeof window === 'undefined' || !window.ethereum) {
+      setStatusMessage('No Base-compatible wallet detected.');
+      return;
+    }
+    try {
+      setConnecting(true);
+      dispatchWalletModalOpen();
+      const account = await ensureBaseNetwork();
+      setWallet(account, '0x2105');
+      connectEconomy(account);
+      setStatusMessage('Wallet connected.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Wallet connection failed.';
+      setStatusMessage(message);
+    } finally {
+      setConnecting(false);
+    }
+  }, [connecting, connectEconomy, setWallet]);
 
-  const openGate = useCallback(
-    (board: BoardKind) => {
-      setDrawerOpen(false);
-      setBoardKind(board);
-      setPhase('gate');
-    },
-    [setBoardKind, setPhase]
-  );
-
-  const handleGateClose = useCallback(() => {
-    setPhase('home');
-  }, [setPhase]);
-
-  const handleGateComplete = useCallback(
-    (mode: EntryMode) => {
-      startRun(mode);
-    },
-    [startRun]
-  );
-
-  const handleIntroComplete = useCallback(() => {
+  const handlePlay = useCallback(async () => {
+    if (!walletAddress) {
+      await connectWallet();
+      return;
+    }
+    const comboBonus = consumeComboStart();
+    const doubleScore = consumeDoubleScore();
+    if (!trialUsedToday) {
+      grantTrialToday();
+      startRun('trial');
+    } else {
+      startRun('paid');
+    }
+    applyStartBonuses({ comboBonus, doubleScore });
     beginGameplay();
-  }, [beginGameplay]);
-
-  const handleReplay = useCallback(() => {
-    openGate(boardKind);
-  }, [boardKind, openGate]);
-
-  const handleReturnHome = useCallback(() => {
-    resetToStart();
-    setDrawerOpen(false);
-  }, [resetToStart]);
+  }, [
+    applyStartBonuses,
+    beginGameplay,
+    connectWallet,
+    consumeComboStart,
+    consumeDoubleScore,
+    grantTrialToday,
+    startRun,
+    trialUsedToday,
+    walletAddress,
+  ]);
 
   const handlePause = useCallback(() => {
     pauseRun();
@@ -256,169 +181,152 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
 
   const handleExit = useCallback(() => {
     resetToStart();
-    setDrawerOpen(false);
   }, [resetToStart]);
 
-  const shareTarget = useMemo(() => {
-    if (highlight) {
-      return highlight;
+  const handleSummaryContinue = useCallback(() => {
+    resetToStart();
+  }, [resetToStart]);
+
+  const primaryLabel = useMemo(() => {
+    if (!walletAddress) {
+      return connecting ? 'Connecting…' : 'Connect Wallet';
     }
-    return {
-      board: boardKind,
-      score: stats.score,
-      combo: stats.bestCombo,
-      streak: stats.streak,
-      dailyKey: boardKind === 'daily' ? dailyKey : undefined,
-      official: lastRunOfficialDaily,
-    } satisfies HighlightEntry;
-  }, [boardKind, stats.score, stats.bestCombo, stats.streak, dailyKey, highlight, lastRunOfficialDaily]);
+    if (!trialUsedToday) {
+      return 'Play Free Today';
+    }
+    return 'Play Run';
+  }, [connecting, trialUsedToday, walletAddress]);
 
-  const shareHref = useMemo(() => {
-    if (!shareTarget) return undefined;
-    const url = shareUrl({
-      score: shareTarget.score,
-      board: shareTarget.board,
-      dailyKey: shareTarget.dailyKey,
-    });
-    const composer = new URL('https://warpcast.com/~/compose');
-    const label = shareTarget.board === 'daily' ? 'Daily Challenge' : 'Arcade';
-    composer.searchParams.set('text', `My Rubble ${label} score: ${shareTarget.score}!\n${url}`);
-    return composer.toString();
-  }, [shareTarget]);
-
-  const displayPhase = phase === 'gate' ? backdropPhase : phase;
-
-  const headerContent = (
-    <div className="flex w-full items-center justify-between gap-3">
-      <div className="flex min-w-0 flex-1 items-center">
-        {displayPhase === 'home' || displayPhase === 'summary' ? (
-          <WalletBar />
-        ) : (
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Rubble Rush</span>
-        )}
-      </div>
-      <div className="flex items-center gap-2 text-xs text-slate-300">
-        {(displayPhase === 'home' || displayPhase === 'summary') && (
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="button-tap flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-base text-slate-100 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-            aria-label="Open settings"
-          >
-            ⚙
-          </button>
-        )}
-        <span className="rounded-full border border-white/10 px-3 py-1">Base Mini</span>
-      </div>
-    </div>
-  );
-
-  const footerContent = (
-    <div className="flex w-full items-center justify-between gap-3">
-      {displayPhase === 'home' || displayPhase === 'summary' ? (
-        <>
-          <button
-            type="button"
-            onClick={() => openDrawer('howto')}
-            className="button-tap rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-          >
-            How to Play
-          </button>
-          <button
-            type="button"
-            onClick={() => openDrawer('stats')}
-            className="button-tap rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-          >
-            Stats
-          </button>
-        </>
-      ) : (
-        <span className="text-xs text-slate-600">&nbsp;</span>
-      )}
-    </div>
-  );
+  const themeClass = theme === 'ocean' ? 'bg-[radial-gradient(circle_at_top,#172554,transparent)]' : 'bg-[radial-gradient(circle_at_top,#4c1d95,transparent)]';
 
   return (
-    <AppExperience playing={playing} header={headerContent} footer={footerContent}>
-      <div className="relative h-full w-full">
+    <AppExperience
+      playing={playing}
+      header={
+        <div className="flex w-full items-center justify-between gap-3">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Rubble Rush</span>
+          <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-200">Base Mini</span>
+        </div>
+      }
+      footer={
+        <div className="flex w-full items-center justify-between text-xs text-slate-300">
+          <span>{statusMessage ?? 'Tap storms. Chain combos. Claim rewards.'}</span>
+          <button
+            type="button"
+            onClick={() => setStatusMessage('Settings panel coming soon.')}
+            className="button-tap rounded-full border border-white/10 px-3 py-1"
+          >
+            Settings
+          </button>
+        </div>
+      }
+    >
+      <div className={`relative h-full w-full overflow-hidden ${themeClass}`}>
         <AnimatePresence mode="wait">
-          {displayPhase === 'home' ? (
+          {playing ? (
             <motion.div
-              key="home"
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
+              key="play"
               className="absolute inset-0"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
             >
-              <HomeScreen
-                shareScore={shareScore}
-                shareBoard={shareBoard}
-                onPlay={(board) => openGate(board)}
-                onOpenDrawer={() => openDrawer('missions')}
+              <GameStage
+                onPause={handlePause}
+                onResume={handleResume}
+                onExit={handleExit}
+                onRequestDrawer={() => setStatusMessage('Open the Shop section below to grab boosts.')}
               />
             </motion.div>
           ) : null}
 
-          {displayPhase === 'intro' ? (
-            <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0">
-              <IntroScreen onSkip={handleIntroComplete} onStart={handleIntroComplete} />
-            </motion.div>
-          ) : null}
-
-          {(displayPhase === 'playing' || displayPhase === 'storm' || displayPhase === 'paused') ? (
-            <motion.div key="play" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0">
-              <GameStage onPause={handlePause} onResume={handleResume} onExit={handleExit} onRequestDrawer={openDrawer} />
-            </motion.div>
-          ) : null}
-
-          {displayPhase === 'summary' ? (
+          {showSummary ? (
             <motion.div
               key="summary"
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="absolute inset-0"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-slate-950/80 px-6 text-center"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
             >
-              <SummaryScreen
-                board={boardKind}
-                officialDaily={lastRunOfficialDaily}
-                onReplay={handleReplay}
-                onReturnHome={handleReturnHome}
-                onOpenDrawer={openDrawer}
-                shareHref={shareHref}
-              />
+              <div className="w-full max-w-md rounded-3xl border border-white/15 bg-slate-900/80 p-6 shadow-xl">
+                <h2 className="text-2xl font-semibold text-white">Run Complete</h2>
+                <p className="mt-2 text-sm text-slate-300">Score {stats.score} · Combo {stats.bestCombo} · Streak {stats.streak}</p>
+                <div className="mt-4 space-y-3">
+                  <FarcasterShare score={stats.score} board={boardKind} />
+                  <button
+                    type="button"
+                    onClick={handlePlay}
+                    className="w-full rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-900"
+                  >
+                    Run Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSummaryContinue}
+                    className="w-full rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    Return Home
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ) : null}
+
+          {!playing && !showSummary ? (
+            <motion.div
+              key="home"
+              className="absolute inset-0 overflow-y-auto px-6 py-10"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+                <section className="rounded-3xl border border-white/15 bg-slate-900/70 p-6 shadow-lg shadow-black/30">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-2">
+                      <span className="rounded-full border border-sky-400/40 bg-sky-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-sky-100">
+                        Levels Map · Mode B
+                      </span>
+                      <h1 className="text-3xl font-semibold text-white">Storm the bubble fields</h1>
+                      <p className="max-w-xl text-sm text-slate-300">
+                        Connect your Base wallet, claim the daily reward, stock up on boosts, and tap through escalating storms.
+                      </p>
+                    </div>
+                    <div className="flex w-full max-w-xs flex-col gap-3">
+                      <motion.button
+                        type="button"
+                        onClick={handlePlay}
+                        disabled={connecting}
+                        whileTap={{ scale: 0.97 }}
+                        className="button-tap inline-flex h-12 w-full items-center justify-center rounded-full bg-gradient-to-r from-sky-400 to-blue-500 text-base font-semibold text-slate-900 shadow-lg shadow-sky-500/40"
+                      >
+                        {primaryLabel}
+                      </motion.button>
+                      <button
+                        type="button"
+                        onClick={() => setStatusMessage('Shop items live below. Tap Buy to use Base checkout.')}
+                        className="rounded-full border border-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-100"
+                      >
+                        Open Shop
+                      </button>
+                      <p className="text-xs text-slate-400">
+                        Boosts {boosts} · Bubbles {bubbles} · {trialUsedToday ? 'Trial used' : 'Free run available'}
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <WalletBar />
+                  <DailyReward />
+                  <InviteCard />
+                  <ShopPanel />
+                  <FarcasterShare score={shareScore} board={shareBoard} />
+                </div>
+              </div>
             </motion.div>
           ) : null}
         </AnimatePresence>
-
-        <GateModal
-          open={phase === 'gate'}
-          onClose={handleGateClose}
-          onComplete={handleGateComplete}
-        />
-
-        <Drawer
-          open={drawerOpen}
-          view={drawerView}
-          onClose={closeDrawer}
-          onSelect={setDrawerView}
-          highlight={highlight}
-          lifetimeStats={lifetime}
-          onShowTutorial={() => {
-            setDrawerOpen(false);
-            setTutorialOpen(true);
-          }}
-        />
-        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-        <TutorialOverlay
-          open={tutorialOpen}
-          onClose={() => {
-            setTutorialOpen(false);
-            tutorialAutoRef.current = false;
-          }}
-        />
       </div>
     </AppExperience>
   );
