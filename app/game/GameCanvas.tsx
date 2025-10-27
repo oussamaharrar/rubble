@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
+import { useEconomyStore } from '@/lib/economy-store';
 import { playTapChime } from '@/lib/audio';
 
 const COLOR_MAP = {
@@ -94,6 +95,20 @@ export default function GameCanvas() {
     const enabled = localStorage.getItem('rubble:diag') === 'true';
     setDiagOn(enabled);
   }, []);
+
+  useEffect(() => {
+    if (!diagOn) {
+      return;
+    }
+    const econ = useEconomyStore.getState();
+    console.log(
+      `ECON: addr=${econ.address ?? 'none'} | boosts=${econ.boosts} | retries=${econ.retries} | bubbles=${econ.bubbles} | streak=${econ.streak} | bonusTrials=${econ.bonusTrials} | trialToday=${econ.trialUsedToday ? 'yes' : 'no'}`
+    );
+    const stats = statsRef.current;
+    console.log(
+      `DIAG: DPR ${stats.dpr.toFixed(2)} | CSS ${Math.round(stats.width)}x${Math.round(stats.height)} | BUF ${stats.bufferWidth}x${stats.bufferHeight} | FPS ${stats.fps.toFixed(1)} | BUB ${stats.bubbles}`
+    );
+  }, [diagOn]);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
