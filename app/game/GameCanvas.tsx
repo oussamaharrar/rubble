@@ -62,6 +62,11 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
+  const lastDiagRef = useRef('');
+  const initialNow = typeof performance !== 'undefined' ? performance.now() : 0;
+  const slowMoRef = useRef(0);
+  const purpleChallengeRef = useRef<{ count: number; expiresAt: number }>({ count: 0, expiresAt: 0 });
+  const skullChallengeRef = useRef<{ lastHit: number; granted: boolean }>({ lastHit: initialNow, granted: false });
   const [frameStats, setFrameStats] = useState({
     width: 0,
     height: 0,
@@ -483,14 +488,21 @@ export default function GameCanvas() {
       lastTimeRef.current = time;
       const state = useGameStore.getState();
       if (state.phase === 'playing' || state.phase === 'storm') {
+        const slowActive = slowMoRef.current > time;
+        if (!slowActive && slowMoRef.current !== 0 && slowMoRef.current <= time) {
+          slowMoRef.current = 0;
+        }
+        const slowFactor = slowActive ? 0.6 : 1;
         let remaining = Math.max(0, rawDt);
         while (remaining > 0) {
           const slice = Math.min(remaining, 10);
-          state.tick(slice);
+          state.tick(slice * slowFactor);
           remaining -= slice;
         }
       }
-      render(rawDt);
+      const slowActive = slowMoRef.current > time;
+      const renderFactor = slowActive ? 0.6 : 1;
+      render(rawDt * renderFactor);
       frameHandle = window.requestAnimationFrame(step);
     };
 
@@ -521,6 +533,12 @@ export default function GameCanvas() {
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
       ctx.clearRect(0, 0, w || canvas.clientWidth || canvas.width, h || canvas.clientHeight || canvas.height);
+      purpleChallengeRef.current = { count: 0, expiresAt: 0 };
+      skullChallengeRef.current = {
+        lastHit: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+        granted: false,
+      };
+      slowMoRef.current = 0;
     }
   }, [phase]);
 
@@ -594,9 +612,44 @@ export default function GameCanvas() {
     };
 
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
+      const nowTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
       if (!result) return;
+      const rewardHaptic = () => {
+        if (result.hit) {
+          vibrate(25);
+        }
+      };
+      const purpleChallenge = purpleChallengeRef.current;
+      const skullChallenge = skullChallengeRef.current;
+      if (result.hit && result.color === 'pink') {
+        if (purpleChallenge.expiresAt < nowTime) {
+          purpleChallenge.count = 0;
+        }
+        if (purpleChallenge.count === 0) {
+          purpleChallenge.expiresAt = nowTime + 5_000;
+        }
+        purpleChallenge.count += 1;
+        if (purpleChallenge.count >= 3 && nowTime <= purpleChallenge.expiresAt) {
+          purpleChallenge.count = 0;
+          purpleChallenge.expiresAt = 0;
+          useGameStore.getState().spawnGoldenOrb();
+        }
+      } else if (purpleChallenge.expiresAt < nowTime) {
+        purpleChallenge.count = 0;
+      }
+
+      if (result.drain) {
+        skullChallenge.lastHit = nowTime;
+        skullChallenge.granted = false;
+      } else if (nowTime - skullChallenge.lastHit >= 10_000 && !skullChallenge.granted) {
+        useGameStore.getState().grantBooster(1, 'other');
+        skullChallenge.granted = true;
+        rewardHaptic();
+        pushRipple({ x, y, progress: 0, maxRadius: 140, color: 'rgba(96,165,250,0.35)' });
+      }
+
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
+        rewardHaptic();
         if (allowSound) {
           playTapChime({ pitch: result.golden ? 840 : 560 });
         }
@@ -641,7 +694,6 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,7 +701,9 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        if (!result.goldenToxic) {
+          rewardHaptic();
+        }
         if (allowSound) {
           playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
         }
@@ -667,12 +721,12 @@ export default function GameCanvas() {
         playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
       }
 
-      if (result.drain) {
-        vibrate(25);
-      } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
-      } else {
-        vibrate(8);
+      if (!result.drain && (result.energy || result.perfect || result.targetHit)) {
+        rewardHaptic();
+      }
+
+      if (result.hit && (result.combo ?? 0) >= 10 && (result.combo ?? 0) % 5 === 0) {
+        slowMoRef.current = nowTime + 260;
       }
 
       const color = result.energy
@@ -697,8 +751,32 @@ export default function GameCanvas() {
           gravity: 0.001,
         });
       }
-      if (allowSound && result.hit && !result.burst) {
-        playTapChime({ perfect: result.perfect });
+
+      const comboLevel = result.combo ?? 0;
+      if (comboLevel >= 6) {
+        const extra = Math.min(8, Math.floor(comboLevel / 3));
+        const glowColor = result.color ? GLOW_MAP[result.color as keyof typeof GLOW_MAP] ?? 'rgba(56,189,248,0.3)' : 'rgba(56,189,248,0.3)';
+        for (let index = 0; index < extra; index += 1) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 0.08 + Math.random() * 0.05;
+          spawnParticle({
+            x: x + Math.cos(angle) * Math.max(12, (result.radius ?? 24) * 0.6),
+            y: y + Math.sin(angle) * Math.max(12, (result.radius ?? 24) * 0.6),
+            radius: 4,
+            life: 280,
+            color: glowColor,
+            vx: Math.cos(angle) * speed * 0.5,
+            vy: Math.sin(angle) * speed * 0.5,
+            gravity: 0.0006,
+          });
+        }
+        pushRipple({
+          x,
+          y,
+          progress: 0,
+          maxRadius: Math.max(result.radius ?? 36, 24) * (1.6 + comboLevel * 0.05),
+          color: glowColor,
+        });
       }
 
       if (result.perfect && !prefersReducedMotion.current) {
@@ -815,6 +893,16 @@ export default function GameCanvas() {
   const diagText = diagOn
     ? `DPR ${frameStats.dpr.toFixed(2)} | CSS ${Math.round(frameStats.width)}×${Math.round(frameStats.height)}\nBUF ${frameStats.bufferWidth}×${frameStats.bufferHeight} | FPS ${frameStats.fps.toFixed(1)} | BUB ${frameStats.bubbles}`
     : '';
+
+  useEffect(() => {
+    if (diagOn && diagText && diagText !== lastDiagRef.current) {
+      lastDiagRef.current = diagText;
+      console.log(`DIAG: ${diagText}`);
+    }
+    if (!diagOn) {
+      lastDiagRef.current = '';
+    }
+  }, [diagOn, diagText]);
 
   return (
     <div ref={frameRef} style={{ position: 'relative', width: '100%', height: '100%' }}>

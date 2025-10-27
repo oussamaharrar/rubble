@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import HomeContent from '@/components/HomeContent';
+import LevelsApp from '@/components/LevelsApp';
 
 const description =
   'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
@@ -35,12 +35,7 @@ type PageProps = {
 
 export default async function Page({ searchParams }: PageProps) {
   const resolvedParams: Record<string, string | string[] | undefined> = await (searchParams ?? {});
-  const rawScore = resolvedParams.score;
-  const parsedScore = Array.isArray(rawScore) ? parseInt(rawScore[0] ?? '', 10) : parseInt(rawScore ?? '', 10);
-  const shareScore = Number.isFinite(parsedScore) ? parsedScore : undefined;
-  const rawBoard = resolvedParams.board;
-  const boardParam = Array.isArray(rawBoard) ? rawBoard[0] : rawBoard;
-  const shareBoard = boardParam === 'daily' ? 'daily' : 'normal';
-
-  return <HomeContent shareScore={shareScore} shareBoard={shareBoard} />;
+  const refParam = resolvedParams.ref;
+  const refCode = Array.isArray(refParam) ? refParam[0] : refParam;
+  return <LevelsApp refCode={typeof refCode === 'string' ? refCode : undefined} />;
 }
