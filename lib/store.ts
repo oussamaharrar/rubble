@@ -56,6 +56,9 @@ const EASE_DURATION_MS = 8_000;
 const SPAWN_EXCLUSION_RADIUS = 72;
 const SPAWN_MEMORY = 14;
 const MAX_ACTIVE_HAZARDS = 6;
+const TOP_SAFE_ZONE_FRACTION = 0.12;
+const SIDE_SAFE_ZONE_FRACTION = 0.08;
+const SAFE_ZONE_ATTEMPTS = 3;
 
 const DEFAULT_PALETTE: BubbleColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
 
@@ -249,7 +252,7 @@ function initialBoosterBank(): BoosterBank {
     }
     return { freeOrbs: parsed.freeOrbs, lastDailyKey: parsed.lastDailyKey };
   } catch (error) {
-    console.warn('[Rubble] Failed to parse booster bank', error);
+    console.warn("[Bubble’it!] Failed to parse booster bank", error);
     return { freeOrbs: 0, lastDailyKey: '' };
   }
 }
@@ -267,6 +270,56 @@ function persistBooster(bank: BoosterBank) {
 }
 
 type RecentSpawn = { x: number; y: number; at: number };
+
+function clamp(value: number, min: number, max: number) {
+  if (Number.isNaN(value)) return min;
+  if (min > max) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function inTopSafeZone(y: number, radius: number, height: number) {
+  if (height <= 0) return false;
+  const boundary = height * TOP_SAFE_ZONE_FRACTION;
+  return y + radius > 0 && y - radius < boundary;
+}
+
+function inLeftSafeZone(x: number, radius: number, width: number) {
+  if (width <= 0) return false;
+  const boundary = width * SIDE_SAFE_ZONE_FRACTION;
+  return x >= 0 && x - radius < boundary;
+}
+
+function inRightSafeZone(x: number, radius: number, width: number) {
+  if (width <= 0) return false;
+  const boundary = width * (1 - SIDE_SAFE_ZONE_FRACTION);
+  return x <= width && x + radius > boundary;
+}
+
+function spawnViolatesSafeZone(x: number, y: number, radius: number, width: number, height: number) {
+  return (
+    inTopSafeZone(y, radius, height) ||
+    inLeftSafeZone(x, radius, width) ||
+    inRightSafeZone(x, radius, width)
+  );
+}
+
+function adjustToSafeZone(x: number, y: number, radius: number, width: number, height: number) {
+  let nextX = x;
+  let nextY = y;
+  if (inTopSafeZone(y, radius, height)) {
+    const minY = height * TOP_SAFE_ZONE_FRACTION + radius;
+    nextY = clamp(nextY, minY, Math.max(height - radius, minY));
+  }
+  if (inLeftSafeZone(x, radius, width)) {
+    const minX = width * SIDE_SAFE_ZONE_FRACTION + radius;
+    nextX = clamp(nextX, minX, Math.max(width - radius, minX));
+  }
+  if (inRightSafeZone(x, radius, width)) {
+    const maxX = width * (1 - SIDE_SAFE_ZONE_FRACTION) - radius;
+    nextX = clamp(nextX, width * SIDE_SAFE_ZONE_FRACTION + radius, Math.max(maxX, width * SIDE_SAFE_ZONE_FRACTION + radius));
+  }
+  return { x: nextX, y: nextY };
+}
 
 function pickColor(rng: () => number, palette: BubbleColor[], paletteSize: number): BubbleColor {
   const usable = Math.min(Math.max(1, paletteSize), palette.length > 0 ? palette.length : DEFAULT_PALETTE.length);
@@ -300,9 +353,17 @@ function spawnFromEdge(
   let vy = 0;
   const baseSpeed = 0.06 + rng() * 0.08;
   const speedMultiplier = Math.max(0.45, Math.min(speedFactor * easingFactor, 1.6));
+  const topLimit = height * TOP_SAFE_ZONE_FRACTION + radius;
+  const leftLimit = width * SIDE_SAFE_ZONE_FRACTION + radius;
+  const rightLimit = width * (1 - SIDE_SAFE_ZONE_FRACTION) - radius;
+  const safeMinX = clamp(leftLimit, radius, Math.max(width - radius, radius));
+  const safeMaxX = clamp(rightLimit, safeMinX + radius, Math.max(width - radius, safeMinX + radius));
+  const safeMinY = clamp(topLimit, radius, Math.max(height - radius, radius));
+  const safeMaxY = clamp(height - radius, safeMinY + radius, Math.max(height - radius, safeMinY + radius));
   switch (edge) {
     case 'top': {
-      x = radius + rng() * Math.max(width - radius * 2, radius);
+      const span = Math.max(safeMaxX - safeMinX, radius);
+      x = safeMinX + rng() * span;
       y = -radius - jitter(8, 32);
       vx = (rng() - 0.5) * 0.18 * width * 0.0015 * speedMultiplier;
       vy = baseSpeed * height * speedMultiplier;
@@ -310,7 +371,8 @@ function spawnFromEdge(
     }
     case 'left': {
       x = -radius - jitter(8, 24);
-      y = radius + rng() * Math.max(height - radius * 2, radius);
+      const span = Math.max(safeMaxY - safeMinY, radius);
+      y = safeMinY + rng() * span;
       vx = baseSpeed * width * 0.6 * speedMultiplier;
       vy = (rng() - 0.5) * 0.25 * height * 0.001 * speedMultiplier;
       break;
@@ -318,7 +380,8 @@ function spawnFromEdge(
     case 'right':
     default: {
       x = width + radius + jitter(8, 24);
-      y = radius + rng() * Math.max(height - radius * 2, radius);
+      const span = Math.max(safeMaxY - safeMinY, radius);
+      y = safeMinY + rng() * span;
       vx = -baseSpeed * width * 0.6 * speedMultiplier;
       vy = (rng() - 0.5) * 0.25 * height * 0.001 * speedMultiplier;
       break;
@@ -354,6 +417,17 @@ function createBubble(
       break;
     }
     spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+  }
+  for (let attempt = 0; attempt < SAFE_ZONE_ATTEMPTS; attempt += 1) {
+    if (!spawnViolatesSafeZone(spawn.x, spawn.y, radius, width, height)) {
+      break;
+    }
+    if (attempt < SAFE_ZONE_ATTEMPTS - 1) {
+      spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+    } else {
+      const adjusted = adjustToSafeZone(spawn.x, spawn.y, radius, width, height);
+      spawn = { ...spawn, ...adjusted };
+    }
   }
   const color = options?.storm
     ? options?.energy
@@ -404,8 +478,12 @@ function createPoisonCloud(
   now: number
 ): Hazard {
   const radius = 60 + rng() * 22;
-  const x = radius + rng() * Math.max(width - radius * 2, radius);
-  const y = radius + rng() * Math.max(height - radius * 2, radius);
+  const minX = width * SIDE_SAFE_ZONE_FRACTION + radius;
+  const maxX = Math.max(width * (1 - SIDE_SAFE_ZONE_FRACTION) - radius, minX);
+  const minY = height * TOP_SAFE_ZONE_FRACTION + radius;
+  const maxY = Math.max(height - radius, minY);
+  const x = clamp(minX + rng() * Math.max(maxX - minX, radius), minX, maxX);
+  const y = clamp(minY + rng() * Math.max(maxY - minY, radius), minY, maxY);
   const vx = (rng() - 0.5) * 0.02 * width * 0.001;
   const vy = (rng() - 0.5) * 0.02 * height * 0.001;
   return {

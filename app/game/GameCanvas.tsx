@@ -50,12 +50,29 @@ type AmbientDot = {
   phase: number;
 };
 
+type Flash = {
+  color: string;
+  life: number;
+  maxLife: number;
+};
+
+type TrailGlow = {
+  x: number;
+  y: number;
+  life: number;
+  maxLife: number;
+  intensity: number;
+};
+
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const particlePoolRef = useRef<Particle[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
+  const flashesRef = useRef<Flash[]>([]);
+  const trailGlowsRef = useRef<TrailGlow[]>([]);
+  const slowHighlightUntilRef = useRef(0);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
   const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
@@ -254,6 +271,65 @@ export default function GameCanvas() {
         vignette.addColorStop(1, 'rgba(15,23,42,0.65)');
         ctx.fillStyle = vignette;
         ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+      }
+
+      if (!prefersReducedMotion.current) {
+        const highlightRemaining = Math.max(0, slowHighlightUntilRef.current - now);
+        if (highlightRemaining > 0) {
+          const strength = Math.min(1, highlightRemaining / 260);
+          ctx.save();
+          ctx.globalAlpha = 0.18 * strength;
+          ctx.fillStyle = 'rgba(56,189,248,0.7)';
+          ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+          ctx.restore();
+        }
+
+        const flashes = flashesRef.current;
+        const flashNext: Flash[] = [];
+        for (const flash of flashes) {
+          flash.life -= dt;
+          if (flash.life <= 0) {
+            continue;
+          }
+          const progress = 1 - flash.life / flash.maxLife;
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, 0.32 - progress * 0.26);
+          ctx.fillStyle = flash.color;
+          ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+          ctx.restore();
+          flashNext.push(flash);
+        }
+        flashesRef.current = flashNext;
+
+        const trails = trailGlowsRef.current;
+        const trailNext: TrailGlow[] = [];
+        for (const trail of trails) {
+          trail.life -= dt;
+          if (trail.life <= 0) {
+            continue;
+          }
+          const lifeProgress = 1 - trail.life / trail.maxLife;
+          const alpha = Math.max(0, 0.28 - lifeProgress * 0.22);
+          const radius = 70 + trail.intensity * 140 + lifeProgress * 40;
+          const gradient = ctx.createRadialGradient(trail.x, trail.y, radius * 0.25, trail.x, trail.y, radius);
+          gradient.addColorStop(0, `rgba(148,232,255,${0.38 * (trail.intensity + 0.4)})`);
+          gradient.addColorStop(1, 'rgba(15,23,42,0)');
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.arc(trail.x, trail.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          trailNext.push(trail);
+        }
+        trailGlowsRef.current = trailNext.slice(0, 12);
+      } else {
+        flashesRef.current = [];
+        trailGlowsRef.current = [];
+        if (slowHighlightUntilRef.current > now) {
+          slowHighlightUntilRef.current = now;
+        }
       }
 
       const allowAmbient = !prefersReducedMotion.current && !playingPhase;
@@ -586,6 +662,31 @@ export default function GameCanvas() {
       }
     };
 
+    const pushFlash = (color: string, duration = 180) => {
+      if (prefersReducedMotion.current) return;
+      const entry: Flash = { color, life: duration, maxLife: duration };
+      flashesRef.current.unshift(entry);
+      if (flashesRef.current.length > 6) {
+        flashesRef.current.length = 6;
+      }
+    };
+
+    const pushTrailGlow = (x: number, y: number, comboLevel: number) => {
+      if (prefersReducedMotion.current) return;
+      const intensity = Math.min(1, Math.max(0, comboLevel) / 14);
+      const life = 320 + intensity * 220;
+      trailGlowsRef.current.unshift({ x, y, life, maxLife: life, intensity });
+      if (trailGlowsRef.current.length > 12) {
+        trailGlowsRef.current.length = 12;
+      }
+    };
+
+    const triggerSlowHighlight = () => {
+      if (prefersReducedMotion.current) return;
+      const stateNow = useGameStore.getState().now;
+      slowHighlightUntilRef.current = Math.max(slowHighlightUntilRef.current, stateNow + 260);
+    };
+
     const pushRipple = (ripple: Ripple) => {
       ripplesRef.current.unshift(ripple);
       if (ripplesRef.current.length > 10) {
@@ -596,7 +697,7 @@ export default function GameCanvas() {
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
+        vibrate([0, 24, 16, 28]);
         if (allowSound) {
           playTapChime({ pitch: result.golden ? 840 : 560 });
         }
@@ -605,8 +706,13 @@ export default function GameCanvas() {
             ? 'rgba(248,113,113,0.45)'
             : 'rgba(253,224,71,0.45)'
           : 'rgba(56,189,248,0.45)';
-        const maxRadius = Math.max(result.radius ?? 200, 140);
+        const maxRadius = Math.max(result.radius ?? 220, 160);
         pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
+        pushFlash(result.golden ? 'rgba(253,224,71,0.2)' : 'rgba(148,232,255,0.16)', 200);
+        pushTrailGlow(x, y, result.combo ?? 0);
+        if ((result.combo ?? 0) >= 10) {
+          triggerSlowHighlight();
+        }
         if (!prefersReducedMotion.current) {
           burstShakeRef.current = Math.max(burstShakeRef.current, result.hit ? 14 : 8);
         }
@@ -641,7 +747,7 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
+        vibrate(22);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,7 +755,7 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        vibrate(result.goldenToxic ? 26 : 24);
         if (allowSound) {
           playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
         }
@@ -657,6 +763,11 @@ export default function GameCanvas() {
         spawnParticle({ x, y, radius: 14, life: 520, color, vy: -0.06, gravity: 0.0012 });
         const rippleColor = result.goldenToxic ? 'rgba(248,113,113,0.45)' : 'rgba(253,224,71,0.45)';
         pushRipple({ x, y, progress: 0, maxRadius: 160, color: rippleColor });
+        pushFlash(result.goldenToxic ? 'rgba(248,113,113,0.18)' : 'rgba(253,224,71,0.18)', 180);
+        pushTrailGlow(x, y, result.combo ?? 0);
+        if ((result.combo ?? 0) >= 10) {
+          triggerSlowHighlight();
+        }
         if (!prefersReducedMotion.current && !result.goldenToxic) {
           burstShakeRef.current = Math.max(burstShakeRef.current, 6);
         }
@@ -668,11 +779,11 @@ export default function GameCanvas() {
       }
 
       if (result.drain) {
-        vibrate(25);
+        vibrate(22);
       } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
+        vibrate(24);
       } else {
-        vibrate(8);
+        vibrate(20);
       }
 
       const color = result.energy
@@ -702,10 +813,15 @@ export default function GameCanvas() {
       }
 
       if (result.perfect && !prefersReducedMotion.current) {
-        const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
-        const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
+        const rippleColor = result.targetHit ? 'rgba(56,189,248,0.5)' : 'rgba(148,232,255,0.45)';
+        const maxRadius = Math.max(result.radius ?? 36, 28) * 3.1;
         pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
       }
+      pushTrailGlow(x, y, result.combo ?? 0);
+      if ((result.combo ?? 0) >= 10) {
+        triggerSlowHighlight();
+      }
+      pushFlash(result.perfect ? 'rgba(148,232,255,0.14)' : 'rgba(56,189,248,0.1)', 150);
       if (sparkleEnabled && result.perfect) {
         for (let index = 0; index < 4; index += 1) {
           const angle = Math.random() * Math.PI * 2;

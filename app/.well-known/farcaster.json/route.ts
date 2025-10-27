@@ -41,10 +41,10 @@ export async function GET(request: Request) {
 
   const miniapp = {
     version: '1',
-    name: 'Rubble (Bubble Hunt)',
-    subtitle: 'Tap • Combo • Boost on Base',
+    name: "Bubble’it!",
+    subtitle: 'Happy taps • Base boosts • Cheeky combos',
     description:
-      'Tap bubbles, rack combos, and trigger Base boosts to freeze time on-chain.',
+      'Pop energetic bubbles, chain neon combos, and trigger Base boosts for slow-motion highlights.',
     homeUrl: origin,
     iconUrl: `${origin}/game-icons/icon.png`,
     splashImageUrl: `${origin}/game-icons/splash.png`,

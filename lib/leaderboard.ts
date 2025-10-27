@@ -42,7 +42,7 @@ function readBoard(board: BoardKind): LeaderboardEntry[] {
       )
       .slice(0, 10);
   } catch (error) {
-    console.warn('[Rubble] Failed to read leaderboard', error);
+    console.warn("[Bubble’it!] Failed to read leaderboard", error);
     return [];
   }
 }
@@ -54,7 +54,7 @@ function writeBoard(board: BoardKind, entries: LeaderboardEntry[]) {
   try {
     window.localStorage.setItem(storageKey(board), JSON.stringify(entries.slice(0, 10)));
   } catch (error) {
-    console.warn('[Rubble] Failed to persist leaderboard', error);
+    console.warn("[Bubble’it!] Failed to persist leaderboard", error);
   }
 }
 
