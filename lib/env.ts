@@ -7,6 +7,7 @@ const evmAddress = z
 const integerString = z
   .string()
   .regex(/^\d+$/u, 'Expected a non-negative integer string');
+const optionalIntegerString = integerString.optional();
 const relativeOrAbsolute = z
   .string()
   .min(1, 'Expected a non-empty string')
@@ -36,6 +37,18 @@ const rawEnv = {
     process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
     process.env.MIN_PRICE_WEI ??
     '1',
+  NEXT_PUBLIC_PRICE_WEI_BOOST:
+    process.env.NEXT_PUBLIC_PRICE_WEI_BOOST ??
+    process.env.PRICE_WEI_BOOST ??
+    undefined,
+  NEXT_PUBLIC_PRICE_WEI_COMBO:
+    process.env.NEXT_PUBLIC_PRICE_WEI_COMBO ??
+    process.env.PRICE_WEI_COMBO ??
+    undefined,
+  NEXT_PUBLIC_PRICE_WEI_RETRY:
+    process.env.NEXT_PUBLIC_PRICE_WEI_RETRY ??
+    process.env.PRICE_WEI_RETRY ??
+    undefined,
   BASE_RPC_URL:
     process.env.BASE_RPC_URL ??
     process.env.NEXT_PUBLIC_BASE_RPC_URL ??
@@ -46,6 +59,18 @@ const rawEnv = {
     process.env.MIN_PRICE_WEI ??
     process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
     '1',
+  PRICE_WEI_BOOST:
+    process.env.PRICE_WEI_BOOST ??
+    process.env.NEXT_PUBLIC_PRICE_WEI_BOOST ??
+    undefined,
+  PRICE_WEI_COMBO:
+    process.env.PRICE_WEI_COMBO ??
+    process.env.NEXT_PUBLIC_PRICE_WEI_COMBO ??
+    undefined,
+  PRICE_WEI_RETRY:
+    process.env.PRICE_WEI_RETRY ??
+    process.env.NEXT_PUBLIC_PRICE_WEI_RETRY ??
+    undefined,
   FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE,
@@ -66,9 +91,15 @@ const EnvSchema = z
     NEXT_PUBLIC_WEBHOOK_URL: relativeOrAbsolute,
     NEXT_PUBLIC_BASE_RPC_URL: url,
     NEXT_PUBLIC_MIN_PRICE_WEI: integerString,
+    NEXT_PUBLIC_PRICE_WEI_BOOST: optionalIntegerString,
+    NEXT_PUBLIC_PRICE_WEI_COMBO: optionalIntegerString,
+    NEXT_PUBLIC_PRICE_WEI_RETRY: optionalIntegerString,
     BASE_RPC_URL: url,
     PAY_TO_ADDRESS: evmAddress,
     MIN_PRICE_WEI: integerString,
+    PRICE_WEI_BOOST: optionalIntegerString,
+    PRICE_WEI_COMBO: optionalIntegerString,
+    PRICE_WEI_RETRY: optionalIntegerString,
     FARCASTER_ACCOUNT_HEADER: optionalString,
     FARCASTER_ACCOUNT_PAYLOAD: optionalString,
     FARCASTER_ACCOUNT_SIGNATURE: optionalString,
@@ -117,6 +148,39 @@ const MIN_PRICE_WEI = BigInt(parsed.MIN_PRICE_WEI);
 const NEXT_PUBLIC_MIN_PRICE_WEI =
   parsed.NEXT_PUBLIC_MIN_PRICE_WEI ?? parsed.MIN_PRICE_WEI;
 
+const PRICE_CAP_MULTIPLIER = 5n;
+
+function clampPrice(value: bigint) {
+  const min = MIN_PRICE_WEI > 0n ? MIN_PRICE_WEI : 1n;
+  const capBase = MIN_PRICE_WEI > 0n ? MIN_PRICE_WEI : 1n;
+  const cap = capBase * PRICE_CAP_MULTIPLIER;
+  let next = value < min ? min : value;
+  if (cap > 0n && next > cap) {
+    next = cap;
+  }
+  return next;
+}
+
+function parsePrice(value: string | undefined, fallback: bigint) {
+  if (!value) {
+    return clampPrice(fallback);
+  }
+  try {
+    const parsedValue = BigInt(value);
+    return clampPrice(parsedValue);
+  } catch {
+    return clampPrice(fallback);
+  }
+}
+
+const fallbackBoost = MIN_PRICE_WEI > 0n ? MIN_PRICE_WEI : 1_000_000_000_000n;
+const fallbackCombo = fallbackBoost * 2n;
+const fallbackRetry = fallbackBoost * 3n;
+
+const PRICE_WEI_BOOST = parsePrice(parsed.PRICE_WEI_BOOST, fallbackBoost);
+const PRICE_WEI_COMBO = parsePrice(parsed.PRICE_WEI_COMBO, fallbackCombo);
+const PRICE_WEI_RETRY = parsePrice(parsed.PRICE_WEI_RETRY, fallbackRetry);
+
 const modeBEnabled = Boolean(
   parsed.PAYMENTS_API_BASE &&
   parsed.PAYMENTS_API_KEY_ID &&
@@ -129,6 +193,9 @@ export const ENV = {
   PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
   MIN_PRICE_WEI,
   MIN_PRICE_WEI_RAW: parsed.MIN_PRICE_WEI,
+  PRICE_WEI_BOOST,
+  PRICE_WEI_COMBO,
+  PRICE_WEI_RETRY,
   FARCASTER_ACCOUNT_HEADER: parsed.FARCASTER_ACCOUNT_HEADER,
   FARCASTER_ACCOUNT_PAYLOAD: parsed.FARCASTER_ACCOUNT_PAYLOAD,
   FARCASTER_ACCOUNT_SIGNATURE: parsed.FARCASTER_ACCOUNT_SIGNATURE,
@@ -144,6 +211,9 @@ export const ENV = {
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
   NEXT_PUBLIC_MIN_PRICE_WEI,
+  NEXT_PUBLIC_PRICE_WEI_BOOST: PRICE_WEI_BOOST.toString(),
+  NEXT_PUBLIC_PRICE_WEI_COMBO: PRICE_WEI_COMBO.toString(),
+  NEXT_PUBLIC_PRICE_WEI_RETRY: PRICE_WEI_RETRY.toString(),
 } as const;
 
 export const PUBLIC_ENV = {
@@ -151,6 +221,9 @@ export const PUBLIC_ENV = {
   NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
   NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
   NEXT_PUBLIC_MIN_PRICE_WEI,
+  NEXT_PUBLIC_PRICE_WEI_BOOST: PRICE_WEI_BOOST.toString(),
+  NEXT_PUBLIC_PRICE_WEI_COMBO: PRICE_WEI_COMBO.toString(),
+  NEXT_PUBLIC_PRICE_WEI_RETRY: PRICE_WEI_RETRY.toString(),
   PAYMENTS_MODE_B_ENABLED: modeBEnabled ? '1' : '0',
 } as const;
 
