@@ -1,8 +1,19 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore, type TapResult } from '@/lib/store';
 import { playTapChime } from '@/lib/audio';
+
+type Stats = {
+  cssW: number;
+  cssH: number;
+  bufW: number;
+  bufH: number;
+  dpr: number;
+  fps: number;
+  bubbles: number;
+};
 
 const COLOR_MAP = {
   yellow: '#facc15',
@@ -50,7 +61,11 @@ type AmbientDot = {
   phase: number;
 };
 
-export default function GameCanvas() {
+type GameCanvasProps = {
+  children?: ReactNode;
+};
+
+export default function GameCanvas({ children }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
@@ -62,8 +77,9 @@ export default function GameCanvas() {
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
   const ambientDotsRef = useRef<AmbientDot[]>([]);
-  const [frameStats, setFrameStats] = useState({ width: 0, height: 0, dpr: 1, bubbles: 0 });
-  const statsRef = useRef(frameStats);
+  const statsRef = useRef<Stats>({ cssW: 0, cssH: 0, bufW: 0, bufH: 0, dpr: 1, fps: 0, bubbles: 0 });
+  const [, force] = useState({});
+  const diagOn = typeof window !== 'undefined' && localStorage.getItem('rubble:diag') === 'true';
   if (ambientDotsRef.current.length === 0) {
     ambientDotsRef.current = Array.from({ length: 18 }, () => ({
       x: Math.random(),
@@ -73,10 +89,6 @@ export default function GameCanvas() {
       phase: Math.random() * Math.PI * 2,
     }));
   }
-
-  useEffect(() => {
-    statsRef.current = frameStats;
-  }, [frameStats]);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
@@ -127,11 +139,15 @@ export default function GameCanvas() {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gameSizeRef.current = { w: cssW, h: cssH, dpr };
-      setFrameStats((prev) =>
-        prev.width !== cssW || prev.height !== cssH || prev.dpr !== dpr
-          ? { ...prev, width: cssW, height: cssH, dpr }
-          : prev
-      );
+      const stats = statsRef.current;
+      stats.cssW = cssW;
+      stats.cssH = cssH;
+      stats.bufW = canvas.width;
+      stats.bufH = canvas.height;
+      stats.dpr = dpr;
+      if (diagOn) {
+        force({});
+      }
       setStageSize(cssW, cssH);
     };
 
@@ -163,13 +179,14 @@ export default function GameCanvas() {
     let frameHandle: number;
 
     const render = (dt: number) => {
+      const statsData = statsRef.current;
+      const instFps = 1000 / Math.max(dt, 1);
+      statsData.fps = statsData.fps ? statsData.fps * 0.9 + instFps * 0.1 : instFps;
       const state = useGameStore.getState();
       const { bubbles, stats, slowTimeUntil, now, phase, burst, burstPointer, golden, hazards } = state;
       const bubbleCount = bubbles.length;
-      if (statsRef.current.bubbles !== bubbleCount) {
-        setFrameStats((prev) =>
-          prev.bubbles !== bubbleCount ? { ...prev, bubbles: bubbleCount } : prev
-        );
+      if (statsData.bubbles !== bubbleCount) {
+        statsData.bubbles = bubbleCount;
       }
       const size = gameSizeRef.current;
       const measuredWidth = size.w || state.width || canvas.clientWidth || 1;
@@ -431,6 +448,10 @@ export default function GameCanvas() {
         ctx.fill();
       }
 
+      if (diagOn) {
+        force({});
+      }
+
       ctx.restore();
     };
 
@@ -470,7 +491,7 @@ export default function GameCanvas() {
       window.removeEventListener('orientationchange', handleViewportResize);
       window.cancelAnimationFrame(frameHandle);
     };
-  }, [setStageSize]);
+  }, [setStageSize, diagOn, force]);
 
   useEffect(() => {
     if (phase === 'home') {
@@ -775,25 +796,14 @@ export default function GameCanvas() {
   }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
 
   return (
-    <div ref={frameRef} className="relative h-full w-full">
+    <div className="app-frame__inner" ref={frameRef} aria-label="Gameplay area">
       <canvas ref={canvasRef} className="app-canvas" />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 8,
-          background: 'rgba(0,0,0,0.55)',
-          color: '#4ade80',
-          fontSize: 10,
-          padding: '4px 6px',
-          borderRadius: 4,
-          zIndex: 99,
-          fontFamily: 'monospace',
-          pointerEvents: 'none',
-        }}
-      >
-        w:{Math.round(frameStats.width)} h:{Math.round(frameStats.height)} DPR:
-        {frameStats.dpr.toFixed(2)} bubbles:{frameStats.bubbles}
+      <div className="app-hud">{children}</div>
+      <div className={`rbl-diag ${diagOn ? 'rbl-diag--on' : ''}`} role="status" aria-live="polite">
+        {diagOn
+          ? `DPR ${statsRef.current.dpr.toFixed(2)} | CSS ${statsRef.current.cssW.toFixed(0)}×${statsRef.current.cssH.toFixed(0)}
+BUF ${statsRef.current.bufW}×${statsRef.current.bufH} | FPS ${statsRef.current.fps.toFixed(1)} | BUB ${statsRef.current.bubbles}`
+          : ''}
       </div>
     </div>
   );
