@@ -678,6 +678,9 @@ export const useGameStore = create<GameStore>((set, get) => {
         if (allowComboContribution && chainLen >= 3 && now - lastComboFrame > 16) {
           stats.bestCombo = Math.max(stats.bestCombo, chainLen);
           get().progressCombo(chainLen);
+          if (chainLen % 5 === 0) {
+            get().activateSlowTime(260);
+          }
           lastComboFrame = now;
         }
         get().progressColor(bubble.color);
