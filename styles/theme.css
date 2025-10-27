@@ -1,0 +1,71 @@
+:root {
+  --bg-gradient: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.35), transparent 55%),
+    radial-gradient(circle at 80% 10%, rgba(147, 197, 253, 0.4), transparent 60%),
+    radial-gradient(circle at 50% 85%, rgba(14, 116, 144, 0.5), transparent 70%),
+    #020617;
+  --primary-glow: rgba(56, 189, 248, 0.4);
+  --accent-color: #38bdf8;
+  --accent-strong: #7dd3fc;
+  --button-surface: rgba(8, 23, 42, 0.65);
+  --button-border: rgba(125, 211, 252, 0.6);
+  --button-text: #e0f2fe;
+  --button-shadow: 0 18px 48px rgba(15, 118, 176, 0.38);
+  --surface-bg: rgba(3, 7, 18, 0.72);
+  --surface-border: rgba(148, 163, 184, 0.22);
+  --hud-surface: rgba(6, 12, 24, 0.72);
+  --hud-border: rgba(148, 197, 253, 0.28);
+  --hud-text: #e2f4ff;
+  --bubble-highlight: rgba(125, 211, 252, 0.45);
+  --bubble-ambient: rgba(14, 165, 233, 0.08);
+  --screen-glow: 0 40px 120px rgba(14, 165, 233, 0.25);
+  --mascot-bg: linear-gradient(135deg, rgba(56, 189, 248, 0.3), rgba(14, 165, 233, 0.6));
+  --mascot-border: rgba(125, 211, 252, 0.6);
+}
+
+.theme-ocean {
+  --bg-gradient: radial-gradient(circle at 22% 14%, rgba(30, 64, 175, 0.55), transparent 60%),
+    radial-gradient(circle at 78% 12%, rgba(56, 189, 248, 0.48), transparent 64%),
+    radial-gradient(circle at 50% 88%, rgba(13, 148, 136, 0.5), transparent 70%),
+    linear-gradient(180deg, #001427, #021b36 65%, #041024);
+  --primary-glow: rgba(56, 189, 248, 0.6);
+  --accent-color: #38bdf8;
+  --accent-strong: #a5f3fc;
+  --button-surface: rgba(2, 24, 45, 0.68);
+  --button-border: rgba(125, 211, 252, 0.55);
+  --button-text: #e0faff;
+  --button-shadow: 0 24px 60px rgba(21, 94, 117, 0.55);
+  --surface-bg: rgba(2, 18, 35, 0.78);
+  --surface-border: rgba(148, 197, 253, 0.35);
+  --hud-surface: rgba(4, 18, 33, 0.82);
+  --hud-border: rgba(165, 243, 252, 0.35);
+  --hud-text: #dcf3ff;
+  --bubble-highlight: rgba(125, 211, 252, 0.55);
+  --bubble-ambient: rgba(56, 189, 248, 0.12);
+  --screen-glow: 0 50px 140px rgba(14, 165, 233, 0.28);
+  --mascot-bg: linear-gradient(140deg, rgba(56, 189, 248, 0.45), rgba(59, 130, 246, 0.75));
+  --mascot-border: rgba(148, 197, 253, 0.6);
+}
+
+.theme-neon {
+  --bg-gradient: radial-gradient(circle at 18% 12%, rgba(168, 85, 247, 0.52), transparent 60%),
+    radial-gradient(circle at 80% 18%, rgba(236, 72, 153, 0.6), transparent 62%),
+    radial-gradient(circle at 52% 85%, rgba(59, 130, 246, 0.38), transparent 70%),
+    linear-gradient(180deg, #12021d, #22042f 65%, #100020);
+  --primary-glow: rgba(236, 72, 153, 0.55);
+  --accent-color: #f472b6;
+  --accent-strong: #f9a8d4;
+  --button-surface: rgba(32, 8, 56, 0.72);
+  --button-border: rgba(244, 114, 182, 0.58);
+  --button-text: #fde4ff;
+  --button-shadow: 0 26px 70px rgba(157, 23, 77, 0.5);
+  --surface-bg: rgba(29, 5, 41, 0.8);
+  --surface-border: rgba(233, 213, 255, 0.28);
+  --hud-surface: rgba(32, 6, 46, 0.84);
+  --hud-border: rgba(233, 213, 255, 0.35);
+  --hud-text: #fbe9ff;
+  --bubble-highlight: rgba(244, 114, 182, 0.52);
+  --bubble-ambient: rgba(233, 213, 255, 0.12);
+  --screen-glow: 0 60px 160px rgba(168, 85, 247, 0.32);
+  --mascot-bg: linear-gradient(150deg, rgba(168, 85, 247, 0.5), rgba(236, 72, 153, 0.75));
+  --mascot-border: rgba(244, 114, 182, 0.6);
+}
