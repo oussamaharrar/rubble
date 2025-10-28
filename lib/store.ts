@@ -56,6 +56,9 @@ const EASE_DURATION_MS = 8_000;
 const SPAWN_EXCLUSION_RADIUS = 72;
 const SPAWN_MEMORY = 14;
 const MAX_ACTIVE_HAZARDS = 6;
+const SAFE_ZONE_TOP_FRAC = 0.12;
+const SAFE_ZONE_SIDE_FRAC = 0.08;
+const SAFE_ZONE_PADDING = 12;
 
 const DEFAULT_PALETTE: BubbleColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
 
@@ -324,6 +327,17 @@ function spawnFromEdge(
       break;
     }
   }
+  const sideMargin = Math.max(radius + SAFE_ZONE_PADDING, width * SAFE_ZONE_SIDE_FRAC);
+  const topMargin = Math.max(radius + SAFE_ZONE_PADDING, height * SAFE_ZONE_TOP_FRAC);
+  const minX = Math.min(width - radius, Math.max(radius, sideMargin));
+  const maxX = Math.max(minX, width - Math.max(radius, sideMargin));
+  const minY = Math.min(height - radius, Math.max(radius, topMargin));
+  const maxY = Math.max(minY, height - radius);
+  if (edge === 'top') {
+    x = Math.min(Math.max(x, minX), maxX);
+  } else {
+    y = Math.min(Math.max(y, minY), maxY);
+  }
   return { x, y, vx, vy };
 }
 
@@ -404,8 +418,12 @@ function createPoisonCloud(
   now: number
 ): Hazard {
   const radius = 60 + rng() * 22;
-  const x = radius + rng() * Math.max(width - radius * 2, radius);
-  const y = radius + rng() * Math.max(height - radius * 2, radius);
+  const marginX = Math.max(radius + SAFE_ZONE_PADDING, width * SAFE_ZONE_SIDE_FRAC);
+  const marginY = Math.max(radius + SAFE_ZONE_PADDING, height * SAFE_ZONE_TOP_FRAC);
+  const availableWidth = Math.max(radius, width - marginX * 2);
+  const availableHeight = Math.max(radius, height - marginY * 2);
+  const x = marginX + rng() * availableWidth;
+  const y = marginY + rng() * availableHeight;
   const vx = (rng() - 0.5) * 0.02 * width * 0.001;
   const vy = (rng() - 0.5) * 0.02 * height * 0.001;
   return {
@@ -639,6 +657,9 @@ export const useGameStore = create<GameStore>((set, get) => {
         stats.lastColor = bubble.color;
         const baseWindow = now + COMBO_WINDOW_MS;
         comboWindowUntil = baseWindow;
+        if (chainLen >= 10 && chainLen % 10 === 0) {
+          get().activateSlowTime(260);
+        }
       } else {
         chainLen = Math.max(stats.chainLen, 1);
       }
@@ -828,8 +849,8 @@ export const useGameStore = create<GameStore>((set, get) => {
     const radius = state.golden.r;
     const width = state.width;
     const height = state.height;
-    const marginX = Math.max(radius + 24, width * 0.08);
-    const marginY = Math.max(radius + 24, height * 0.08);
+    const marginX = Math.max(radius + 24, width * SAFE_ZONE_SIDE_FRAC);
+    const marginY = Math.max(radius + 24, height * SAFE_ZONE_TOP_FRAC);
     const maxWidth = Math.max(width - marginX * 2, radius);
     const maxHeight = Math.max(height - marginY * 2, radius);
     const rng = state.rng;

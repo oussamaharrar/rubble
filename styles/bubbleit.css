@@ -1,0 +1,152 @@
+@keyframes bubbleit-gradient-pulse {
+  0% {
+    transform: scale(1);
+    filter: saturate(1);
+  }
+  50% {
+    transform: scale(1.03);
+    filter: saturate(1.1);
+  }
+  100% {
+    transform: scale(1);
+    filter: saturate(1);
+  }
+}
+
+@keyframes bubbleit-sparkle-float {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.9);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.6;
+  }
+  80% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translate3d(0, -18px, 0) scale(1.05);
+    opacity: 0;
+  }
+}
+
+@keyframes bubbleit-drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -16px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes bubbleit-tilt {
+  0% {
+    transform: rotate(-1.5deg);
+  }
+  50% {
+    transform: rotate(1.5deg);
+  }
+  100% {
+    transform: rotate(-1.5deg);
+  }
+}
+
+@keyframes bubbleit-splash {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+}
+
+.bubbleit-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.bubbleit-bg::before,
+.bubbleit-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 32px;
+  opacity: 0.9;
+}
+
+.bubbleit-bg::before {
+  background: radial-gradient(circle at 20% 15%, rgba(255, 255, 255, 0.12), transparent 55%),
+    radial-gradient(circle at 80% 30%, rgba(255, 255, 255, 0.18), transparent 60%);
+  animation: bubbleit-gradient-pulse 8s ease-in-out infinite;
+}
+
+.bubbleit-bg::after {
+  background: radial-gradient(circle at 50% 85%, rgba(255, 255, 255, 0.22), transparent 65%);
+  mix-blend-mode: screen;
+  animation: bubbleit-drift 12s ease-in-out infinite;
+}
+
+.bubbleit-bubble-field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bubbleit-bubble {
+  position: absolute;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
+  filter: blur(0.4px);
+  opacity: 0.75;
+  animation: bubbleit-drift calc(10s + var(--bubble-delay) * 1s) ease-in-out infinite;
+}
+
+.bubbleit-sparkle {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0) 80%);
+  animation: bubbleit-sparkle-float calc(2.8s + var(--sparkle-delay) * 0.6s) ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.6));
+}
+
+.bubbleit-mascot {
+  animation: bubbleit-drift 4.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.bubbleit-mascot--wink {
+  animation: bubbleit-drift 4.6s ease-in-out infinite, bubbleit-tilt 2.6s ease-in-out infinite;
+}
+
+.bubbleit-mascot__splash {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: bubbleit-splash 640ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubbleit-bg::before,
+  .bubbleit-bg::after,
+  .bubbleit-bubble,
+  .bubbleit-sparkle,
+  .bubbleit-mascot,
+  .bubbleit-mascot--wink,
+  .bubbleit-mascot__splash {
+    animation: none !important;
+  }
+}
