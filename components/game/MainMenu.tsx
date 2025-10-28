@@ -39,11 +39,11 @@ export default function MainMenu({ onPlay, onConnectWallet, walletAddress, boost
     <div className="flex h-full flex-col gap-6 overflow-y-auto bg-gradient-to-b from-midnight/60 via-midnight/40 to-midnight/80 p-6 text-sky-50">
       <div className="flex items-center justify-between rounded-3xl border border-sky-500/20 bg-slate-900/50 px-5 py-4 shadow-[0_20px_80px_rgba(14,165,233,0.18)]">
         <div>
-          <p className="neon-chip mb-2">Rubble: Bubble Hunt Evolution</p>
+          <p className="neon-chip mb-2">Bubble’it! arcade deck</p>
           <h1 className="text-2xl font-semibold text-sky-100">Bubble Hunter HQ</h1>
-          <p className="text-sm text-slate-200/80">Tap in sync, chain colors, climb to the Rubble Crown.</p>
+          <p className="text-sm text-slate-200/80">Tap in sync, chain colors, and climb toward the Bubble’it! Crown.</p>
         </div>
-        <Image src="/game-icons/icon.png" alt="Rubble logo" width={72} height={72} className="drop-shadow-glow" />
+        <Image src="/game-icons/icon.png" alt="Bubble’it! logo" width={72} height={72} className="drop-shadow-glow" />
       </div>
 
       <div className="grid gap-4">
@@ -113,7 +113,7 @@ export default function MainMenu({ onPlay, onConnectWallet, walletAddress, boost
                 <li><strong>Tap bubbles</strong> in rhythm. Missed taps shatter your combo.</li>
                 <li><strong>Match colors</strong> for amplified combo multipliers and neon feedback.</li>
                 <li><strong>Booster Rush</strong>: unlock power-ups via Base Pay to freeze time, magnetise, or double scores.</li>
-                <li><strong>Rubble Crown</strong> unlocks at 1,000 points—keep the streak alive!</li>
+                <li><strong>Bubble’it! Crown</strong> unlocks at 1,000 points—keep the streak alive!</li>
               </ul>
             </motion.div>
           </motion.div>

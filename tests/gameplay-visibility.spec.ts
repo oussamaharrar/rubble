@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Rubble gameplay visibility', () => {
+test.describe('Bubble’it! gameplay visibility', () => {
   test('canvas visible, sized, and HUD layered', async ({ page }) => {
     const baseUrl = process.env.BASE_URL || 'http://localhost:3000/';
     await page.addInitScript(() => {

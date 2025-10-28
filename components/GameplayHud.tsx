@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo } from 'react';
-import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
 
@@ -28,66 +27,32 @@ export default function GameplayHud({ accent, glassBg, glassBorder, onPause }: G
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div
-          className="pointer-events-auto flex flex-col gap-2 text-left"
-          style={{ color: 'rgba(255,255,255,0.82)' }}
-        >
+      <div className="flex items-start justify-between">
+        <div className="pointer-events-auto flex flex-col gap-3 text-left text-white/85">
           <div
-            className="rounded-full px-4 py-2 text-xs uppercase tracking-[0.18em]"
-            style={{
-              background: `${glassBg}`,
-              border: `1px solid ${glassBorder}`,
-              color: 'rgba(255,255,255,0.78)',
-            }}
             data-testid="hud-score"
+            className="rounded-2xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em]"
+            style={{ background: glassBg, borderColor: glassBorder }}
           >
-            <span className="text-[0.7rem] font-semibold">Score</span>
-            <span className="ml-2 text-lg font-bold" style={{ color: '#fff' }}>
-              {stats.score}
-            </span>
+            <span className="block text-[0.7rem]">Score</span>
+            <span className="text-2xl font-bold tracking-tight text-white">{stats.score}</span>
           </div>
           <div
-            className="rounded-full px-4 py-2 text-xs uppercase tracking-[0.18em]"
-            style={{
-              background: `${glassBg}`,
-              border: `1px solid ${glassBorder}`,
-              color: 'rgba(255,255,255,0.78)',
-            }}
             data-testid="hud-combo"
+            className="rounded-2xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em]"
+            style={{ background: glassBg, borderColor: glassBorder }}
           >
-            <span className="text-[0.7rem] font-semibold">Combo</span>
-            <span className="ml-2 text-lg font-bold" style={{ color: accent }}>
+            <span className="block text-[0.7rem]">Combo</span>
+            <span className="text-2xl font-bold" style={{ color: accent }}>
               {comboLabel}
             </span>
           </div>
-          <div
-            className="rounded-full px-4 py-2 text-xs uppercase tracking-[0.18em]"
-            style={{
-              background: `${glassBg}`,
-              border: `1px solid ${glassBorder}`,
-              color: 'rgba(255,255,255,0.78)',
-            }}
-            data-testid="hud-burst"
-          >
-            <span className="text-[0.7rem] font-semibold">Streak</span>
-            <span className="ml-2 text-lg font-bold" style={{ color: '#fff' }}>
-              {stats.streak}
-            </span>
-          </div>
         </div>
-        <div className="pointer-events-auto flex flex-col items-end gap-3 text-right">
+        <div className="pointer-events-auto flex flex-col items-end gap-3 text-right text-white">
           <motion.div
             data-testid="hud-timer"
-            className={clsx(
-              'rounded-full px-4 py-2 text-lg font-semibold tracking-tight',
-              'shadow-lg shadow-black/40'
-            )}
-            style={{
-              background: glassBg,
-              border: `1px solid ${glassBorder}`,
-              color: timeCritical ? accent : '#ffffff',
-            }}
+            className="rounded-2xl border px-5 py-2 text-2xl font-bold tracking-tight shadow-lg shadow-black/40"
+            style={{ background: glassBg, borderColor: glassBorder, color: timeCritical ? accent : '#ffffff' }}
             animate={timeCritical ? { scale: [1, 1.06, 1] } : { scale: 1 }}
             transition={{ duration: 0.8, repeat: timeCritical ? Infinity : 0, ease: 'easeInOut' }}
             aria-live="polite"
@@ -97,18 +62,17 @@ export default function GameplayHud({ accent, glassBg, glassBorder, onPause }: G
           <motion.button
             type="button"
             onClick={onPause}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-base font-semibold"
-            style={{
-              background: glassBg,
-              border: `1px solid ${glassBorder}`,
-              color: '#ffffff',
-            }}
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border text-base font-semibold"
+            style={{ background: glassBg, borderColor: glassBorder, color: '#ffffff' }}
             whileTap={{ scale: 0.95 }}
           >
             ⏸
           </motion.button>
         </div>
       </div>
+      <span data-testid="hud-burst" className="sr-only">
+        Streak {stats.streak}
+      </span>
     </div>
   );
 }

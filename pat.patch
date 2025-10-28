@@ -28,13 +28,13 @@ index 643886becfeb9cdffa026f761af9dc1dec355696..d3b35414b7666fe816fd3605105cf531
      version: '1',
      miniapp: {
        version: '1',
--      name: 'Rubble (Bubble Hunt)',
+-      name: 'Bubble’it! (Bubble Hunt)',
 -      subtitle: 'Tap • Combo • Boost on Base',
 -      description: 'Tap bubbles, rack combos, and trigger Base Pay boosters to slow time.',
-+      name: 'Rubble (Bubble Hunt Evolution)',
++      name: 'Bubble’it! (Bubble Hunt Evolution)',
 +      subtitle: 'Neon rhythm hunting on Base',
 +      description:
-+        'Chain neon bubbles, unlock Base Pay boosters, and chase the Rubble Crown with color combos and rush waves.',
++        'Chain neon bubbles, unlock Base Pay boosters, and chase the Bubble’it! Crown with color combos and rush waves.',
        homeUrl,
        iconUrl,
        splashImageUrl: splashUrl,
@@ -813,13 +813,13 @@ index 0000000000000000000000000000000000000000..aed11d3e4b702ab6f48c553103c927df
 +          >
 +            <motion.img
 +              src="/game-icons/crown.png"
-+              alt="Rubble Crown"
++              alt="Bubble’it! Crown"
 +              className="h-20 w-20 drop-shadow-aurora"
 +              initial={{ scale: 0.6, rotate: -12 }}
 +              animate={{ scale: 1, rotate: 0 }}
 +              transition={{ type: 'spring', stiffness: 240, damping: 18 }}
 +            />
-+            <p className="text-xl font-semibold">👑 You&apos;re the Rubble Champion!</p>
++            <p className="text-xl font-semibold">👑 You&apos;re the Bubble’it! Champion!</p>
 +          </motion.div>
 +        )}
 +      </AnimatePresence>
@@ -957,7 +957,7 @@ index 0000000000000000000000000000000000000000..d8ea1cee3112ade225929ce36a1407e9
 +      boosters={boosters}
 +      walletConnected={Boolean(walletAddress)}
 +      onBoosterTriggered={(type) => {
-+        console.log('[Rubble] Booster triggered from store', type);
++        console.log('[Bubble’it!] Booster triggered from store', type);
 +      }}
 +    />
 +  );
@@ -984,7 +984,7 @@ index 0000000000000000000000000000000000000000..d8ea1cee3112ade225929ce36a1407e9
 +              <div className="neon-chip mb-2">Base Mini</div>
 +              <motion.img
 +                src="/game-icons/icon.png"
-+                alt="Rubble logo"
++                alt="Bubble’it! logo"
 +                className="h-28 w-28 drop-shadow-glow"
 +                initial={{ opacity: 0, scale: 0.8 }}
 +                animate={{ opacity: 1, scale: 1 }}
@@ -997,7 +997,7 @@ index 0000000000000000000000000000000000000000..d8ea1cee3112ade225929ce36a1407e9
 +              transition={{ delay: 0.4 }}
 +              className="text-center text-sm text-sky-100/80"
 +            >
-+              Loading Rubble: Bubble Hunt Evolution…
++              Loading Bubble’it!: Bubble Hunt Evolution…
 +            </motion.p>
 +          </motion.div>
 +        )}
@@ -1387,31 +1387,31 @@ index 305cf18bd15fe32b721c68bdbca0f38d218a5048..e25a79da74eefa04c8ef52f5d1ec0992
  
  const description =
 -  'Tap bubbles, rack combos, and trigger Base Pay boosters in this Base mini arcade.';
-+  'Tap neon bubbles in rhythm, chain colors, unlock boosters with Base Pay, and race for the Rubble Crown.';
++  'Tap neon bubbles in rhythm, chain colors, unlock boosters with Base Pay, and race for the Bubble’it! Crown.';
  
  export const metadata: Metadata = {
--  title: 'Rubble — Bubble Hunt',
-+  title: 'Rubble — Bubble Hunt Evolution',
+-  title: 'Bubble’it! — Bubble Hunt',
++  title: 'Bubble’it! — Bubble Hunt Evolution',
    description,
    openGraph: {
--    title: 'Rubble — Bubble Hunt',
-+    title: 'Rubble — Bubble Hunt Evolution',
+-    title: 'Bubble’it! — Bubble Hunt',
++    title: 'Bubble’it! — Bubble Hunt Evolution',
      description,
      url: '/',
      type: 'website',
-     siteName: 'Rubble',
+     siteName: 'Bubble’it!',
      images: ['/game-icons/og.png'],
    },
    twitter: {
      card: 'summary_large_image',
--    title: 'Rubble — Bubble Hunt',
-+    title: 'Rubble — Bubble Hunt Evolution',
+-    title: 'Bubble’it! — Bubble Hunt',
++    title: 'Bubble’it! — Bubble Hunt Evolution',
      description,
      images: ['/game-icons/og.png'],
    },
    other: {
--    'fc:miniapp:name': 'Rubble (Bubble Hunt)',
-+    'fc:miniapp:name': 'Rubble (Bubble Hunt Evolution)',
+-    'fc:miniapp:name': 'Bubble’it! (Bubble Hunt)',
++    'fc:miniapp:name': 'Bubble’it! (Bubble Hunt Evolution)',
      'fc:miniapp:image': '/game-icons/embed.png',
      'fc:miniapp:url': '/',
      'fc:miniapp:button:text': 'Play',
@@ -1639,7 +1639,7 @@ index 91733e9ef02cac30458b8f42b1950cbff40ba0b7..20f1f921ac74bd99598e3e658bbde07e
 -      dispatchBooster(BOOSTER_DURATION_MS);
 +      setMessage(`${label} activated!`);
 +      dispatchBooster(boosterType, durationMs);
-+      console.info(`[Rubble] Booster ${boosterType} activated from session ${session.id}`);
++      console.info(`[Bubble’it!] Booster ${boosterType} activated from session ${session.id}`);
 +      onActivated?.(session.id as string);
      } catch (error) {
        const reason = error instanceof Error ? error.message : 'Payment failed';
@@ -1964,14 +1964,14 @@ index 0000000000000000000000000000000000000000..02da66e8dbf8d33277a238cdb5e6c600
 +        <div className="flex items-center justify-between">
 +          <h2 className="text-2xl font-semibold text-sky-100">Run Complete</h2>
 +          {crowned && (
-+            <Image src="/game-icons/crown.png" alt="Rubble Crown" width={60} height={60} className="drop-shadow-aurora" />
++            <Image src="/game-icons/crown.png" alt="Bubble’it! Crown" width={60} height={60} className="drop-shadow-aurora" />
 +          )}
 +        </div>
 +        <div className="grid gap-3">
 +          <div className="rounded-3xl border border-sky-400/30 bg-slate-900/60 p-4">
 +            <p className="text-sm text-sky-100/80">Score</p>
 +            <p className="text-3xl font-semibold text-sky-50">{score}</p>
-+            {crowned && <p className="text-xs uppercase tracking-[0.28em] text-amber-200/90">👑 Rubble Champion!</p>}
++            {crowned && <p className="text-xs uppercase tracking-[0.28em] text-amber-200/90">👑 Bubble’it! Champion!</p>}
 +          </div>
 +          <div className="rounded-3xl border border-indigo-400/30 bg-slate-900/60 p-4">
 +            <p className="text-sm text-indigo-100/80">Highest Combo</p>
@@ -2046,11 +2046,11 @@ index 0000000000000000000000000000000000000000..66f5c6896d5907fd98cdb5298d41dae3
 +    <div className="flex h-full flex-col gap-6 overflow-y-auto bg-gradient-to-b from-midnight/60 via-midnight/40 to-midnight/80 p-6 text-sky-50">
 +      <div className="flex items-center justify-between rounded-3xl border border-sky-500/20 bg-slate-900/50 px-5 py-4 shadow-[0_20px_80px_rgba(14,165,233,0.18)]">
 +        <div>
-+          <p className="neon-chip mb-2">Rubble: Bubble Hunt Evolution</p>
++          <p className="neon-chip mb-2">Bubble’it!: Bubble Hunt Evolution</p>
 +          <h1 className="text-2xl font-semibold text-sky-100">Bubble Hunter HQ</h1>
-+          <p className="text-sm text-slate-200/80">Tap in sync, chain colors, climb to the Rubble Crown.</p>
++          <p className="text-sm text-slate-200/80">Tap in sync, chain colors, climb to the Bubble’it! Crown.</p>
 +        </div>
-+        <Image src="/game-icons/icon.png" alt="Rubble logo" width={72} height={72} className="drop-shadow-glow" />
++        <Image src="/game-icons/icon.png" alt="Bubble’it! logo" width={72} height={72} className="drop-shadow-glow" />
 +      </div>
 +
 +      <div className="grid gap-4">
@@ -2120,7 +2120,7 @@ index 0000000000000000000000000000000000000000..66f5c6896d5907fd98cdb5298d41dae3
 +                <li><strong>Tap bubbles</strong> in rhythm. Missed taps shatter your combo.</li>
 +                <li><strong>Match colors</strong> for amplified combo multipliers and neon feedback.</li>
 +                <li><strong>Booster Rush</strong>: unlock power-ups via Base Pay to freeze time, magnetise, or double scores.</li>
-+                <li><strong>Rubble Crown</strong> unlocks at 1,000 points—keep the streak alive!</li>
++                <li><strong>Bubble’it! Crown</strong> unlocks at 1,000 points—keep the streak alive!</li>
 +              </ul>
 +            </motion.div>
 +          </motion.div>

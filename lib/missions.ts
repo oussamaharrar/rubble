@@ -61,7 +61,7 @@ export function readPersistedMissions(dateKey: string) {
     }
     return parsed.missions;
   } catch (error) {
-    console.warn('[Rubble] Failed to parse missions', error);
+    console.warn('[Bubble’it!] Failed to parse missions', error);
     return null;
   }
 }
