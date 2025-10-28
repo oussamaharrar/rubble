@@ -1,4 +1,4 @@
-export const WALLET_MODAL_EVENT = 'rubble:wallet-modal-open';
+export const WALLET_MODAL_EVENT = 'bubbleit:wallet-modal-open';
 
 export function dispatchWalletModalOpen() {
   if (typeof window === 'undefined') {

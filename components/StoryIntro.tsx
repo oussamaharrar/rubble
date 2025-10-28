@@ -32,9 +32,9 @@ export default function StoryIntro({ open, onDismiss }: StoryIntroProps) {
             <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-sky-500/20 to-amber-400/20 text-3xl text-sky-200">
               🌌
             </div>
-            <h2 className="text-2xl font-semibold text-slate-100">Rubble needs your taps</h2>
+            <h2 className="text-2xl font-semibold text-slate-100">Bubble’it! needs your taps</h2>
             <p className="mt-3 text-sm text-slate-300">
-              Fragments of the Rubble planet spiral in Base storms. Chain combos, stabilize the grid, and harvest energy orbs before the timer collapses.
+              Bubbly fragments swirl through Base storms. Chain combos, steady the grid, and soak up orbs before the timer fizzes out.
             </p>
             <p className="mt-3 text-xs uppercase tracking-wide text-slate-400">
               Tap fast. Dodge the poison. Carry the streak.

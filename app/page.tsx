@@ -1,28 +1,27 @@
 import type { Metadata } from 'next';
 import EntryExperience from '@/components/EntryExperience';
 
-const description =
-  'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
+const description = 'Pop cheeky bubbles, chain neon combos, and flex your score in Bubble’it!';
 
 export const metadata: Metadata = {
-  title: 'Rubble Rush — Daily Storm Challenge',
+  title: "Bubble’it! — Neon bubble challenge",
   description,
   openGraph: {
-    title: 'Rubble Rush — Daily Storm Challenge',
+    title: "Bubble’it! — Neon bubble challenge",
     description,
     url: '/',
     type: 'website',
-    siteName: 'Rubble',
+    siteName: "Bubble’it!",
     images: ['/game-icons/og.png'],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Rubble Rush — Daily Storm Challenge',
+    title: "Bubble’it! — Neon bubble challenge",
     description,
     images: ['/game-icons/og.png'],
   },
   other: {
-    'fc:miniapp:name': 'Rubble Rush',
+    'fc:miniapp:name': "Bubble’it!",
     'fc:miniapp:image': '/game-icons/embed.png',
     'fc:miniapp:url': '/',
     'fc:miniapp:button:text': 'Play',

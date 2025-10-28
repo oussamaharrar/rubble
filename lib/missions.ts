@@ -10,8 +10,8 @@ const COLOR_LABELS: Record<BubbleColor, string> = {
   orange: 'orange',
 };
 
-const MISSION_KEY_PREFIX = 'rubble:m:daily:';
-const BONUS_KEY_PREFIX = 'rubble:m:bonus:';
+const MISSION_KEY_PREFIX = 'bubbleit:m:daily:';
+const BONUS_KEY_PREFIX = 'bubbleit:m:bonus:';
 
 function hashString(value: string) {
   let hash = 0;
@@ -61,7 +61,7 @@ export function readPersistedMissions(dateKey: string) {
     }
     return parsed.missions;
   } catch (error) {
-    console.warn('[Rubble] Failed to parse missions', error);
+    console.warn("[Bubble’it!] Failed to parse missions", error);
     return null;
   }
 }

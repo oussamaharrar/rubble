@@ -1,10 +1,10 @@
 const globalState = globalThis as unknown as {
-  __rubbleGrantedSessions?: Set<string>;
-  __rubbleGrantedTimestamps?: Map<string, number>;
+  __bubbleitGrantedSessions?: Set<string>;
+  __bubbleitGrantedTimestamps?: Map<string, number>;
 };
 
-const grantedSessions = (globalState.__rubbleGrantedSessions ??= new Set<string>());
-const grantedTimestamps = (globalState.__rubbleGrantedTimestamps ??= new Map<string, number>());
+const grantedSessions = (globalState.__bubbleitGrantedSessions ??= new Set<string>());
+const grantedTimestamps = (globalState.__bubbleitGrantedTimestamps ??= new Map<string, number>());
 
 const GRANT_TTL_MS = 60 * 60 * 1000; // one hour
 

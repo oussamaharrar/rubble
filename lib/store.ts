@@ -36,10 +36,10 @@ const BURST_SCORE_MULTIPLIER = 0.7;
 const GOLDEN_RESPAWN_MIN_MS = 20_000;
 const GOLDEN_RESPAWN_RANGE_MS = 10_000;
 
-const BOOSTER_KEY = 'rubble:booster-bank';
-const SETTINGS_KEY = 'rubble_settings_v2';
-const UNLOCKS_KEY = 'rubble_unlocks_v1';
-const DAILY_RUN_KEY_PREFIX = 'rubble:daily-runs';
+const BOOSTER_KEY = 'bubbleit:booster-bank';
+const SETTINGS_KEY = 'bubbleit_settings_v2';
+const UNLOCKS_KEY = 'bubbleit_unlocks_v1';
+const DAILY_RUN_KEY_PREFIX = 'bubbleit:daily-runs';
 
 const BASE_MAX_BUBBLES = 40;
 const BASE_MAX_STORM_ORBS = 10;
@@ -56,6 +56,9 @@ const EASE_DURATION_MS = 8_000;
 const SPAWN_EXCLUSION_RADIUS = 72;
 const SPAWN_MEMORY = 14;
 const MAX_ACTIVE_HAZARDS = 6;
+const SAFE_TOP_RATIO = 0.12;
+const SAFE_SIDE_RATIO = 0.08;
+const SAFE_SPAWN_RETRIES = 3;
 
 const DEFAULT_PALETTE: BubbleColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
 
@@ -139,7 +142,7 @@ function persistUnlocks(unlocks: UnlockState) {
   }
 }
 
-const FIRST_RUN_KEY = 'rubble_first_run_v1';
+const FIRST_RUN_KEY = 'bubbleit_first_run_v1';
 
 function firstRunDefaults(): FirstRunProgress {
   return { tapped: false, perfect: false, burst: false };
@@ -249,7 +252,7 @@ function initialBoosterBank(): BoosterBank {
     }
     return { freeOrbs: parsed.freeOrbs, lastDailyKey: parsed.lastDailyKey };
   } catch (error) {
-    console.warn('[Rubble] Failed to parse booster bank', error);
+    console.warn("[Bubble’it!] Failed to parse booster bank", error);
     return { freeOrbs: 0, lastDailyKey: '' };
   }
 }
@@ -342,7 +345,17 @@ function createBubble(
   const radius = (options?.storm ? 20 : 24) + rng() * (options?.storm ? 12 : 18);
   const edge = chooseEdge(rng);
   let spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
-  const attempts = 4;
+  const safeLeft = Math.max(radius, width * SAFE_SIDE_RATIO + radius);
+  const safeRight = Math.max(safeLeft, Math.min(width - radius, width * (1 - SAFE_SIDE_RATIO) - radius));
+  const safeTop = Math.max(radius, height * SAFE_TOP_RATIO + radius);
+  const attempts = SAFE_SPAWN_RETRIES + 1;
+  const isSafeSpawn = (candidate: { x: number; y: number }) => {
+    const withinX = candidate.x >= safeLeft && candidate.x <= safeRight;
+    if (candidate.y < 0) {
+      return withinX;
+    }
+    return withinX && candidate.y >= safeTop;
+  };
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const nearest = recentSpawns.reduce((min, entry) => {
       const dx = entry.x - spawn.x;
@@ -350,11 +363,19 @@ function createBubble(
       const dist = Math.sqrt(dx * dx + dy * dy);
       return Math.min(min, dist);
     }, Number.POSITIVE_INFINITY);
-    if (nearest > SPAWN_EXCLUSION_RADIUS) {
+    const safe = isSafeSpawn(spawn);
+    if (nearest > SPAWN_EXCLUSION_RADIUS && safe) {
       break;
     }
-    spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+    if (attempt < attempts - 1) {
+      spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+    }
   }
+  const clampXMin = Number.isFinite(safeLeft) ? safeLeft : radius;
+  const clampXMax = Number.isFinite(safeRight) ? safeRight : width - radius;
+  const finalX = Math.min(Math.max(spawn.x, clampXMin), clampXMax);
+  const finalY = spawn.y < safeTop ? safeTop : spawn.y;
+  spawn = { ...spawn, x: finalX, y: finalY };
   const color = options?.storm
     ? options?.energy
       ? 'blue'
@@ -1642,7 +1663,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     const until = Math.max(state.slowTimeUntil, state.now) + durationMs;
     set({ slowTimeUntil: until });
   },
-  loadDaily: (seed = 'rubble-daily') => {
+  loadDaily: (seed = 'bubbleit-daily') => {
     const key = getDailyKeyUTC();
     let missions = readPersistedMissions(key);
     if (!missions) {
