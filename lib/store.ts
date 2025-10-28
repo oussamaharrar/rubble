@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { persistMissions, readPersistedMissions, generateDailyMissions, bonusStorageKey } from '@/lib/missions';
 import { deriveDailyTuning, getDailyKeyUTC, isDailyEligible, seedFromDailyKey, type DailyTuning } from '@/lib/daily';
+import { useWalletStore } from '@/lib/wallet-store';
 import type {
   BoardKind,
   Bubble,
@@ -342,6 +343,44 @@ function createBubble(
   const radius = (options?.storm ? 20 : 24) + rng() * (options?.storm ? 12 : 18);
   const edge = chooseEdge(rng);
   let spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+  const sideMargin = Math.max(width * 0.08, radius * 1.25);
+  const topMargin = Math.max(height * 0.12, radius * 1.25);
+  const safeMinX = sideMargin;
+  const safeMaxX = Math.max(safeMinX, width - sideMargin);
+  const baseSafeMaxY = height - Math.max(radius * 1.5, height * 0.06);
+  const safeMinY = Math.max(topMargin, radius * 1.25);
+  const safeMaxY = Math.max(safeMinY, baseSafeMaxY);
+  const hudHeight = Math.min(height * 0.35, 280);
+  const hudBandBottom = Math.min(height - radius, topMargin + hudHeight);
+  const leftHudWidth = Math.min(width * 0.32, 260);
+  const rightHudWidth = Math.min(width * 0.28, 220);
+  const leftHudEnd = Math.min(safeMaxX, safeMinX + leftHudWidth);
+  const rightHudStart = Math.max(safeMinX, safeMaxX - rightHudWidth);
+
+  const randomInRange = (min: number, max: number) => (max <= min ? min : min + rng() * (max - min));
+
+  if (edge === 'top') {
+    let attempts = 0;
+    let candidate = randomInRange(safeMinX, safeMaxX);
+    const overlapsHud = (value: number) =>
+      (value + radius >= safeMinX && value - radius <= leftHudEnd) ||
+      (value + radius >= rightHudStart && value - radius <= safeMaxX);
+    while (attempts < 3 && overlapsHud(candidate)) {
+      candidate = randomInRange(safeMinX, safeMaxX);
+      attempts += 1;
+    }
+    spawn.x = Math.min(Math.max(candidate, safeMinX), safeMaxX);
+  } else {
+    let attempts = 0;
+    let candidate = randomInRange(safeMinY, safeMaxY);
+    const overlapsHud = (value: number) => value + radius >= topMargin && value - radius <= hudBandBottom;
+    while (attempts < 3 && overlapsHud(candidate)) {
+      candidate = randomInRange(safeMinY, safeMaxY);
+      attempts += 1;
+    }
+    spawn.y = Math.min(Math.max(candidate, safeMinY), safeMaxY);
+  }
+
   const attempts = 4;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const nearest = recentSpawns.reduce((min, entry) => {
@@ -519,6 +558,7 @@ type GameStore = {
   firstRun: FirstRunProgress;
   lastPerfectAt: number;
   lastBurstAt: number;
+  lastComboMilestone: number;
   burst: BurstState;
   burstPointer: { x: number; y: number } | null;
   golden: GoldenOrbState;
@@ -538,6 +578,7 @@ type GameStore = {
   tap: (x: number, y: number, options?: TapOptions) => TapResult;
   grantBooster: (count: number, source?: 'energy' | 'paid' | 'mission' | 'other') => void;
   grantOrbOnPaidEntry: () => void;
+  useEntryOrb: () => boolean;
   consumeBooster: () => boolean;
   loadDaily: (seed?: string | number) => void;
   setBoardKind: (board: BoardKind) => void;
@@ -594,6 +635,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     let timeGainWindowStart = state.timeGainWindowStart;
     let timeGainAccumulated = state.timeGainAccumulated;
     let cloudPenalty = false;
+    let comboMilestone = state.lastComboMilestone;
 
     if (now - timeGainWindowStart >= 1_000) {
       timeGainWindowStart = now;
@@ -639,6 +681,9 @@ export const useGameStore = create<GameStore>((set, get) => {
         stats.lastColor = bubble.color;
         const baseWindow = now + COMBO_WINDOW_MS;
         comboWindowUntil = baseWindow;
+        if (chainLen < 10 && comboMilestone > 0) {
+          comboMilestone = Math.floor(chainLen / 10) * 10;
+        }
       } else {
         chainLen = Math.max(stats.chainLen, 1);
       }
@@ -683,6 +728,14 @@ export const useGameStore = create<GameStore>((set, get) => {
         get().progressColor(bubble.color);
       }
 
+      if (allowComboContribution && stats.chainLen >= 10) {
+        const milestone = Math.floor(stats.chainLen / 10) * 10;
+        if (milestone > comboMilestone) {
+          comboMilestone = milestone;
+          get().activateSlowTime(260);
+        }
+      }
+
       if (perfectCandidate && allowComboContribution) {
         perfect = true;
         const extendedWindow = Math.min(
@@ -716,6 +769,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       targetCelebrationUntil: celebrationUntil,
       perfectUntil,
       lastPerfectAt: perfect ? now : state.lastPerfectAt,
+      lastComboMilestone: comboMilestone,
     });
 
     if (energy) {
@@ -918,6 +972,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   firstRun: readFirstRunProgress(),
   lastPerfectAt: 0,
   lastBurstAt: 0,
+  lastComboMilestone: 0,
   burst: defaultBurstState(),
   burstPointer: null,
   golden: defaultGoldenState(),
@@ -1014,6 +1069,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       firstRun: get().firstRun,
       lastPerfectAt: 0,
       lastBurstAt: 0,
+      lastComboMilestone: 0,
       burst: burstDefaults,
       burstPointer: null,
       golden: defaultGoldenState(),
@@ -1027,6 +1083,10 @@ export const useGameStore = create<GameStore>((set, get) => {
       return;
     }
     set({ phase: 'playing', startedAt: performance.now() });
+    if (state.entryMode === 'trial') {
+      const wallet = useWalletStore.getState();
+      wallet.markTrialConsumed();
+    }
   },
   endRun: () => {
     const state = get();
@@ -1116,6 +1176,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       firstRun: get().firstRun,
       lastPerfectAt: 0,
       lastBurstAt: 0,
+      lastComboMilestone: 0,
       burst: { ...defaultBurstState(), cooldownMs: state.burst.cooldownMs, minHoldMs: state.burst.minHoldMs, maxHoldMs: state.burst.maxHoldMs },
       burstPointer: null,
       golden: defaultGoldenState(),
@@ -1622,6 +1683,19 @@ export const useGameStore = create<GameStore>((set, get) => {
   },
   grantOrbOnPaidEntry: () => {
     get().grantBooster(1, 'paid');
+  },
+  useEntryOrb: () => {
+    const state = get();
+    if (state.boosterBank.freeOrbs <= 0) {
+      return false;
+    }
+    const bank: BoosterBank = {
+      freeOrbs: state.boosterBank.freeOrbs - 1,
+      lastDailyKey: state.boosterBank.lastDailyKey,
+    };
+    persistBooster(bank);
+    set({ boosterBank: bank });
+    return true;
   },
   consumeBooster: () => {
     const state = get();
