@@ -56,6 +56,7 @@ export default function GameCanvas() {
   const particlesRef = useRef<Particle[]>([]);
   const particlePoolRef = useRef<Particle[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
+  const flashRef = useRef<{ started: number; until: number; color: string } | null>(null);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
   const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
@@ -239,6 +240,25 @@ export default function GameCanvas() {
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, measuredWidth, measuredHeight);
 
+      const flash = flashRef.current;
+      if (flash) {
+        const nowPerf = performance.now();
+        if (nowPerf >= flash.until) {
+          flashRef.current = null;
+        } else {
+          const duration = Math.max(1, flash.until - flash.started);
+          const progress = Math.max(0, Math.min(1, (nowPerf - flash.started) / duration));
+          const alpha = Math.max(0, 0.26 * (1 - progress));
+          if (alpha > 0.01) {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = flash.color;
+            ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+            ctx.restore();
+          }
+        }
+      }
+
       const slowFactor = now < slowTimeUntil ? Math.cos((now / 180) % Math.PI) : 0;
       if (slowFactor > 0) {
         const maxDim = Math.max(measuredWidth, measuredHeight);
@@ -331,8 +351,10 @@ export default function GameCanvas() {
         const fill = COLOR_MAP[bubble.color];
         ctx.beginPath();
         ctx.fillStyle = fill;
-        ctx.globalAlpha = bubble.storm ? 0.95 : 0.88;
-        ctx.shadowBlur = bubble.storm ? 35 : 16;
+        const baseAlpha = bubble.storm ? 0.95 : 0.82 + comboIntensity * 0.06;
+        ctx.globalAlpha = Math.min(1, baseAlpha);
+        const glowBoost = 14 + comboIntensity * 24;
+        ctx.shadowBlur = bubble.storm ? 35 : glowBoost;
         ctx.shadowColor = bubble.storm
           ? bubble.poison
             ? 'rgba(248,113,113,0.55)'
@@ -534,7 +556,12 @@ export default function GameCanvas() {
     const vibrate = (pattern: number | number[]) => {
       if (!allowHaptics) return;
       if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
-      navigator.vibrate(pattern);
+      const clamp = (value: number) => Math.min(Math.max(Math.round(value), 0), 40);
+      if (Array.isArray(pattern)) {
+        navigator.vibrate(pattern.map(clamp));
+      } else {
+        navigator.vibrate(clamp(pattern));
+      }
     };
 
     const spawnParticle = ({
@@ -596,9 +623,12 @@ export default function GameCanvas() {
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
+        vibrate([0, 26, 18, 32]);
         if (allowSound) {
-          playTapChime({ pitch: result.golden ? 840 : 560 });
+          playTapChime({
+            pitch: result.golden ? 840 : 560,
+            rare: result.golden && !result.goldenToxic,
+          });
         }
         const rippleColor = result.golden
           ? result.goldenToxic
@@ -607,6 +637,16 @@ export default function GameCanvas() {
           : 'rgba(56,189,248,0.45)';
         const maxRadius = Math.max(result.radius ?? 200, 140);
         pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
+        const nowPerf = performance.now();
+        flashRef.current = {
+          started: nowPerf,
+          until: nowPerf + 180,
+          color: result.golden
+            ? result.goldenToxic
+              ? 'rgba(248,113,113,0.32)'
+              : 'rgba(253,224,71,0.26)'
+            : 'rgba(148,232,255,0.24)',
+        };
         if (!prefersReducedMotion.current) {
           burstShakeRef.current = Math.max(burstShakeRef.current, result.hit ? 14 : 8);
         }
@@ -641,7 +681,7 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
+        vibrate(24);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,14 +689,24 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        const nowPerf = performance.now();
+        vibrate(result.goldenToxic ? 30 : [12, 24, 18]);
         if (allowSound) {
-          playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
+          playTapChime({
+            perfect: !result.goldenToxic,
+            pitch: result.goldenToxic ? 420 : 920,
+            rare: !result.goldenToxic,
+          });
         }
         const color = result.goldenToxic ? 'rgba(248,113,113,0.6)' : 'rgba(253,224,71,0.65)';
         spawnParticle({ x, y, radius: 14, life: 520, color, vy: -0.06, gravity: 0.0012 });
         const rippleColor = result.goldenToxic ? 'rgba(248,113,113,0.45)' : 'rgba(253,224,71,0.45)';
         pushRipple({ x, y, progress: 0, maxRadius: 160, color: rippleColor });
+        flashRef.current = {
+          started: nowPerf,
+          until: nowPerf + 150,
+          color: result.goldenToxic ? 'rgba(248,113,113,0.28)' : 'rgba(253,224,71,0.26)',
+        };
         if (!prefersReducedMotion.current && !result.goldenToxic) {
           burstShakeRef.current = Math.max(burstShakeRef.current, 6);
         }
@@ -664,15 +714,56 @@ export default function GameCanvas() {
       }
 
       if (allowSound) {
-        playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
+        playTapChime({
+          perfect: result.perfect,
+          pitch: result.drain ? 360 : undefined,
+          rare: result.energy || result.perfect,
+        });
       }
 
+      const comboStreak = result.combo ?? 0;
       if (result.drain) {
-        vibrate(25);
-      } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
+        vibrate(28);
+      } else if (result.energy || comboStreak >= 3) {
+        vibrate([14, 24, 16]);
       } else {
-        vibrate(8);
+        vibrate(22);
+      }
+
+      const nowPerf = performance.now();
+      let flashColor: string | null = null;
+      let flashDuration = 0;
+      if (result.energy || result.perfect || result.targetHit || comboStreak >= 6) {
+        flashColor = result.energy
+          ? 'rgba(56,189,248,0.28)'
+          : result.perfect
+          ? 'rgba(236,72,153,0.26)'
+          : 'rgba(148,232,255,0.22)';
+        flashDuration = 140;
+        if (!prefersReducedMotion.current) {
+          const rippleColor = result.energy
+            ? 'rgba(56,189,248,0.45)'
+            : result.perfect
+            ? 'rgba(236,72,153,0.42)'
+            : 'rgba(148,232,255,0.32)';
+          const maxRadius = Math.max(result.radius ?? 32, 24) * (result.perfect ? 3 : 2.2);
+          pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
+        }
+      } else if (comboStreak >= 3) {
+        flashColor = 'rgba(148,163,255,0.18)';
+        flashDuration = 110;
+        if (!prefersReducedMotion.current) {
+          pushRipple({
+            x,
+            y,
+            progress: 0,
+            maxRadius: Math.max(result.radius ?? 28, 22) * 1.8,
+            color: 'rgba(148,232,255,0.22)',
+          });
+        }
+      }
+      if (flashColor) {
+        flashRef.current = { started: nowPerf, until: nowPerf + flashDuration, color: flashColor };
       }
 
       const color = result.energy
