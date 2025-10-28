@@ -27,7 +27,15 @@ export default function GameplayHud({ accent, glassBg, glassBorder, onPause }: G
   const timeCritical = stats.timeLeft <= 10 && (phase === 'playing' || phase === 'storm');
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between p-4 sm:p-5">
+    <div
+      className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between"
+      style={{
+        paddingTop: 'clamp(32px, 12vh, 120px)',
+        paddingBottom: 'clamp(24px, 10vh, 96px)',
+        paddingLeft: 'clamp(16px, 8vw, 96px)',
+        paddingRight: 'clamp(16px, 8vw, 96px)',
+      }}
+    >
       <div className="flex items-start justify-between gap-4">
         <div
           className="pointer-events-auto flex flex-col gap-2 text-left"
