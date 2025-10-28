@@ -1,6 +1,6 @@
-# Rubble (Bubble Hunt)
+# Bubble’it!
 
-Rubble is a Farcaster Mini App built with Next.js 15 that brings an arcade bubble tapper to Base. It ships with a dynamic Farcaster manifest, Base payment verification endpoint, and production-ready scaffolding for Vercel deployments.
+Bubble’it! is a Farcaster Mini App built with Next.js 15 that brings a cheeky bubble tapper to Base. It ships with a dynamic Farcaster manifest, Base payment verification endpoint, and production-ready scaffolding for Vercel deployments.
 
 ## Tech stack
 
@@ -34,7 +34,7 @@ Create a `.env.local` (and mirror it to `.env.example`) with the following value
 
 | Name | Required | Description | Example |
 | --- | :---: | --- | --- |
-| `NEXT_PUBLIC_URL` | ✅ | Public base URL for the deployed mini app. | `https://rubble.example.com` |
+| `NEXT_PUBLIC_URL` | ✅ | Public base URL for the deployed mini app. | `https://bubbleit.example.com` |
 | `NEXT_PUBLIC_WEBHOOK_URL` | ✅ | Relative or absolute URL to the payment webhook (defaults to `/api/pay/webhook`). | `/api/pay/webhook` |
 | `NEXT_PUBLIC_BASE_RPC_URL` | ✅ | Coinbase Developer Platform RPC for Base (client-safe). | `https://api.developer.coinbase.com/rpc/v1/base/YOUR_KEY` |
 | `NEXT_PUBLIC_MIN_PRICE_WEI` | ✅ | Minimum payment amount exposed to the client, in wei. | `1` |

@@ -20,7 +20,7 @@ export default function HomeScreen({ onPlay, shareScore, shareBoard = 'normal', 
     <div className="home-chrome absolute inset-0 flex flex-col items-center justify-between px-6 pb-10 pt-12 text-center">
       <div className="flex w-full flex-col items-center gap-4">
         <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-sky-200">
-          Rubble Rush
+          Bubble’it!
         </span>
         <h1 className="text-3xl font-semibold text-white">Base storm mini-run</h1>
         <p className="max-w-sm text-sm text-slate-300">

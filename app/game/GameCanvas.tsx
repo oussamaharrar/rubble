@@ -42,13 +42,8 @@ interface Particle {
   gravity: number;
 }
 
-type AmbientDot = {
-  x: number;
-  y: number;
-  radius: number;
-  depth: number;
-  phase: number;
-};
+type Flash = { progress: number; strength: number; hue: number };
+type ComboTrail = { x: number; y: number; combo: number; life: number };
 
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -56,12 +51,14 @@ export default function GameCanvas() {
   const particlesRef = useRef<Particle[]>([]);
   const particlePoolRef = useRef<Particle[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
+  const flashRef = useRef<Flash[]>([]);
+  const comboTrailRef = useRef<ComboTrail[]>([]);
+  const slowMoRef = useRef(0);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
   const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
-  const ambientDotsRef = useRef<AmbientDot[]>([]);
   const [frameStats, setFrameStats] = useState({
     width: 0,
     height: 0,
@@ -73,15 +70,6 @@ export default function GameCanvas() {
   });
   const [diagOn, setDiagOn] = useState(false);
   const statsRef = useRef(frameStats);
-  if (ambientDotsRef.current.length === 0) {
-    ambientDotsRef.current = Array.from({ length: 18 }, () => ({
-      x: Math.random(),
-      y: Math.random(),
-      radius: 18 + Math.random() * 28,
-      depth: 0.25 + Math.random() * 0.75,
-      phase: Math.random() * Math.PI * 2,
-    }));
-  }
 
   useEffect(() => {
     statsRef.current = frameStats;
@@ -256,26 +244,27 @@ export default function GameCanvas() {
         ctx.fillRect(0, 0, measuredWidth, measuredHeight);
       }
 
-      const allowAmbient = !prefersReducedMotion.current && !playingPhase;
-      if (allowAmbient) {
-        const dots = ambientDotsRef.current;
-        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.08)';
-        for (const dot of dots) {
-          const offsetX = Math.sin(now / 16000 + dot.phase) * dot.depth * 36;
-          const offsetY = Math.cos(now / 18000 + dot.phase) * dot.depth * 42;
-          const x = dot.x * measuredWidth + offsetX;
-          const y = dot.y * measuredHeight + offsetY;
-          ctx.beginPath();
-          ctx.fillStyle = dotColor;
-          ctx.globalAlpha = 0.08;
-          ctx.arc(x, y, dot.radius * (0.7 + comboIntensity * 0.25), 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 1;
+      const flashes = flashRef.current;
+      if (flashes.length > 0) {
+        const remainingFlashes: Flash[] = [];
+        for (const flash of flashes) {
+          flash.progress += dt * 0.0045;
+          if (flash.progress >= 1) {
+            continue;
+          }
+          const strength = Math.max(0, 1 - flash.progress) * flash.strength;
+          ctx.save();
+          ctx.globalCompositeOperation = 'screen';
+          ctx.globalAlpha = 0.32 * strength;
+          ctx.fillStyle = `hsla(${flash.hue}, 95%, 70%, 1)`;
+          ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+          ctx.restore();
+          remainingFlashes.push(flash);
         }
+        flashRef.current = remainingFlashes;
       }
 
-      const wobble = prefersReducedMotion.current ? 0 : Math.sin(now / 420) * 4;
-      ctx.translate(0, wobble);
+      ctx.translate(0, 0);
 
       if (!prefersReducedMotion.current && burstShakeRef.current > 0) {
         const shake = burstShakeRef.current;
@@ -449,6 +438,28 @@ export default function GameCanvas() {
       }
       ripplesRef.current = rippleRemaining.slice(0, 8);
 
+      if (comboTrailRef.current.length > 0) {
+        const remainingTrails: ComboTrail[] = [];
+        for (const trail of comboTrailRef.current) {
+          trail.life -= dt;
+          if (trail.life <= 0) {
+            continue;
+          }
+          const lifeRatio = Math.max(0, trail.life / 260);
+          const comboScale = Math.min(1, trail.combo / 15);
+          const radius = 36 + Math.min(120, trail.combo * 6);
+          const gradient = ctx.createRadialGradient(trail.x, trail.y, 0, trail.x, trail.y, radius);
+          gradient.addColorStop(0, `rgba(125,242,255,${0.35 * comboScale * lifeRatio})`);
+          gradient.addColorStop(1, 'rgba(125,242,255,0)');
+          ctx.beginPath();
+          ctx.fillStyle = gradient;
+          ctx.arc(trail.x, trail.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+          remainingTrails.push(trail);
+        }
+        comboTrailRef.current = remainingTrails.slice(0, 20);
+      }
+
       if (burst.charging && burstPointer) {
         const chargeElapsed = Math.max(0, Date.now() - burst.chargeStartAt);
         const progress = Math.min(chargeElapsed / burst.maxHoldMs, 1);
@@ -481,16 +492,22 @@ export default function GameCanvas() {
       const last = lastTimeRef.current ?? time;
       const rawDt = Math.min(time - last, 48);
       lastTimeRef.current = time;
+      let effectiveDt = Math.max(0, rawDt);
+      if (!prefersReducedMotion.current && slowMoRef.current > time) {
+        effectiveDt *= 0.55;
+      } else if (slowMoRef.current && slowMoRef.current <= time) {
+        slowMoRef.current = 0;
+      }
       const state = useGameStore.getState();
       if (state.phase === 'playing' || state.phase === 'storm') {
-        let remaining = Math.max(0, rawDt);
+        let remaining = Math.max(0, effectiveDt);
         while (remaining > 0) {
           const slice = Math.min(remaining, 10);
           state.tick(slice);
           remaining -= slice;
         }
       }
-      render(rawDt);
+      render(effectiveDt);
       frameHandle = window.requestAnimationFrame(step);
     };
 
@@ -596,7 +613,7 @@ export default function GameCanvas() {
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
+        vibrate(result.golden ? 28 : 26);
         if (allowSound) {
           playTapChime({ pitch: result.golden ? 840 : 560 });
         }
@@ -609,6 +626,11 @@ export default function GameCanvas() {
         pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
         if (!prefersReducedMotion.current) {
           burstShakeRef.current = Math.max(burstShakeRef.current, result.hit ? 14 : 8);
+          const flashHue = result.golden ? (result.goldenToxic ? 10 : 52) : 198;
+          flashRef.current.unshift({ progress: 0, strength: result.golden ? 1.2 : 0.9, hue: flashHue });
+          if (flashRef.current.length > 6) {
+            flashRef.current.length = 6;
+          }
         }
         const burstParticles = Math.max(8, Math.min(18, (result.poppedIds?.length ?? 4) + 6));
         for (let index = 0; index < burstParticles; index += 1) {
@@ -641,7 +663,7 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
+        vibrate(24);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,7 +671,7 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        vibrate(result.goldenToxic ? 28 : 26);
         if (allowSound) {
           playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
         }
@@ -657,22 +679,32 @@ export default function GameCanvas() {
         spawnParticle({ x, y, radius: 14, life: 520, color, vy: -0.06, gravity: 0.0012 });
         const rippleColor = result.goldenToxic ? 'rgba(248,113,113,0.45)' : 'rgba(253,224,71,0.45)';
         pushRipple({ x, y, progress: 0, maxRadius: 160, color: rippleColor });
-        if (!prefersReducedMotion.current && !result.goldenToxic) {
-          burstShakeRef.current = Math.max(burstShakeRef.current, 6);
+        if (!prefersReducedMotion.current) {
+          const flashHue = result.goldenToxic ? 8 : 48;
+          flashRef.current.unshift({ progress: 0, strength: result.goldenToxic ? 0.5 : 1, hue: flashHue });
+          if (flashRef.current.length > 6) {
+            flashRef.current.length = 6;
+          }
+          if (!result.goldenToxic) {
+            burstShakeRef.current = Math.max(burstShakeRef.current, 6);
+            slowMoRef.current = performance.now() + 260;
+          }
+        }
+        comboTrailRef.current.unshift({ x, y, combo: Math.max(1, result.combo ?? 12), life: 320 });
+        if (comboTrailRef.current.length > 24) {
+          comboTrailRef.current.length = 24;
         }
         return;
       }
 
       if (allowSound) {
-        playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
+        playTapChime({ perfect: result.perfect && !result.drain, pitch: result.drain ? 360 : undefined });
       }
 
       if (result.drain) {
-        vibrate(25);
-      } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
+        vibrate(24);
       } else {
-        vibrate(8);
+        vibrate(result.energy ? 26 : 24);
       }
 
       const color = result.energy
@@ -697,14 +729,26 @@ export default function GameCanvas() {
           gravity: 0.001,
         });
       }
-      if (allowSound && result.hit && !result.burst) {
-        playTapChime({ perfect: result.perfect });
-      }
-
-      if (result.perfect && !prefersReducedMotion.current) {
-        const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
-        const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
-        pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
+      if (!result.drain) {
+        const comboValue = Math.max(1, result.combo ?? 0);
+        if (!prefersReducedMotion.current) {
+          const hue = result.targetHit ? 185 : 200;
+          const strength = result.perfect ? 1 : 0.65 + Math.min(0.25, comboValue * 0.02);
+          flashRef.current.unshift({ progress: 0, strength, hue });
+          if (flashRef.current.length > 6) {
+            flashRef.current.length = 6;
+          }
+          const rippleColor = result.targetHit ? 'rgba(56,189,248,0.55)' : 'rgba(148,232,255,0.4)';
+          const radius = Math.max(result.radius ?? 36, 28) * (1.5 + Math.min(comboValue / 12, 0.6));
+          pushRipple({ x, y, progress: 0, maxRadius: radius, color: rippleColor });
+        }
+        comboTrailRef.current.unshift({ x, y, combo: comboValue, life: 260 });
+        if (comboTrailRef.current.length > 24) {
+          comboTrailRef.current.length = 24;
+        }
+        if (!prefersReducedMotion.current && comboValue >= 10) {
+          slowMoRef.current = performance.now() + 260;
+        }
       }
       if (sparkleEnabled && result.perfect) {
         for (let index = 0; index < 4; index += 1) {

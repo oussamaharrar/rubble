@@ -76,7 +76,7 @@ export default function LeaderboardModal({ open, onClose, highlight }: Leaderboa
   const shareHref = useMemo(() => {
     if (!shareTarget) return '';
     const url = shareUrl({ score: shareTarget.score, board: shareTarget.board, dailyKey: shareTarget.dailyKey });
-    const castText = `My Rubble ${shareTarget.board === 'daily' ? 'Daily Challenge' : 'Arcade'} score: ${shareTarget.score}!`;
+    const castText = `My Bubble’it! ${shareTarget.board === 'daily' ? 'Daily Challenge' : 'Arcade'} score: ${shareTarget.score}!`;
     const composer = new URL('https://warpcast.com/~/compose');
     composer.searchParams.set('text', `${castText}\n${url}`);
     return composer.toString();

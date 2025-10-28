@@ -24,14 +24,14 @@ export default function GameOverScreen({ score, highestCombo, colorChain, onRetr
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-semibold text-sky-100">Run Complete</h2>
           {crowned && (
-            <Image src="/game-icons/crown.png" alt="Rubble Crown" width={60} height={60} className="drop-shadow-aurora" />
+            <Image src="/game-icons/crown.png" alt="Bubble’it! Crown" width={60} height={60} className="drop-shadow-aurora" />
           )}
         </div>
         <div className="grid gap-3">
           <div className="rounded-3xl border border-sky-400/30 bg-slate-900/60 p-4">
             <p className="text-sm text-sky-100/80">Score</p>
             <p className="text-3xl font-semibold text-sky-50">{score}</p>
-            {crowned && <p className="text-xs uppercase tracking-[0.28em] text-amber-200/90">👑 Rubble Champion!</p>}
+            {crowned && <p className="text-xs uppercase tracking-[0.28em] text-amber-200/90">👑 Bubble’it! Champion!</p>}
           </div>
           <div className="rounded-3xl border border-indigo-400/30 bg-slate-900/60 p-4">
             <p className="text-sm text-indigo-100/80">Highest Combo</p>

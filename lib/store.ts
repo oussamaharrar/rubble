@@ -56,6 +56,8 @@ const EASE_DURATION_MS = 8_000;
 const SPAWN_EXCLUSION_RADIUS = 72;
 const SPAWN_MEMORY = 14;
 const MAX_ACTIVE_HAZARDS = 6;
+const SAFE_ZONE_TOP_RATIO = 0.12;
+const SAFE_ZONE_SIDE_RATIO = 0.08;
 
 const DEFAULT_PALETTE: BubbleColor[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
 
@@ -249,7 +251,7 @@ function initialBoosterBank(): BoosterBank {
     }
     return { freeOrbs: parsed.freeOrbs, lastDailyKey: parsed.lastDailyKey };
   } catch (error) {
-    console.warn('[Rubble] Failed to parse booster bank', error);
+    console.warn('[Bubble’it!] Failed to parse booster bank', error);
     return { freeOrbs: 0, lastDailyKey: '' };
   }
 }
@@ -343,6 +345,17 @@ function createBubble(
   const edge = chooseEdge(rng);
   let spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
   const attempts = 4;
+  let safeLeft = width * SAFE_ZONE_SIDE_RATIO + radius;
+  let safeRight = width * (1 - SAFE_ZONE_SIDE_RATIO) - radius;
+  safeLeft = Math.max(radius, safeLeft);
+  safeRight = Math.min(width - radius, safeRight);
+  if (safeLeft > safeRight) {
+    const fallback = Math.min(Math.max(width / 2, radius), width - radius);
+    safeLeft = fallback;
+    safeRight = fallback;
+  }
+  const safeTop = Math.max(radius, height * SAFE_ZONE_TOP_RATIO + radius);
+  const isWithinSafe = (point: { x: number; y: number }) => point.x >= safeLeft && point.x <= safeRight && point.y >= safeTop;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const nearest = recentSpawns.reduce((min, entry) => {
       const dx = entry.x - spawn.x;
@@ -350,10 +363,17 @@ function createBubble(
       const dist = Math.sqrt(dx * dx + dy * dy);
       return Math.min(min, dist);
     }, Number.POSITIVE_INFINITY);
-    if (nearest > SPAWN_EXCLUSION_RADIUS) {
+    if (nearest > SPAWN_EXCLUSION_RADIUS && isWithinSafe(spawn)) {
       break;
     }
     spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
+  }
+  if (!isWithinSafe(spawn)) {
+    spawn = {
+      ...spawn,
+      x: Math.min(Math.max(spawn.x, safeLeft), safeRight),
+      y: Math.max(spawn.y, safeTop),
+    };
   }
   const color = options?.storm
     ? options?.energy
