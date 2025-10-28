@@ -42,13 +42,27 @@ interface Particle {
   gravity: number;
 }
 
-type AmbientDot = {
+type ColorTone = { r: number; g: number; b: number };
+
+interface FlashEffect {
+  progress: number;
+  life: number;
+  tint: ColorTone;
+}
+
+interface TrailGlow {
   x: number;
   y: number;
   radius: number;
-  depth: number;
-  phase: number;
-};
+  life: number;
+  maxLife: number;
+  tint: ColorTone;
+}
+
+function toRgba(tone: ColorTone, alpha: number) {
+  const clamped = Math.max(0, Math.min(1, alpha));
+  return `rgba(${tone.r},${tone.g},${tone.b},${clamped})`;
+}
 
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -61,7 +75,8 @@ export default function GameCanvas() {
   const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const burstShakeRef = useRef(0);
   const pointerRef = useRef({ id: null as number | null, startTime: 0, charging: false, x: 0, y: 0 });
-  const ambientDotsRef = useRef<AmbientDot[]>([]);
+  const flashRef = useRef<FlashEffect[]>([]);
+  const trailsRef = useRef<TrailGlow[]>([]);
   const [frameStats, setFrameStats] = useState({
     width: 0,
     height: 0,
@@ -73,15 +88,6 @@ export default function GameCanvas() {
   });
   const [diagOn, setDiagOn] = useState(false);
   const statsRef = useRef(frameStats);
-  if (ambientDotsRef.current.length === 0) {
-    ambientDotsRef.current = Array.from({ length: 18 }, () => ({
-      x: Math.random(),
-      y: Math.random(),
-      radius: 18 + Math.random() * 28,
-      depth: 0.25 + Math.random() * 0.75,
-      phase: Math.random() * Math.PI * 2,
-    }));
-  }
 
   useEffect(() => {
     statsRef.current = frameStats;
@@ -91,14 +97,13 @@ export default function GameCanvas() {
     if (typeof window === 'undefined') {
       return;
     }
-    const enabled = localStorage.getItem('rubble:diag') === 'true';
+    const enabled = localStorage.getItem('bubbleit:diag') === 'true';
     setDiagOn(enabled);
   }, []);
 
   const setStageSize = useGameStore((state) => state.setStageSize);
   const phase = useGameStore((state) => state.phase);
   const settings = useGameStore((state) => state.settings);
-  const unlocks = useGameStore((state) => state.unlocks);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -181,7 +186,7 @@ export default function GameCanvas() {
     window.addEventListener('resize', handleViewportResize, { passive: true });
     window.addEventListener('orientationchange', handleViewportResize, { passive: true });
 
-    const root = document.getElementById('rubble-root');
+    const root = document.getElementById('bubbleit-root');
     const mutationObserver = root
       ? new MutationObserver(scheduleResize)
       : null;
@@ -256,26 +261,7 @@ export default function GameCanvas() {
         ctx.fillRect(0, 0, measuredWidth, measuredHeight);
       }
 
-      const allowAmbient = !prefersReducedMotion.current && !playingPhase;
-      if (allowAmbient) {
-        const dots = ambientDotsRef.current;
-        const dotColor = themeActive ? 'rgba(148,197,255,0.08)' : 'rgba(56,189,248,0.08)';
-        for (const dot of dots) {
-          const offsetX = Math.sin(now / 16000 + dot.phase) * dot.depth * 36;
-          const offsetY = Math.cos(now / 18000 + dot.phase) * dot.depth * 42;
-          const x = dot.x * measuredWidth + offsetX;
-          const y = dot.y * measuredHeight + offsetY;
-          ctx.beginPath();
-          ctx.fillStyle = dotColor;
-          ctx.globalAlpha = 0.08;
-          ctx.arc(x, y, dot.radius * (0.7 + comboIntensity * 0.25), 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 1;
-        }
-      }
-
-      const wobble = prefersReducedMotion.current ? 0 : Math.sin(now / 420) * 4;
-      ctx.translate(0, wobble);
+      ctx.translate(0, 0);
 
       if (!prefersReducedMotion.current && burstShakeRef.current > 0) {
         const shake = burstShakeRef.current;
@@ -430,6 +416,25 @@ export default function GameCanvas() {
       }
       particlesRef.current = remaining;
 
+      const trails = trailsRef.current;
+      const trailNext: TrailGlow[] = [];
+      for (const trail of trails) {
+        trail.life -= dt;
+        if (trail.life <= 0) {
+          continue;
+        }
+        const progress = 1 - trail.life / trail.maxLife;
+        const radius = trail.radius * (1 + progress * 0.6);
+        const gradient = ctx.createRadialGradient(trail.x, trail.y, 0, trail.x, trail.y, radius);
+        gradient.addColorStop(0, toRgba(trail.tint, Math.max(0, 0.35 - progress * 0.2)));
+        gradient.addColorStop(1, toRgba(trail.tint, 0));
+        ctx.beginPath();
+        ctx.fillStyle = gradient;
+        ctx.fillRect(trail.x - radius, trail.y - radius, radius * 2, radius * 2);
+        trailNext.push(trail);
+      }
+      trailsRef.current = trailNext;
+
       const ripples = ripplesRef.current;
       const rippleRemaining: Ripple[] = [];
       for (const ripple of ripples) {
@@ -448,6 +453,23 @@ export default function GameCanvas() {
         rippleRemaining.push(ripple);
       }
       ripplesRef.current = rippleRemaining.slice(0, 8);
+
+      const flashes = flashRef.current;
+      const flashNext: FlashEffect[] = [];
+      for (const flash of flashes) {
+        flash.progress += dt;
+        if (flash.progress >= flash.life) {
+          continue;
+        }
+        const strength = 1 - flash.progress / flash.life;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = toRgba(flash.tint, 0.12 * strength);
+        ctx.fillRect(0, 0, measuredWidth, measuredHeight);
+        ctx.restore();
+        flashNext.push(flash);
+      }
+      flashRef.current = flashNext;
 
       if (burst.charging && burstPointer) {
         const chargeElapsed = Math.max(0, Date.now() - burst.chargeStartAt);
@@ -529,7 +551,6 @@ export default function GameCanvas() {
     if (!canvas) return;
     const allowHaptics = settings.haptics && !settings.reducedMotion;
     const allowSound = settings.sound;
-    const sparkleEnabled = unlocks.fxSparkle && settings.sparkleFx && !settings.reducedMotion;
 
     const vibrate = (pattern: number | number[]) => {
       if (!allowHaptics) return;
@@ -593,20 +614,52 @@ export default function GameCanvas() {
       }
     };
 
+    const pushTrailGlow = (trail: TrailGlow) => {
+      trailsRef.current.unshift(trail);
+      if (trailsRef.current.length > 16) {
+        trailsRef.current.length = 16;
+      }
+    };
+
+    const pushFlash = (tint: ColorTone, life = 220) => {
+      flashRef.current.unshift({ progress: 0, life, tint });
+      if (flashRef.current.length > 6) {
+        flashRef.current.length = 6;
+      }
+    };
+
+    const toneFromResult = (result: TapResult): ColorTone => {
+      if (result.golden && result.goldenToxic) {
+        return { r: 248, g: 113, b: 113 };
+      }
+      if (result.golden) {
+        return { r: 253, g: 224, b: 71 };
+      }
+      if (result.energy) {
+        return { r: 111, g: 227, b: 255 };
+      }
+      if (result.drain) {
+        return { r: 252, g: 129, b: 129 };
+      }
+      const combo = Math.max(0, Math.min(result.combo ?? 0, 25));
+      const r = Math.round(170 + combo * 3.5);
+      const g = Math.round(210 + combo * 1.5);
+      const b = Math.round(255 - combo * 3.2);
+      return { r, g, b };
+    };
+
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
+        vibrate(28);
         if (allowSound) {
           playTapChime({ pitch: result.golden ? 840 : 560 });
         }
-        const rippleColor = result.golden
-          ? result.goldenToxic
-            ? 'rgba(248,113,113,0.45)'
-            : 'rgba(253,224,71,0.45)'
-          : 'rgba(56,189,248,0.45)';
-        const maxRadius = Math.max(result.radius ?? 200, 140);
+        const tone = toneFromResult(result);
+        const rippleColor = toRgba(tone, 0.45);
+        const maxRadius = Math.max(result.radius ?? 200, 160);
         pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
+        pushFlash(tone, 320);
         if (!prefersReducedMotion.current) {
           burstShakeRef.current = Math.max(burstShakeRef.current, result.hit ? 14 : 8);
         }
@@ -626,22 +679,14 @@ export default function GameCanvas() {
           });
         }
         if (result.golden) {
-          spawnParticle({
-            x,
-            y,
-            radius: 18,
-            life: 520,
-            color: result.goldenToxic ? 'rgba(248,113,113,0.6)' : 'rgba(253,224,71,0.7)',
-            vx: 0,
-            vy: -0.08,
-            gravity: 0.001,
-          });
+          spawnParticle({ x, y, radius: 18, life: 520, color: toRgba(tone, 0.7), vx: 0, vy: -0.08, gravity: 0.001 });
+          pushTrailGlow({ x, y, radius: 60, life: 480, maxLife: 480, tint: tone });
         }
         return;
       }
 
       if (!result.hit) {
-        vibrate(25);
+        vibrate(22);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,14 +694,15 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        vibrate(result.goldenToxic ? 22 : 26);
         if (allowSound) {
           playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
         }
-        const color = result.goldenToxic ? 'rgba(248,113,113,0.6)' : 'rgba(253,224,71,0.65)';
-        spawnParticle({ x, y, radius: 14, life: 520, color, vy: -0.06, gravity: 0.0012 });
-        const rippleColor = result.goldenToxic ? 'rgba(248,113,113,0.45)' : 'rgba(253,224,71,0.45)';
-        pushRipple({ x, y, progress: 0, maxRadius: 160, color: rippleColor });
+        const tone = toneFromResult(result);
+        spawnParticle({ x, y, radius: 16, life: 520, color: toRgba(tone, 0.7), vy: -0.06, gravity: 0.0012 });
+        pushRipple({ x, y, progress: 0, maxRadius: 180, color: toRgba(tone, 0.5) });
+        pushTrailGlow({ x, y, radius: 56, life: 420, maxLife: 420, tint: tone });
+        pushFlash(tone, 300);
         if (!prefersReducedMotion.current && !result.goldenToxic) {
           burstShakeRef.current = Math.max(burstShakeRef.current, 6);
         }
@@ -667,22 +713,27 @@ export default function GameCanvas() {
         playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
       }
 
-      if (result.drain) {
-        vibrate(25);
-      } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
-      } else {
-        vibrate(8);
+      vibrate(result.drain ? 20 : 26);
+
+      const tone = toneFromResult(result);
+      const combo = result.combo ?? 0;
+      const rippleRadius = Math.max(result.radius ?? 40, 28) * (2 + Math.min(combo, 20) * 0.05);
+      pushRipple({ x, y, progress: 0, maxRadius: rippleRadius, color: toRgba(tone, 0.42) });
+      pushTrailGlow({
+        x,
+        y,
+        radius: 38 + Math.min(combo, 20) * 2.2,
+        life: 420,
+        maxLife: 420,
+        tint: tone,
+      });
+      pushFlash(tone);
+
+      if (combo >= 10) {
+        useGameStore.getState().activateSlowTime(260);
       }
 
-      const color = result.energy
-        ? 'rgba(56,189,248,0.6)'
-        : result.drain
-        ? 'rgba(248,113,113,0.6)'
-        : result.targetHit
-        ? 'rgba(56,189,248,0.65)'
-        : 'rgba(255,255,255,0.35)';
-      const baseCount = result.perfect ? 8 : 6;
+      const baseCount = result.perfect ? 7 : 5;
       for (let index = 0; index < baseCount; index += 1) {
         const angle = Math.random() * Math.PI * 2;
         const speed = 0.12 + Math.random() * 0.08;
@@ -691,36 +742,11 @@ export default function GameCanvas() {
           y,
           radius: 6 + Math.random() * 3,
           life: 360,
-          color,
+          color: toRgba(tone, 0.6),
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed - 0.02,
           gravity: 0.001,
         });
-      }
-      if (allowSound && result.hit && !result.burst) {
-        playTapChime({ perfect: result.perfect });
-      }
-
-      if (result.perfect && !prefersReducedMotion.current) {
-        const rippleColor = result.targetHit ? 'rgba(56,189,248,0.45)' : 'rgba(148,232,255,0.4)';
-        const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
-        pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
-      }
-      if (sparkleEnabled && result.perfect) {
-        for (let index = 0; index < 4; index += 1) {
-          const angle = Math.random() * Math.PI * 2;
-          const speed = 0.16 + Math.random() * 0.05;
-          spawnParticle({
-            x,
-            y,
-            radius: 3,
-            life: 300,
-            color: 'rgba(255,255,255,0.7)',
-            vx: Math.cos(angle) * speed,
-            vy: Math.sin(angle) * speed,
-            gravity: 0.0008,
-          });
-        }
       }
     };
 
@@ -810,7 +836,7 @@ export default function GameCanvas() {
       canvas.removeEventListener('pointercancel', handlePointerCancel);
       canvas.removeEventListener('pointerleave', handlePointerCancel);
     };
-  }, [settings.haptics, settings.reducedMotion, settings.sound, settings.sparkleFx, unlocks.fxSparkle]);
+  }, [settings.haptics, settings.reducedMotion, settings.sound]);
 
   const diagText = diagOn
     ? `DPR ${frameStats.dpr.toFixed(2)} | CSS ${Math.round(frameStats.width)}×${Math.round(frameStats.height)}\nBUF ${frameStats.bufferWidth}×${frameStats.bufferHeight} | FPS ${frameStats.fps.toFixed(1)} | BUB ${frameStats.bubbles}`

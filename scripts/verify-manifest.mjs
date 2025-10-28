@@ -52,11 +52,11 @@ async function loadFromBuild() {
       module.default?.routeModule?.userland?.GET ??
       module.default?.handlers?.GET;
     if (typeof handler === 'function') {
-      const origin = 'https://build-output.rubble';
+      const origin = 'https://build-output.bubbleit';
       const headers = new Headers({
         'x-forwarded-proto': 'https',
-        'x-forwarded-host': 'build-output.rubble',
-        host: 'build-output.rubble',
+        'x-forwarded-host': 'build-output.bubbleit',
+        host: 'build-output.bubbleit',
       });
       const request = new Request(`${origin}/.well-known/farcaster.json`, { headers });
       const response = await handler(request);
@@ -75,7 +75,7 @@ async function loadFromPreview(baseUrl) {
   const response = await fetch(manifestUrl, {
     headers: {
       accept: 'application/json',
-      'user-agent': 'rubble-manifest-verifier/1.0',
+      'user-agent': 'bubbleit-manifest-verifier/1.0',
     },
     cache: 'no-store',
   });
@@ -124,7 +124,7 @@ try {
 
   assert(version === '1', 'manifest.version must be "1"');
   assert(miniapp?.version === '1', 'miniapp.version must be "1"');
-  assert(miniapp?.name === 'Rubble (Bubble Hunt)', 'miniapp.name mismatch');
+  assert(miniapp?.name === "Bubble’it!", 'miniapp.name mismatch');
 
   const manifestHomeRaw = String(miniapp?.homeUrl ?? '');
   let manifestHomeUrl;

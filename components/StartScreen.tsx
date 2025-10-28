@@ -55,7 +55,7 @@ export default function StartScreen({
             className="home-chrome relative mx-auto mb-6 w-full max-w-sm rounded-3xl bg-gradient-to-b from-[#06080f] to-[#0a0d15] p-6 pb-10 text-center shadow-lg shadow-black/40"
           >
             <div className="inline-flex items-center gap-2 rounded-full bg-sky-500/15 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-sky-200/80 shadow-inner shadow-sky-400/20">
-              Rubble Rush
+              Bubble’it!
             </div>
             <h1 className="mt-4 text-3xl font-semibold text-white">Storm &amp; Combos</h1>
             <p className="mt-3 text-sm text-slate-300/80">

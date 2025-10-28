@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Rubble gameplay visibility', () => {
+test.describe('Bubble’it! gameplay visibility', () => {
   test('canvas visible, sized, and HUD layered', async ({ page }) => {
     const baseUrl = process.env.BASE_URL || 'http://localhost:3000/';
     await page.addInitScript(() => {
-      window.localStorage.setItem('rubble:autoplay', 'true');
+      window.localStorage.setItem('bubbleit:autoplay', 'true');
     });
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
 
@@ -33,13 +33,13 @@ test.describe('Rubble gameplay visibility', () => {
     const canvasZ = await canvas.evaluate((el) => getComputedStyle(el).zIndex);
     expect(parseInt(hudZ || '0')).toBeGreaterThan(parseInt(canvasZ || '0'));
 
-    await page.waitForFunction(() => document.getElementById('rubble-root')?.getAttribute('data-playing') === '1');
+    await page.waitForFunction(() => document.getElementById('bubbleit-root')?.getAttribute('data-playing') === '1');
 
     const overflowY = await page.evaluate(() => window.getComputedStyle(document.body).overflowY);
     expect(overflowY).toBe('hidden');
 
     await page.evaluate(() => {
-      localStorage.setItem('rubble:diag', 'true');
+      localStorage.setItem('bubbleit:diag', 'true');
       location.reload();
     });
     await page.waitForLoadState('domcontentloaded');

@@ -18,7 +18,7 @@ import { useGameStore } from '@/lib/store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
 
-const LIFETIME_KEY = 'rubble:lifetime-stats';
+const LIFETIME_KEY = 'bubbleit:lifetime-stats';
 
 type HighlightEntry = {
   board: BoardKind;
@@ -121,7 +121,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
     if (typeof window === 'undefined') {
       return;
     }
-    const autoPlay = window.localStorage.getItem('rubble:autoplay') === 'true';
+    const autoPlay = window.localStorage.getItem('bubbleit:autoplay') === 'true';
     if (!autoPlay) {
       return;
     }
@@ -282,7 +282,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
     });
     const composer = new URL('https://warpcast.com/~/compose');
     const label = shareTarget.board === 'daily' ? 'Daily Challenge' : 'Arcade';
-    composer.searchParams.set('text', `My Rubble ${label} score: ${shareTarget.score}!\n${url}`);
+    composer.searchParams.set('text', `My Bubble’it! ${label} score: ${shareTarget.score}!\n${url}`);
     return composer.toString();
   }, [shareTarget]);
 
@@ -294,7 +294,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
         {displayPhase === 'home' || displayPhase === 'summary' ? (
           <WalletBar />
         ) : (
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Rubble Rush</span>
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Bubble’it!</span>
         )}
       </div>
       <div className="flex items-center gap-2 text-xs text-slate-300">

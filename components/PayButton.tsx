@@ -109,7 +109,7 @@ function dispatchBooster(type: BoosterType, duration: number) {
     return;
   }
   window.dispatchEvent(
-    new CustomEvent('rubble:booster', {
+    new CustomEvent('bubbleit:booster', {
       detail: { type, duration },
     })
   );

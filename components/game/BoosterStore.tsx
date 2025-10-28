@@ -27,8 +27,8 @@ export default function BoosterStore({ boosters, walletConnected, onBoosterTrigg
       }));
       onBoosterTriggered?.(detail.type);
     };
-    window.addEventListener('rubble:booster', handler as EventListener);
-    return () => window.removeEventListener('rubble:booster', handler as EventListener);
+    window.addEventListener('bubbleit:booster', handler as EventListener);
+    return () => window.removeEventListener('bubbleit:booster', handler as EventListener);
   }, [boosters.length, onBoosterTriggered]);
 
   useEffect(() => {

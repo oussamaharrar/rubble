@@ -103,7 +103,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           />
         ))}
         <p className="text-[11px] text-slate-400">
-          Preferences are stored locally under rubble_settings_v2. Haptics respect your device capabilities and browser support.
+          Preferences are stored locally under bubbleit_settings_v2. Haptics respect your device capabilities and browser support.
         </p>
       </div>
     </Modal>

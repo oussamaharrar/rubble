@@ -37,7 +37,7 @@ export function getDailyKeyUTC(date = new Date()): string {
 }
 
 export function seedFromDailyKey(key: string): number {
-  return hashString(`rubble:daily:${key}`);
+  return hashString(`bubbleit:daily:${key}`);
 }
 
 export function deriveDailyTuning(seed: number): DailyTuning {

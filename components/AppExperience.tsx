@@ -31,7 +31,7 @@ export default function AppExperience({ children, header, footer, playing }: App
 
   return (
     <div
-      id="rubble-root"
+      id="bubbleit-root"
       className="app-viewport safe-top safe-bottom"
       data-playing={playing ? '1' : '0'}
       role="application"

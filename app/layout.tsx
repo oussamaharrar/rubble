@@ -5,8 +5,8 @@ import '@/styles/mobile-frame.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000'),
-  title: 'Rubble — Bubble Hunt',
-  description: 'A Farcaster mini app arcade built for Base.',
+  title: "Bubble’it! — Pop happy on Base",
+  description: 'Bubble’it! is a cheeky Base mini-game packed with bubbly boosts.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
