@@ -18,6 +18,8 @@ import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { getRuntimeConfig } from '@/app/config/runtime';
 import { shortenAddress } from '@/lib/address';
 import { useToast } from '@/lib/use-toast';
+import { logEvent } from '@/lib/telemetry';
+import { ensureTrialRecord, markTrialUsed, verifyTrial, type TrialRecord } from '@/lib/trial';
 import type { EntryMode } from '@/types/game';
 
 type ScreenState = 'home' | 'playing' | 'paused';
@@ -224,6 +226,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   const [showMore, setShowMore] = useState(false);
   const [tickets, setTickets] = useState<number>(() => readStoredTickets());
   const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
+  const [trialRecord, setTrialRecord] = useState<TrialRecord | null>(null);
   const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
   const [stageRect, setStageRect] = useState<DOMRectReadOnly | null>(null);
   const [measureToken, setMeasureToken] = useState(0);
@@ -233,8 +236,11 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
   const runStateRef = useRef<{ started: boolean; ended: boolean }>({ started: false, ended: false });
+  const lastWalletRef = useRef<string | null>(null);
+  const lastTrialStatusRef = useRef<TrialRecord['status'] | null>(null);
 
   const walletAddress = useWalletStore((state) => state.address);
+  const walletChainId = useWalletStore((state) => state.chainId);
   const walletConnected = Boolean(walletAddress);
   const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
   const resetWalletStore = useWalletStore((state) => state.reset);
@@ -280,6 +286,17 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
     setRememberFlag(readRememberedFlag());
     setRememberedAddress(readRememberedAddress());
   }, []);
+
+  useEffect(() => {
+    if (!walletAddress) {
+      lastWalletRef.current = null;
+      return;
+    }
+    if (walletAddress !== lastWalletRef.current) {
+      logEvent('wallet_connected', { address: walletAddress, chainId: walletChainId ?? null });
+      lastWalletRef.current = walletAddress;
+    }
+  }, [walletAddress, walletChainId]);
 
   const handleToast = useCallback(
     (message: string) => {
@@ -329,23 +346,34 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   }, [hudRect, safeLogged, setHudSafeArea, stageRect]);
 
   useEffect(() => {
-    if (!runtime.trialEnabled) {
+    let cancelled = false;
+    if (!runtime.trialEnabled || typeof window === 'undefined' || !walletAddress) {
       setTrialAvailable(false);
-      return;
+      setTrialRecord(null);
+      return () => {
+        cancelled = true;
+      };
     }
-    if (typeof window === 'undefined' || !walletAddress) {
-      setTrialAvailable(false);
-      return;
-    }
-    const key = `rubble:trial:${walletAddress.toLowerCase()}`;
-    const status = window.localStorage.getItem(key);
-    if (!status) {
-      window.localStorage.setItem(key, 'available');
-      setTrialAvailable(true);
-      return;
-    }
-    setTrialAvailable(status !== 'used');
+
+    void (async () => {
+      const record = await ensureTrialRecord(walletAddress);
+      if (cancelled) return;
+      setTrialRecord(record);
+      setTrialAvailable(record.status === 'available');
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [runtime.trialEnabled, walletAddress]);
+
+  useEffect(() => {
+    const status = trialRecord?.status ?? null;
+    if (status === 'available' && lastTrialStatusRef.current !== 'available' && walletAddress) {
+      logEvent('trial_granted', { address: walletAddress });
+    }
+    lastTrialStatusRef.current = status;
+  }, [trialRecord?.status, walletAddress]);
 
   const hasTicketsOrBoosts = tickets > 0 || boosterOrbs > 0;
   const eligibleToPlay = walletConnected && (trialAvailable || hasTicketsOrBoosts);
@@ -376,6 +404,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
         runStateRef.current.ended = true;
         const nextEligible = walletConnected && (trialAvailable || tickets > 0);
         console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
+        logEvent('run_ended', { mode: pendingModeRef.current ?? 'unknown', state: 'summary' });
       }
       setTimeout(() => {
         resetToStart();
@@ -386,12 +415,31 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
     }
   }, [phase, resetToStart, trialAvailable, tickets, walletConnected]);
 
-  const handleConsumeTrial = useCallback(() => {
-    if (typeof window !== 'undefined' && walletAddress) {
-      window.localStorage.setItem(`rubble:trial:${walletAddress.toLowerCase()}`, 'used');
+  const handleConsumeTrial = useCallback(
+    (recordOverride?: TrialRecord | null) => {
+      if (!walletAddress) return;
+      const updated = markTrialUsed(walletAddress, recordOverride ?? trialRecord ?? undefined);
+      setTrialRecord(updated);
+      setTrialAvailable(false);
+    },
+    [trialRecord, walletAddress]
+  );
+
+  const verifyTrialBeforeStart = useCallback(async () => {
+    if (!walletAddress) {
+      return { ok: false as const, reason: 'Wallet required' };
     }
-    setTrialAvailable(false);
-  }, [walletAddress]);
+    if (!trialRecord || trialRecord.status !== 'available') {
+      return { ok: false as const, reason: 'No trial available' };
+    }
+    const result = await verifyTrial(walletAddress, trialRecord);
+    setTrialRecord(result.record);
+    setTrialAvailable(result.record.status === 'available');
+    if (!result.ok) {
+      return { ok: false as const, reason: result.reason ?? 'Trial verification failed' };
+    }
+    return { ok: true as const, record: result.record };
+  }, [trialRecord, walletAddress]);
 
   const handleConsumeTicket = useCallback(() => {
     setTickets((prev) => {
@@ -424,7 +472,8 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
     window.localStorage.setItem(key, 'claimed');
     handleGrantTicket(1, 'Boost granted!');
     grantBooster(1, 'energy');
-  }, [grantBooster, handleGrantTicket, handleToast]);
+    logEvent('daily_claimed', { address: walletAddress ?? undefined });
+  }, [grantBooster, handleGrantTicket, handleToast, walletAddress]);
 
   const handleShareBoost = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -456,7 +505,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   }, [handleToast, hasProvider, updateRemember, walletConnected]);
 
   const startGameplay = useCallback(
-    (mode: EntryMode) => {
+    (mode: EntryMode, options?: { trialConsumed?: boolean }) => {
       pendingModeRef.current = mode;
       startRun(mode);
       beginGameplay();
@@ -466,41 +515,70 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       const nextEligible = walletConnected && (nextTrialAvailable || remainingTickets > 0 || boosterOrbs > 0);
       console.log(`RUN: started=true ended=false nextEligible=${nextEligible}`);
       if (mode === 'trial') {
-        handleConsumeTrial();
+        if (!options?.trialConsumed) {
+          handleConsumeTrial();
+        }
       } else {
         handleConsumeTicket();
       }
+      logEvent('run_started', { mode });
       setScreen('playing');
       setGateOpen(false);
       setNoRunsOpen(false);
     },
-    [beginGameplay, boosterOrbs, handleConsumeTicket, handleConsumeTrial, startRun, tickets, trialAvailable, walletConnected]
+    [
+      beginGameplay,
+      boosterOrbs,
+      handleConsumeTicket,
+      handleConsumeTrial,
+      startRun,
+      tickets,
+      trialAvailable,
+      walletConnected,
+    ]
   );
 
-  const handlePlayPress = useCallback(() => {
+  const handlePlayPress = useCallback(async () => {
     if (!walletConnected) {
       setGateOpen(true);
+      logEvent('gate_shown', { reason: 'wallet_required' });
       return;
     }
     if (!eligibleToPlay) {
       setNoRunsOpen(true);
       return;
     }
-    const mode: EntryMode = trialAvailable ? 'trial' : 'paid';
-    startGameplay(mode);
-  }, [eligibleToPlay, startGameplay, trialAvailable, walletConnected]);
+    if (trialAvailable) {
+      const verification = await verifyTrialBeforeStart();
+      if (!verification.ok) {
+        handleToast(verification.reason ?? 'Trial unavailable.');
+        return;
+      }
+      handleConsumeTrial(verification.record);
+      startGameplay('trial', { trialConsumed: true });
+      return;
+    }
+    startGameplay('paid');
+  }, [eligibleToPlay, handleConsumeTrial, handleToast, startGameplay, trialAvailable, verifyTrialBeforeStart, walletConnected]);
 
-  const handlePlayTrial = useCallback(() => {
+  const handlePlayTrial = useCallback(async () => {
     if (!walletConnected) {
       setGateOpen(true);
+      logEvent('gate_shown', { reason: 'wallet_required' });
       return;
     }
     if (!trialAvailable) {
       handleToast('No trial available. Earn or buy another run.');
       return;
     }
-    startGameplay('trial');
-  }, [handleToast, startGameplay, trialAvailable, walletConnected]);
+    const verification = await verifyTrialBeforeStart();
+    if (!verification.ok) {
+      handleToast(verification.reason ?? 'Trial unavailable.');
+      return;
+    }
+    handleConsumeTrial(verification.record);
+    startGameplay('trial', { trialConsumed: true });
+  }, [handleConsumeTrial, handleToast, startGameplay, trialAvailable, verifyTrialBeforeStart, walletConnected]);
 
   const handleOpenMore = useCallback(() => {
     if (screen !== 'home') return;
@@ -559,6 +637,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       runStateRef.current.ended = true;
       const nextEligible = walletConnected && (trialAvailable || tickets > 0 || boosterOrbs > 0);
       console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
+      logEvent('run_ended', { mode: pendingModeRef.current ?? 'unknown', state: 'exit' });
     }
     runStateRef.current = { started: false, ended: false };
     resetToStart();
@@ -724,7 +803,9 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                       className={BUTTON_CLASS}
                       whileHover={prefersReducedMotion ? undefined : { scale: 1.05, rotate: -1 }}
                       whileTap={prefersReducedMotion ? undefined : { scale: 0.94, rotate: 1 }}
-                      onClick={handlePlayPress}
+                      onClick={() => {
+                        void handlePlayPress();
+                      }}
                     >
                       PLAY Bubble’it!
                     </motion.button>
@@ -868,7 +949,9 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                           type="button"
                           data-testid="gate-play-free"
                           className={clsx(GLASS_BUTTON_CLASS, !trialAvailable && 'opacity-40')}
-                          onClick={handlePlayTrial}
+                          onClick={() => {
+                            void handlePlayTrial();
+                          }}
                           disabled={!trialAvailable}
                         >
                           Play Free

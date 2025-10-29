@@ -17,6 +17,7 @@ import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
+import { logEvent } from '@/lib/telemetry';
 
 const LIFETIME_KEY = 'rubble:lifetime-stats';
 
@@ -206,10 +207,16 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
 
   const playing = phase === 'playing' || phase === 'storm';
 
-  const openDrawer = useCallback((view: DrawerView) => {
-    setDrawerView(view);
-    setDrawerOpen(true);
-  }, []);
+  const openDrawer = useCallback(
+    (view: DrawerView) => {
+      setDrawerView(view);
+      setDrawerOpen(true);
+      if (view === 'shop') {
+        logEvent('shop_opened');
+      }
+    },
+    []
+  );
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 

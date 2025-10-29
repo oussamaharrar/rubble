@@ -2,27 +2,29 @@ import type { Metadata } from 'next';
 import EntryExperience from '@/components/EntryExperience';
 
 const description =
-  'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
+  'Fast arcade popping with boosts, rewards, and daily challenges on Base.';
+const heroImageUrl = '/api/og/hero';
+const title = 'Bubble’it! — Pop & Win';
 
 export const metadata: Metadata = {
-  title: 'Rubble Rush — Daily Storm Challenge',
+  title,
   description,
   openGraph: {
-    title: 'Rubble Rush — Daily Storm Challenge',
+    title,
     description,
     url: '/',
     type: 'website',
-    siteName: 'Rubble',
-    images: ['/game-icons/og.png'],
+    siteName: 'Bubble’it!',
+    images: [heroImageUrl],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Rubble Rush — Daily Storm Challenge',
+    title,
     description,
-    images: ['/game-icons/og.png'],
+    images: [heroImageUrl],
   },
   other: {
-    'fc:miniapp:name': 'Rubble Rush',
+    'fc:miniapp:name': 'Bubble’it!',
     'fc:miniapp:image': '/game-icons/embed.png',
     'fc:miniapp:url': '/',
     'fc:miniapp:button:text': 'Play',

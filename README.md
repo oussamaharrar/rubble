@@ -35,6 +35,7 @@ Create a `.env.local` (and mirror it to `.env.example`) with the following value
 | Name | Required | Description | Example |
 | --- | :---: | --- | --- |
 | `NEXT_PUBLIC_URL` | ✅ | Public base URL for the deployed mini app. | `https://rubble.example.com` |
+| `NEXT_PUBLIC_SITE_URL` | ✅ | Canonical site URL used for hero imagery and metadata. | `https://rubble.example.com` |
 | `NEXT_PUBLIC_WEBHOOK_URL` | ✅ | Relative or absolute URL to the payment webhook (defaults to `/api/pay/webhook`). | `/api/pay/webhook` |
 | `NEXT_PUBLIC_BASE_RPC_URL` | ✅ | Coinbase Developer Platform RPC for Base (client-safe). | `https://api.developer.coinbase.com/rpc/v1/base/YOUR_KEY` |
 | `NEXT_PUBLIC_MIN_PRICE_WEI` | ✅ | Minimum payment amount exposed to the client, in wei. | `1` |
@@ -50,6 +51,9 @@ Create a `.env.local` (and mirror it to `.env.example`) with the following value
 | `PAYMENTS_WEBHOOK_SECRET` | ➖ | Secret for verifying Commerce/OnchainKit webhooks. | `webhook-secret` |
 | `BASE_PAY_MOCK` | ➖ | `1` to bypass remote calls during local development. | `0` |
 | `BASE_BUILDER_OWNER_ADDRESS` | ➖ | Address included in the Farcaster Base Builder manifest section. | `0xabc123...` |
+| `PUBLIC_OWNER_ADDRESS` | ✅ | Owner address surfaced via `/api/signer/health` and app account metadata. | `0xabc123...` |
+| `TRIAL_SIGN_KEY` | ➖ | Optional HMAC secret for issuing/validating trial tokens. | `super-secret` |
+| `SITE_NOINDEX` | ➖ | Set to `1` to disable indexing and emit `X-Robots-Tag: noindex`. | `0` |
 
 After updating `.env.local`, run `pnpm dev` or restart the dev server to propagate changes.
 

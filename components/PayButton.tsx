@@ -7,6 +7,7 @@ import type { BoosterType } from '@/lib/game/types';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
+import { logEvent } from '@/lib/telemetry';
 
 const MIN_PRICE_WEI = (() => {
   const fallback = process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '1';
@@ -279,7 +280,12 @@ export default function PayButton({
       dispatchBooster(boosterType, durationMs);
     }
     onGranted?.();
-  }, [boosterType, durationMs, onGranted, shouldGrantBooster]);
+    logEvent('purchase_success', {
+      sku: sku ?? 'default',
+      amountWei: amountWei.toString(),
+      booster: shouldGrantBooster ? boosterType : undefined,
+    });
+  }, [amountWei, boosterType, durationMs, onGranted, shouldGrantBooster, sku]);
 
   const handleNativeIntent = useCallback(
     async (intent: PayIntent, fromAddress: string) => {
@@ -358,6 +364,7 @@ export default function PayButton({
       setInfoMessage('Preparing Base checkout…');
 
       dispatchWalletModalOpen();
+      logEvent('purchase_intent', { sku: sku ?? 'default', amountWei: amountWei.toString() });
       const account = await ensureBaseNetwork();
       setWallet(account, BASE_CHAIN_ID_HEX);
 
