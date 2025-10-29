@@ -11,7 +11,9 @@ type HealthResponse = {
   reason?: string;
 };
 
-function normalizeAddress(address: string | null | undefined) {
+type AnySigner = { status?: string; signer_address?: string; custody_address?: string };
+
+function normalizeAddress(address: string | undefined) {
   if (!address) return undefined;
   const trimmed = address.trim();
   return trimmed.length > 0 ? trimmed : undefined;
@@ -41,19 +43,37 @@ async function fetchNeynarStatus(uuid: string, apiKey: string) {
   }
 
   try {
-    const payload = (await response.json()) as {
-      signer?: { status?: string; signer_address?: string; custody_address?: string };
-      result?: { status?: string; signer?: { status?: string; signer_address?: string } };
+    const p = (await response.json()) as {
+      signer?: AnySigner;
+      result?: { signer?: AnySigner; status?: string };
       status?: string;
     };
-    const signer = payload.signer ?? payload.result?.signer ?? undefined;
-    const status = (signer?.status ?? payload.result?.status ?? payload.status ?? '').toLowerCase();
-    const address = normalizeAddress(signer?.signer_address ?? signer?.custody_address);
-    const active = status === 'approved' || status === 'active' || status === 'enabled';
+    const signer: AnySigner | undefined = p.signer ?? p.result?.signer ?? undefined;
+    const status = (signer?.status ?? p.result?.status ?? p.status ?? '').toLowerCase();
+    const rawAddress =
+      (typeof signer?.signer_address === 'string' && signer.signer_address) ||
+      (typeof signer?.custody_address === 'string' && signer.custody_address) ||
+      undefined;
+    const address = normalizeAddress(rawAddress);
+    const addressSource =
+      rawAddress && typeof signer?.signer_address === 'string' && rawAddress === signer.signer_address
+        ? 'signer_address'
+        : rawAddress && typeof signer?.custody_address === 'string' && rawAddress === signer.custody_address
+          ? 'custody_address'
+          : 'none';
+    if ((process.env.DIAG ?? '').toLowerCase() === 'true') {
+      console.info('[signer-health] address source:', addressSource);
+    }
+    const statusSuggestsActive = status === 'approved' || status === 'active' || status === 'enabled';
+    if (statusSuggestsActive && !address) {
+      return { ok: false as const, reason: 'ADDRESS_MISSING', address: undefined };
+    }
+    const active = statusSuggestsActive && !!address;
     if (active) {
       return { ok: true as const, address };
     }
-    return { ok: false as const, reason: status ? `STATUS_${status}` : 'STATUS_UNKNOWN', address };
+    const reason = status ? `STATUS_${status}` : 'STATUS_UNKNOWN';
+    return { ok: false as const, reason, address };
   } catch {
     return { ok: false as const, reason: 'PARSE_ERROR' };
   }
