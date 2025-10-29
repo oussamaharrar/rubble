@@ -33,12 +33,14 @@ const booleanFlag = z.enum(['0', '1']);
 
 type RawEnv = {
   NEXT_PUBLIC_URL: string;
+  NEXT_PUBLIC_SITE_URL?: string;
   NEXT_PUBLIC_WEBHOOK_URL: string;
   NEXT_PUBLIC_BASE_RPC_URL: string;
   NEXT_PUBLIC_MIN_PRICE_WEI: string;
   BASE_RPC_URL: string;
   PAY_TO_ADDRESS: string;
   MIN_PRICE_WEI: string;
+  PUBLIC_OWNER_ADDRESS?: string;
   FARCASTER_ACCOUNT_HEADER?: string;
   FARCASTER_ACCOUNT_PAYLOAD?: string;
   FARCASTER_ACCOUNT_SIGNATURE?: string;
@@ -52,16 +54,20 @@ type RawEnv = {
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;
   NEXT_PUBLIC_PRICE_MAX?: string;
+  TRIAL_SIGN_KEY?: string;
+  NOINDEX?: string;
 };
 
 const DEFAULT_RAW: RawEnv = {
   NEXT_PUBLIC_URL: 'http://localhost:3000',
+  NEXT_PUBLIC_SITE_URL: undefined,
   NEXT_PUBLIC_WEBHOOK_URL: '/api/pay/webhook',
   NEXT_PUBLIC_BASE_RPC_URL: 'https://api.developer.coinbase.com/rpc/v1/base',
   NEXT_PUBLIC_MIN_PRICE_WEI: '1',
   BASE_RPC_URL: 'https://api.developer.coinbase.com/rpc/v1/base',
   PAY_TO_ADDRESS: '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
   MIN_PRICE_WEI: '1',
+  PUBLIC_OWNER_ADDRESS: undefined,
   FARCASTER_ACCOUNT_HEADER: undefined,
   FARCASTER_ACCOUNT_PAYLOAD: undefined,
   FARCASTER_ACCOUNT_SIGNATURE: undefined,
@@ -75,17 +81,21 @@ const DEFAULT_RAW: RawEnv = {
   NEXT_PUBLIC_TRIAL_ENABLED: undefined,
   NEXT_PUBLIC_PRICE_MIN: undefined,
   NEXT_PUBLIC_PRICE_MAX: undefined,
+  TRIAL_SIGN_KEY: undefined,
+  NOINDEX: undefined,
 };
 
 const EnvSchema = z
   .object({
     NEXT_PUBLIC_URL: url,
+    NEXT_PUBLIC_SITE_URL: url.optional(),
     NEXT_PUBLIC_WEBHOOK_URL: relativeOrAbsolute,
     NEXT_PUBLIC_BASE_RPC_URL: url,
     NEXT_PUBLIC_MIN_PRICE_WEI: integerString,
     BASE_RPC_URL: url,
     PAY_TO_ADDRESS: evmAddress,
     MIN_PRICE_WEI: integerString,
+    PUBLIC_OWNER_ADDRESS: evmAddress.optional(),
     FARCASTER_ACCOUNT_HEADER: optionalString,
     FARCASTER_ACCOUNT_PAYLOAD: optionalString,
     FARCASTER_ACCOUNT_SIGNATURE: optionalString,
@@ -99,6 +109,8 @@ const EnvSchema = z
     NEXT_PUBLIC_TRIAL_ENABLED: z.string().optional(),
     NEXT_PUBLIC_PRICE_MIN: z.string().optional(),
     NEXT_PUBLIC_PRICE_MAX: z.string().optional(),
+    TRIAL_SIGN_KEY: optionalString,
+    NOINDEX: z.string().optional(),
   })
   .superRefine((value, ctx) => {
     const accountFields = [
@@ -135,6 +147,7 @@ const EnvSchema = z
 function readRawEnv(): RawEnv {
   return {
     NEXT_PUBLIC_URL: process.env.NEXT_PUBLIC_URL ?? DEFAULT_RAW.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL ?? undefined,
     NEXT_PUBLIC_WEBHOOK_URL:
       process.env.NEXT_PUBLIC_WEBHOOK_URL ?? DEFAULT_RAW.NEXT_PUBLIC_WEBHOOK_URL,
     NEXT_PUBLIC_BASE_RPC_URL:
@@ -154,6 +167,7 @@ function readRawEnv(): RawEnv {
       process.env.MIN_PRICE_WEI ??
       process.env.NEXT_PUBLIC_MIN_PRICE_WEI ??
       DEFAULT_RAW.MIN_PRICE_WEI,
+    PUBLIC_OWNER_ADDRESS: process.env.PUBLIC_OWNER_ADDRESS ?? undefined,
     FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER ?? undefined,
     FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD ?? undefined,
     FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE ?? undefined,
@@ -167,6 +181,8 @@ function readRawEnv(): RawEnv {
     NEXT_PUBLIC_TRIAL_ENABLED: process.env.NEXT_PUBLIC_TRIAL_ENABLED ?? undefined,
     NEXT_PUBLIC_PRICE_MIN: process.env.NEXT_PUBLIC_PRICE_MIN ?? undefined,
     NEXT_PUBLIC_PRICE_MAX: process.env.NEXT_PUBLIC_PRICE_MAX ?? undefined,
+    TRIAL_SIGN_KEY: process.env.TRIAL_SIGN_KEY ?? undefined,
+    NOINDEX: process.env.NOINDEX ?? process.env.NEXT_PUBLIC_NOINDEX ?? undefined,
   };
 }
 
@@ -210,6 +226,7 @@ function loadEnv(): ParsedEnv {
     PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
     MIN_PRICE_WEI,
     MIN_PRICE_WEI_RAW: parsed.MIN_PRICE_WEI,
+    PUBLIC_OWNER_ADDRESS: parsed.PUBLIC_OWNER_ADDRESS,
     FARCASTER_ACCOUNT_HEADER: parsed.FARCASTER_ACCOUNT_HEADER,
     FARCASTER_ACCOUNT_PAYLOAD: parsed.FARCASTER_ACCOUNT_PAYLOAD,
     FARCASTER_ACCOUNT_SIGNATURE: parsed.FARCASTER_ACCOUNT_SIGNATURE,
@@ -222,6 +239,7 @@ function loadEnv(): ParsedEnv {
     BASE_BUILDER_OWNER_ADDRESS:
       parsed.BASE_BUILDER_OWNER_ADDRESS ?? parsed.PAY_TO_ADDRESS,
     NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_URL: parsed.NEXT_PUBLIC_SITE_URL ?? parsed.NEXT_PUBLIC_URL,
     NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
     NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
     NEXT_PUBLIC_MIN_PRICE_WEI,
@@ -229,10 +247,13 @@ function loadEnv(): ParsedEnv {
     NEXT_PUBLIC_TRIAL_ENABLED: parsed.NEXT_PUBLIC_TRIAL_ENABLED,
     NEXT_PUBLIC_PRICE_MIN: parsed.NEXT_PUBLIC_PRICE_MIN,
     NEXT_PUBLIC_PRICE_MAX: parsed.NEXT_PUBLIC_PRICE_MAX,
+    TRIAL_SIGN_KEY: parsed.TRIAL_SIGN_KEY,
+    NOINDEX: parsed.NOINDEX,
   };
 
   const publicEnv: PublicEnv = {
     NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_URL: parsed.NEXT_PUBLIC_SITE_URL ?? parsed.NEXT_PUBLIC_URL,
     NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
     NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
     NEXT_PUBLIC_MIN_PRICE_WEI,
@@ -260,6 +281,7 @@ export type Env = {
   PAY_TO_ADDRESS: string;
   MIN_PRICE_WEI: bigint;
   MIN_PRICE_WEI_RAW: string;
+  PUBLIC_OWNER_ADDRESS?: string;
   FARCASTER_ACCOUNT_HEADER?: string;
   FARCASTER_ACCOUNT_PAYLOAD?: string;
   FARCASTER_ACCOUNT_SIGNATURE?: string;
@@ -271,6 +293,7 @@ export type Env = {
   BASE_PAY_MOCK: string;
   BASE_BUILDER_OWNER_ADDRESS: string;
   NEXT_PUBLIC_URL: string;
+  NEXT_PUBLIC_SITE_URL: string;
   NEXT_PUBLIC_WEBHOOK_URL: string;
   NEXT_PUBLIC_BASE_RPC_URL: string;
   NEXT_PUBLIC_MIN_PRICE_WEI: string;
@@ -278,10 +301,13 @@ export type Env = {
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;
   NEXT_PUBLIC_PRICE_MAX?: string;
+  TRIAL_SIGN_KEY?: string;
+  NOINDEX?: string;
 };
 
 export type PublicEnv = {
   NEXT_PUBLIC_URL: string;
+  NEXT_PUBLIC_SITE_URL: string;
   NEXT_PUBLIC_WEBHOOK_URL: string;
   NEXT_PUBLIC_BASE_RPC_URL: string;
   NEXT_PUBLIC_MIN_PRICE_WEI: string;

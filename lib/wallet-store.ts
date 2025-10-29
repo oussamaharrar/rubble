@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { logEvent } from '@/lib/telemetry';
 
 interface WalletState {
   address: string | null;
@@ -16,6 +17,12 @@ export const useWalletStore = create<WalletState>((set) => ({
   chainId: null,
   setAddress: (address) => set({ address }),
   setChainId: (chainId) => set({ chainId }),
-  setWallet: (address, chainId) => set({ address, chainId }),
+  setWallet: (address, chainId) =>
+    set(() => {
+      if (address) {
+        logEvent('wallet_connected', { address, chain: chainId ?? null });
+      }
+      return { address, chainId };
+    }),
   reset: () => set({ address: null, chainId: null }),
 }));
