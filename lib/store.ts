@@ -6,6 +6,7 @@ import { deriveDailyTuning, getDailyKeyUTC, isDailyEligible, seedFromDailyKey, t
 import type {
   BoardKind,
   Bubble,
+  BubbleKind,
   BoosterBank,
   BubbleColor,
   BurstState,
@@ -21,6 +22,9 @@ import type {
   RunStats,
   UnlockState,
 } from '@/types/game';
+import { logEvent } from '@/lib/telemetry';
+import { useRewardBoostStore } from '@/lib/stores/reward-boost';
+import type { BoostSource } from '@/lib/stores/reward-boost';
 
 const COMBO_WINDOW_MS = 5_000;
 const BASE_POINTS = 10;
@@ -35,6 +39,9 @@ const BURST_OVERCHARGE_MULTIPLIER = 1.3;
 const BURST_SCORE_MULTIPLIER = 0.7;
 const GOLDEN_RESPAWN_MIN_MS = 20_000;
 const GOLDEN_RESPAWN_RANGE_MS = 10_000;
+const RARE_CHANCE = 0.05;
+const TREASURE_CHANCE = 0.01;
+const BAD_CHANCE = 0.08;
 
 const BOOSTER_KEY = 'rubble:booster-bank';
 const SETTINGS_KEY = 'rubble_settings_v2';
@@ -360,6 +367,23 @@ function createBubble(
       ? 'blue'
       : 'orange'
     : pickColor(rng, palette, paletteSize);
+  const roll = options?.storm ? null : rng();
+  let kind: BubbleKind = 'normal';
+  if (options?.storm) {
+    if (options.poison) {
+      kind = 'drain';
+    } else if (options.energy) {
+      kind = 'energy';
+    }
+  } else if (roll !== null) {
+    if (roll < TREASURE_CHANCE) {
+      kind = 'treasure';
+    } else if (roll < TREASURE_CHANCE + RARE_CHANCE) {
+      kind = 'rare';
+    } else if (roll < TREASURE_CHANCE + RARE_CHANCE + BAD_CHANCE) {
+      kind = 'bad';
+    }
+  }
   return {
     id: `${now}-${Math.floor(rng() * 1_000_000)}`,
     x: spawn.x,
@@ -371,6 +395,7 @@ function createBubble(
     storm: options?.storm ?? false,
     poison: options?.poison ?? false,
     createdAt: now,
+    kind,
   };
 }
 
@@ -456,11 +481,11 @@ function createPoisonCloud(
 }
 
 function isEnergyOrb(bubble: Bubble) {
-  return bubble.storm && !bubble.poison;
+  return bubble.kind === 'energy';
 }
 
 function isDrainOrb(bubble: Bubble) {
-  return bubble.storm && bubble.poison;
+  return bubble.kind === 'drain';
 }
 
 function defaultBurstState(): BurstState {
@@ -501,6 +526,8 @@ export type TapResult = {
   goldenToxic?: boolean;
   burst?: boolean;
   poppedIds?: string[];
+  kind?: BubbleKind;
+  scoreDelta?: number;
 };
 
 declare global {
@@ -564,6 +591,8 @@ type GameStore = {
   golden: GoldenOrbState;
   nextGoldenSpawnAt: number;
   hudSafeArea: { top: number; right: number; bottom: number; left: number };
+  rewardBoostUsed: BoostSource | null;
+  treasureFound: boolean;
   startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
@@ -605,6 +634,7 @@ type GameStore = {
 export const useGameStore = create<GameStore>((set, get) => {
   const applyBubbleHit = (targetId: string, x: number, y: number, options?: TapOptions): TapResult => {
     const state = get();
+    useRewardBoostStore.getState().refresh();
     const index = state.bubbles.findIndex((bubble) => bubble.id === targetId);
     if (index === -1) {
       return { hit: false };
@@ -620,9 +650,12 @@ export const useGameStore = create<GameStore>((set, get) => {
     const distance = Math.hypot(x - bubble.x, y - bubble.y);
     const perfectThreshold = bubble.r * 0.35;
     const activeTarget = Boolean(targetState.active && targetState.color && now <= targetState.expiresAt);
-    const matchesTarget = activeTarget && !isDrainOrb(bubble) && targetState.color === bubble.color;
+    const bubbleKind = bubble.kind;
+    const targetEligible =
+      activeTarget && !isDrainOrb(bubble) && bubbleKind !== 'bad' && targetState.color === bubble.color;
     const allowPerfect = options?.allowPerfect ?? true;
-    const perfectCandidate = allowPerfect && !isDrainOrb(bubble) && distance <= perfectThreshold;
+    const perfectCandidate =
+      allowPerfect && !isDrainOrb(bubble) && bubbleKind !== 'bad' && distance <= perfectThreshold;
 
     const remaining = [...state.bubbles.slice(0, index), ...state.bubbles.slice(index + 1)];
     const stats = { ...state.stats };
@@ -636,6 +669,8 @@ export const useGameStore = create<GameStore>((set, get) => {
     let timeGainWindowStart = state.timeGainWindowStart;
     let timeGainAccumulated = state.timeGainAccumulated;
     let cloudPenalty = false;
+    let scoreDelta = 0;
+    const nextTreasureFound = state.treasureFound || bubbleKind === 'treasure';
 
     if (now - timeGainWindowStart >= 1_000) {
       timeGainWindowStart = now;
@@ -669,6 +704,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       currentStreak = 0;
       comboWindowUntil = 0;
       drain = true;
+      scoreDelta = -DRAIN_PENALTY_SCORE;
     } else {
       currentStreak = state.currentStreak + 1;
       stats.streak = Math.max(stats.streak, currentStreak);
@@ -685,9 +721,18 @@ export const useGameStore = create<GameStore>((set, get) => {
         chainLen = Math.max(stats.chainLen, 1);
       }
 
-      if (isEnergyOrb(bubble)) {
+      if (bubbleKind === 'bad') {
+        const penalty = Math.max(5, Math.round(BASE_POINTS * 1.5));
+        stats.score = Math.max(0, stats.score - penalty);
+        stats.chainLen = 0;
+        stats.lastColor = undefined;
+        stats.streak = Math.max(stats.streak, state.currentStreak);
+        currentStreak = 0;
+        comboWindowUntil = 0;
+        scoreDelta = -penalty;
+      } else if (isEnergyOrb(bubble)) {
         let awarded = ENERGY_POINTS;
-        if (matchesTarget) {
+        if (targetEligible) {
           targetHit = true;
           awarded *= 3;
           stats.timeLeft += 2;
@@ -697,20 +742,32 @@ export const useGameStore = create<GameStore>((set, get) => {
         }
         stats.score += awarded;
         energy = true;
+        scoreDelta = awarded;
       } else {
         const multiplier = Math.min(1 + 0.25 * Math.max(chainLen - 2, 0), 4);
         const baseAward = Math.round(BASE_POINTS * multiplier);
-        let awarded = matchesTarget ? baseAward * 3 : baseAward;
+        let awarded = targetEligible ? baseAward * 3 : baseAward;
+        if (bubbleKind === 'rare') {
+          awarded *= 3;
+        }
         const hazardFactor = cloudPenalty ? 0.5 : 1;
         awarded = Math.round(awarded * scoreMultiplier * hazardFactor);
         if (awarded > 0) {
           stats.score += awarded;
         }
+        if (bubbleKind === 'treasure') {
+          useRewardBoostStore.getState().grant('treasure');
+          logEvent('treasure_found', { score: awarded, combo: stats.chainLen });
+          logEvent('boost_granted', { reason: 'treasure' });
+        } else if (bubbleKind === 'rare') {
+          logEvent('rare_found', { combo: stats.chainLen, score: awarded });
+        }
+        scoreDelta = awarded;
         const availableGain = Math.max(0, 1 - timeGainAccumulated);
         const appliedGain = Math.min(BASE_TIME_REWARD * timeMultiplier, availableGain);
         stats.timeLeft += appliedGain;
         timeGainAccumulated += appliedGain;
-        if (matchesTarget) {
+        if (targetEligible) {
           stats.timeLeft += 2;
           targetHit = true;
           celebrationUntil = Math.max(celebrationUntil, now + 1_500);
@@ -761,6 +818,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       targetCelebrationUntil: celebrationUntil,
       perfectUntil,
       lastPerfectAt: perfect ? now : state.lastPerfectAt,
+      treasureFound: nextTreasureFound,
     });
 
     if (energy) {
@@ -774,6 +832,13 @@ export const useGameStore = create<GameStore>((set, get) => {
       get().markFirstRun({ perfect: true });
     }
 
+    logEvent('bubble_hit', {
+      type: bubbleKind,
+      scoreDelta,
+      combo: get().stats.chainLen,
+      source,
+    });
+
     return {
       hit: true,
       energy,
@@ -784,6 +849,8 @@ export const useGameStore = create<GameStore>((set, get) => {
       radius: bubble.r,
       color: bubble.color,
       burst: source === 'burst',
+      kind: bubbleKind,
+      scoreDelta,
     };
   };
 
@@ -968,7 +1035,14 @@ export const useGameStore = create<GameStore>((set, get) => {
   golden: defaultGoldenState(),
   nextGoldenSpawnAt: GOLDEN_RESPAWN_MIN_MS,
   hudSafeArea: { top: 0, right: 0, bottom: 0, left: 0 },
+  rewardBoostUsed: null,
+  treasureFound: false,
   startRun: (mode = 'trial') => {
+    const rewardBoostStore = useRewardBoostStore.getState();
+    if (mode !== 'trial') {
+      rewardBoostStore.refresh();
+    }
+    const consumedBoost = mode === 'trial' ? null : rewardBoostStore.consumeForRun();
     const state = get();
     const board = state.boardKind;
     const defaultSeed = hashString(`${Date.now()}-${Math.random()}`);
@@ -1064,6 +1138,8 @@ export const useGameStore = create<GameStore>((set, get) => {
       burstPointer: null,
       golden: defaultGoldenState(),
       nextGoldenSpawnAt: initialGoldenAt,
+      rewardBoostUsed: consumedBoost ? consumedBoost.source : null,
+      treasureFound: false,
     });
     get().spawnBubbles(Math.floor(maxBubbles / 2));
   },
@@ -1076,6 +1152,13 @@ export const useGameStore = create<GameStore>((set, get) => {
   },
   endRun: () => {
     const state = get();
+    const earnedBoost = state.stats.energyOrbsCollected > 0;
+    const payload = {
+      totalScore: state.stats.score,
+      earnedBoost,
+      board: state.boardKind,
+      boostSource: state.rewardBoostUsed,
+    };
     if (state.boardKind === 'daily' && state.dailyKey) {
       const nextCount = state.dailyRunCount + 1;
       writeDailyRunCount(state.dailyKey, nextCount);
@@ -1089,6 +1172,7 @@ export const useGameStore = create<GameStore>((set, get) => {
         targetCelebrationUntil: 0,
         perfectUntil: 0,
       });
+      logEvent('run_completed', payload);
       return;
     }
     set({
@@ -1099,6 +1183,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       targetCelebrationUntil: 0,
       perfectUntil: 0,
     });
+    logEvent('run_completed', payload);
   },
   resetToStart: () => {
     const state = get();
@@ -1166,6 +1251,8 @@ export const useGameStore = create<GameStore>((set, get) => {
       burstPointer: null,
       golden: defaultGoldenState(),
       nextGoldenSpawnAt: initialGoldenAt,
+      rewardBoostUsed: null,
+      treasureFound: false,
     });
   },
   pauseRun: () => {
@@ -1966,3 +2053,13 @@ export const useGameStore = create<GameStore>((set, get) => {
   hitGoldenOrb,
 };
 });
+
+declare global {
+  interface Window {
+    __rubbleStore?: typeof useGameStore;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.__rubbleStore = useGameStore;
+}

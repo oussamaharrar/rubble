@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
+import { useDailyRewardStore } from '@/lib/stores/daily-reward';
 import type { BoardKind } from '@/types/game';
 import type { DrawerView } from '@/components/Drawer';
 
@@ -26,6 +27,8 @@ export default function SummaryScreen({
   const missions = useGameStore((state) => state.missions);
   const now = useGameStore((state) => state.now);
   const boosterBank = useGameStore((state) => state.boosterBank);
+  const treasureFound = useGameStore((state) => state.treasureFound);
+  const dailyAvailable = useDailyRewardStore((state) => state.available);
 
   const elapsed = Math.max(0, Math.round(now / 1000));
   const boardLabel = board === 'daily' ? 'Daily Challenge' : 'Arcade Run';
@@ -35,6 +38,16 @@ export default function SummaryScreen({
   return (
     <div className="home-chrome absolute inset-0 flex flex-col items-center gap-6 px-6 pb-10 pt-12 text-center">
       <div className="w-full max-w-sm space-y-4">
+        {treasureFound ? (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center justify-center gap-2 rounded-3xl border border-amber-400/30 bg-amber-500/15 px-4 py-3 text-sm font-semibold text-amber-100 shadow shadow-amber-500/20"
+          >
+            <span className="text-lg">🎉</span>
+            <span>You found a Treasure bubble! Bonus boost activated.</span>
+          </motion.div>
+        ) : null}
         <span className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
           Run Summary
         </span>
@@ -74,6 +87,17 @@ export default function SummaryScreen({
             </div>
           </div>
         </div>
+        {dailyAvailable ? (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25 }}
+            className="rounded-2xl border border-emerald-400/30 bg-emerald-500/15 px-4 py-3 text-sm font-semibold text-emerald-100 shadow shadow-emerald-500/20"
+          >
+            Daily Reward available! Tap the 🎁 icon on the home screen to claim your boost.
+          </motion.div>
+        ) : null}
         <motion.button
           type="button"
           onClick={() => onOpenDrawer('leaderboard')}
