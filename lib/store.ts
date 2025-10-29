@@ -717,6 +717,9 @@ export const useGameStore = create<GameStore>((set, get) => {
           nextTargetAt = now + 9_000 + state.rng() * 3_000;
           targetState = { active: false, expiresAt: 0 };
         }
+        if (allowComboContribution && chainLen >= 10 && !state.settings.reducedMotion) {
+          get().activateSlowTime(240);
+        }
         if (allowComboContribution && chainLen >= 3 && now - lastComboFrame > 16) {
           stats.bestCombo = Math.max(stats.bestCombo, chainLen);
           get().progressCombo(chainLen);

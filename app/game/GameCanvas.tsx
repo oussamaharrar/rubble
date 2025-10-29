@@ -596,7 +596,7 @@ export default function GameCanvas() {
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
       if (result.burst) {
-        vibrate([0, 18, 12, 40]);
+        vibrate([0, 24, 26, 24]);
         if (allowSound) {
           playTapChime({ pitch: result.golden ? 840 : 560 });
         }
@@ -641,7 +641,7 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
+        vibrate(24);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -649,7 +649,7 @@ export default function GameCanvas() {
       }
 
       if (result.golden) {
-        vibrate(result.goldenToxic ? 35 : [10, 20, 10]);
+        vibrate(result.goldenToxic ? 28 : [22, 24, 22]);
         if (allowSound) {
           playTapChime({ perfect: !result.goldenToxic, pitch: result.goldenToxic ? 420 : 920 });
         }
@@ -668,11 +668,11 @@ export default function GameCanvas() {
       }
 
       if (result.drain) {
-        vibrate(25);
+        vibrate(24);
       } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
+        vibrate([20, 24, 20]);
       } else {
-        vibrate(8);
+        vibrate(22);
       }
 
       const color = result.energy

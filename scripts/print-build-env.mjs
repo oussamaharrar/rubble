@@ -18,11 +18,25 @@ async function main() {
       'NEXT_PUBLIC_TRIAL_ENABLED',
       'NEXT_PUBLIC_PRICE_MIN',
       'NEXT_PUBLIC_PRICE_MAX',
+      'NEXT_PUBLIC_SITE_URL',
+      'SITE_NOINDEX',
+      'TRIAL_SIGN_KEY',
+      'DIAG',
     ];
 
+    const maskValue = (value) => {
+      if (!value) return '***';
+      const trimmed = String(value);
+      if (trimmed.length <= 4) {
+        return `${trimmed.slice(0, 1)}***`;
+      }
+      return `${trimmed.slice(0, 2)}***${trimmed.slice(-2)}`;
+    };
+
     const presenceReport = expectedEnvs.map((name) => {
-      const present = Object.prototype.hasOwnProperty.call(process.env, name) && process.env[name] !== '';
-      return `  - ${name}: ${present ? 'present' : 'absent'}`;
+      const raw = process.env[name];
+      const present = Object.prototype.hasOwnProperty.call(process.env, name) && raw !== '' && raw !== undefined;
+      return `  - ${name}: ${present ? `present (${maskValue(raw)})` : 'absent'}`;
     });
 
     const lines = [

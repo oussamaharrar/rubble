@@ -7,6 +7,7 @@ import type { BoosterType } from '@/lib/game/types';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
+import { logEvent } from '@/lib/telemetry';
 
 const MIN_PRICE_WEI = (() => {
   const fallback = process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '1';
@@ -274,12 +275,20 @@ export default function PayButton({
     setToast(next);
   }, []);
 
-  const handleGrant = useCallback(() => {
-    if (shouldGrantBooster) {
-      dispatchBooster(boosterType, durationMs);
-    }
-    onGranted?.();
-  }, [boosterType, durationMs, onGranted, shouldGrantBooster]);
+  const handleGrant = useCallback(
+    (source: 'native' | 'commerce' | 'mock' | 'unknown') => {
+      if (shouldGrantBooster) {
+        dispatchBooster(boosterType, durationMs);
+      }
+      onGranted?.();
+      logEvent('purchase_success', {
+        sku,
+        source,
+        amountWei: amountWei.toString(),
+      });
+    },
+    [amountWei, boosterType, durationMs, onGranted, shouldGrantBooster, sku]
+  );
 
   const handleNativeIntent = useCallback(
     async (intent: PayIntent, fromAddress: string) => {
@@ -302,12 +311,12 @@ export default function PayButton({
         tx.maxPriorityFeePerGas = intent.maxPriorityFeePerGas;
       }
 
-      await provider.request<string>({
-        method: 'eth_sendTransaction',
-        params: [tx],
-      });
+        await provider.request<string>({
+          method: 'eth_sendTransaction',
+          params: [tx],
+        });
 
-      handleGrant();
+      handleGrant('native');
       showToast({ type: 'success', message: resolvedSuccessMessage });
       setInfoMessage(null);
     },
@@ -317,7 +326,7 @@ export default function PayButton({
   const handleCommerceSession = useCallback(
     async (session: UnknownRecord) => {
       if (readBooleanField(session, 'mock')) {
-        handleGrant();
+        handleGrant('mock');
         showToast({ type: 'success', message: resolvedSuccessMessage });
         return;
       }
@@ -342,7 +351,7 @@ export default function PayButton({
         return;
       }
 
-      handleGrant();
+      handleGrant('commerce');
       showToast({ type: 'success', message: resolvedSuccessMessage });
     },
     [handleGrant, isMounted, resolvedSuccessMessage, showToast]
@@ -354,6 +363,10 @@ export default function PayButton({
     }
 
     try {
+      logEvent('purchase_intent', {
+        sku,
+        amountWei: amountWei.toString(),
+      });
       setIsSubmitting(true);
       setInfoMessage('Preparing Base checkout…');
 

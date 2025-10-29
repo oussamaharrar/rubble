@@ -18,6 +18,7 @@ import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { getRuntimeConfig } from '@/app/config/runtime';
 import { shortenAddress } from '@/lib/address';
 import { useToast } from '@/lib/use-toast';
+import { logEvent } from '@/lib/telemetry';
 import type { EntryMode } from '@/types/game';
 
 type ScreenState = 'home' | 'playing' | 'paused';
@@ -25,6 +26,7 @@ type ScreenState = 'home' | 'playing' | 'paused';
 type EntryExperienceProps = {
   shareScore?: number;
   shareBoard?: 'daily' | 'normal';
+  tagline?: string;
 };
 
 const SCREEN_DURATION = 0.24;
@@ -43,6 +45,7 @@ const GLASS_BUTTON_CLASS =
 
 const REMEMBER_KEY = 'rubble:remember';
 const REMEMBER_ADDRESS_KEY = 'rubble:address';
+const TRIAL_KEY_PREFIX = 'rubble:trial';
 
 function persistRememberedWallet(address: string | null): 0 | 1 {
   if (typeof window === 'undefined') return 0;
@@ -204,7 +207,16 @@ function todayKey(prefix: string) {
   return `${prefix}:${key}`;
 }
 
-export default function EntryExperience({ shareScore, shareBoard }: EntryExperienceProps) {
+function compactDayStamp(now = new Date()) {
+  return `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
+}
+
+function trialStorageKey(address: string) {
+  const normalized = address.trim().toLowerCase();
+  return `${TRIAL_KEY_PREFIX}:${compactDayStamp()}:${normalized}`;
+}
+
+export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop. Win. Repeat.' }: EntryExperienceProps) {
   const [rememberFlag, setRememberFlag] = useState<0 | 1>(() => readRememberedFlag());
   const [rememberedAddress, setRememberedAddress] = useState<string | null>(() => readRememberedAddress());
   const { ready: walletReady, hasProvider } = useWalletSession((flag, address) => {
@@ -232,7 +244,15 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
-  const runStateRef = useRef<{ started: boolean; ended: boolean }>({ started: false, ended: false });
+  const runStateRef = useRef<{ started: boolean; ended: boolean; mode: EntryMode | null; startedAt: number }>(
+    { started: false, ended: false, mode: null, startedAt: 0 }
+  );
+  const trialKeyRef = useRef<string | null>(null);
+  const lastTrialLoggedRef = useRef<string | null>(null);
+  const lastWalletAddressRef = useRef<string | null>(null);
+  const shopSourceRef = useRef<'home' | 'header' | 'gate' | 'no_runs'>('home');
+  const lastGateReasonRef = useRef<string | null>(null);
+  const lastNoRunsLoggedRef = useRef(false);
 
   const walletAddress = useWalletStore((state) => state.address);
   const walletConnected = Boolean(walletAddress);
@@ -309,6 +329,18 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
     };
   }, []);
 
+  useEffect(() => {
+    if (!walletAddress) {
+      lastWalletAddressRef.current = null;
+      return;
+    }
+    if (lastWalletAddressRef.current === walletAddress) {
+      return;
+    }
+    lastWalletAddressRef.current = walletAddress;
+    logEvent('wallet_connected', { address: walletAddress });
+  }, [walletAddress]);
+
   const handleHudBounds = useCallback((rect: DOMRectReadOnly) => {
     setHudRect(rect);
   }, []);
@@ -329,22 +361,47 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   }, [hudRect, safeLogged, setHudSafeArea, stageRect]);
 
   useEffect(() => {
-    if (!runtime.trialEnabled) {
+    if (!runtime.trialEnabled || typeof window === 'undefined') {
       setTrialAvailable(false);
+      trialKeyRef.current = null;
       return;
     }
-    if (typeof window === 'undefined' || !walletAddress) {
+    if (!walletAddress) {
       setTrialAvailable(false);
+      trialKeyRef.current = null;
       return;
     }
-    const key = `rubble:trial:${walletAddress.toLowerCase()}`;
-    const status = window.localStorage.getItem(key);
+    const key = trialStorageKey(walletAddress);
+    trialKeyRef.current = key;
+    let status = window.localStorage.getItem(key);
+    if (!status) {
+      const legacyKey = `rubble:trial:${walletAddress.toLowerCase()}`;
+      const legacy = window.localStorage.getItem(legacyKey);
+      if (legacy === 'used') {
+        window.localStorage.setItem(key, 'used');
+      } else if (legacy) {
+        window.localStorage.setItem(key, 'available');
+      }
+      if (legacy) {
+        window.localStorage.removeItem(legacyKey);
+        status = window.localStorage.getItem(key);
+      }
+    }
     if (!status) {
       window.localStorage.setItem(key, 'available');
       setTrialAvailable(true);
+      if (lastTrialLoggedRef.current !== key) {
+        logEvent('trial_granted', { address: walletAddress, key, source: 'fresh' });
+        lastTrialLoggedRef.current = key;
+      }
       return;
     }
-    setTrialAvailable(status !== 'used');
+    const available = status !== 'used';
+    setTrialAvailable(available);
+    if (available && lastTrialLoggedRef.current !== key) {
+      logEvent('trial_granted', { address: walletAddress, key, source: 'existing' });
+      lastTrialLoggedRef.current = key;
+    }
   }, [runtime.trialEnabled, walletAddress]);
 
   const hasTicketsOrBoosts = tickets > 0 || boosterOrbs > 0;
@@ -366,6 +423,18 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   }, [eligibleToPlay, gateOpen, noRunsOpen]);
 
   useEffect(() => {
+    if (!gateOpen) {
+      lastGateReasonRef.current = null;
+    }
+  }, [gateOpen]);
+
+  useEffect(() => {
+    if (!noRunsOpen) {
+      lastNoRunsLoggedRef.current = false;
+    }
+  }, [noRunsOpen]);
+
+  useEffect(() => {
     if (phase === 'paused') {
       setScreen('paused');
     } else if (phase === 'playing' || phase === 'storm' || phase === 'intro') {
@@ -374,11 +443,25 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       setScreen('home');
       if (!runStateRef.current.ended && runStateRef.current.started) {
         runStateRef.current.ended = true;
+        const { stats: currentStats } = useGameStore.getState();
+        const startedAt = runStateRef.current.startedAt;
+        const durationMs =
+          startedAt > 0
+            ? (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt
+            : 0;
+        logEvent('run_ended', {
+          mode: runStateRef.current.mode,
+          score: currentStats.score,
+          durationMs: Math.max(0, Math.round(durationMs)),
+          bestCombo: currentStats.bestCombo,
+          streak: currentStats.streak,
+        });
         const nextEligible = walletConnected && (trialAvailable || tickets > 0);
         console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
       }
       setTimeout(() => {
         resetToStart();
+        runStateRef.current = { started: false, ended: false, mode: null, startedAt: 0 };
         setScreen('home');
       }, 120);
     } else {
@@ -388,7 +471,9 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
 
   const handleConsumeTrial = useCallback(() => {
     if (typeof window !== 'undefined' && walletAddress) {
-      window.localStorage.setItem(`rubble:trial:${walletAddress.toLowerCase()}`, 'used');
+      const key = trialStorageKey(walletAddress);
+      trialKeyRef.current = key;
+      window.localStorage.setItem(key, 'used');
     }
     setTrialAvailable(false);
   }, [walletAddress]);
@@ -422,6 +507,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       return;
     }
     window.localStorage.setItem(key, 'claimed');
+    logEvent('daily_claimed', { source: 'home' });
     handleGrantTicket(1, 'Boost granted!');
     grantBooster(1, 'energy');
   }, [grantBooster, handleGrantTicket, handleToast]);
@@ -436,6 +522,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
     window.localStorage.setItem(key, 'claimed');
     grantBooster(1, 'energy');
     handleToast('Boost granted!');
+    logEvent('invite_shared', { channel: 'farcaster' });
   }, [grantBooster, handleToast]);
 
   const attemptConnect = useCallback(async () => {
@@ -455,12 +542,43 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
     }
   }, [handleToast, hasProvider, updateRemember, walletConnected]);
 
+  const showGate = useCallback(
+    (reason: string) => {
+      if (!gateOpen || lastGateReasonRef.current !== reason) {
+        logEvent('gate_shown', { reason });
+        lastGateReasonRef.current = reason;
+      }
+      setGateOpen(true);
+    },
+    [gateOpen]
+  );
+
+  const showNoRuns = useCallback(() => {
+    if (!lastNoRunsLoggedRef.current) {
+      logEvent('gate_shown', { reason: 'no_runs' });
+      lastNoRunsLoggedRef.current = true;
+    }
+    setNoRunsOpen(true);
+  }, []);
+
   const startGameplay = useCallback(
     (mode: EntryMode) => {
       pendingModeRef.current = mode;
       startRun(mode);
       beginGameplay();
-      runStateRef.current = { started: true, ended: false };
+      runStateRef.current = {
+        started: true,
+        ended: false,
+        mode,
+        startedAt: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+      };
+      logEvent('run_started', {
+        mode,
+        trial: mode === 'trial',
+        ticketsBefore: tickets,
+        boosters: boosterOrbs,
+        trialAvailable,
+      });
       const remainingTickets = mode === 'trial' ? tickets : Math.max(0, tickets - 1);
       const nextTrialAvailable = mode === 'trial' ? false : trialAvailable;
       const nextEligible = walletConnected && (nextTrialAvailable || remainingTickets > 0 || boosterOrbs > 0);
@@ -479,39 +597,59 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
 
   const handlePlayPress = useCallback(() => {
     if (!walletConnected) {
-      setGateOpen(true);
+      showGate('wallet_required');
       return;
     }
     if (!eligibleToPlay) {
-      setNoRunsOpen(true);
+      showNoRuns();
       return;
     }
     const mode: EntryMode = trialAvailable ? 'trial' : 'paid';
     startGameplay(mode);
-  }, [eligibleToPlay, startGameplay, trialAvailable, walletConnected]);
+  }, [eligibleToPlay, showGate, showNoRuns, startGameplay, trialAvailable, walletConnected]);
 
   const handlePlayTrial = useCallback(() => {
     if (!walletConnected) {
-      setGateOpen(true);
+      showGate('wallet_required');
       return;
     }
     if (!trialAvailable) {
       handleToast('No trial available. Earn or buy another run.');
+      logEvent('gate_shown', { reason: 'trial_unavailable' });
       return;
     }
     startGameplay('trial');
-  }, [handleToast, startGameplay, trialAvailable, walletConnected]);
+  }, [handleToast, showGate, startGameplay, trialAvailable, walletConnected]);
+
+  const openShop = useCallback(
+    (source: 'home' | 'header' | 'gate' | 'no_runs') => {
+      shopSourceRef.current = source;
+      setShowMore(true);
+    },
+    []
+  );
 
   const handleOpenMore = useCallback(() => {
     if (screen !== 'home') return;
-    setShowMore(true);
-  }, [screen]);
+    openShop('home');
+  }, [openShop, screen]);
 
-  const handleManage = useCallback(() => {
+  const handleManageFromChip = useCallback(() => {
     setGateOpen(false);
     setNoRunsOpen(false);
-    handleOpenMore();
-  }, [handleOpenMore]);
+    openShop('header');
+  }, [openShop]);
+
+  const handleManageFromGate = useCallback(() => {
+    setGateOpen(false);
+    setNoRunsOpen(false);
+    openShop('gate');
+  }, [openShop]);
+
+  const handleManageFromNoRuns = useCallback(() => {
+    setNoRunsOpen(false);
+    openShop('no_runs');
+  }, [openShop]);
 
   const handleDisconnect = useCallback(() => {
     updateRemember(null);
@@ -538,7 +676,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
         document.body.removeChild(helper);
       }
       handleToast('Address copied!');
-      console.log(`HEADER: short="${shortAddress}" bubbles=${boosterOrbs} toastCopy=shown`);
+      console.log(`HEADER: short="${shortAddress}" bubbles=${boosterOrbs} copyToast=shown`);
     } catch {
       handleToast('Unable to copy address. Copy manually.');
     }
@@ -557,10 +695,22 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   const handleExit = useCallback(() => {
     if (runStateRef.current.started && !runStateRef.current.ended) {
       runStateRef.current.ended = true;
+      const { stats: currentStats } = useGameStore.getState();
+      const startedAt = runStateRef.current.startedAt;
+      const durationMs =
+        startedAt > 0 ? (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt : 0;
+      logEvent('run_ended', {
+        mode: runStateRef.current.mode,
+        score: currentStats.score,
+        durationMs: Math.max(0, Math.round(durationMs)),
+        bestCombo: currentStats.bestCombo,
+        streak: currentStats.streak,
+        aborted: true,
+      });
       const nextEligible = walletConnected && (trialAvailable || tickets > 0 || boosterOrbs > 0);
       console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
     }
-    runStateRef.current = { started: false, ended: false };
+    runStateRef.current = { started: false, ended: false, mode: null, startedAt: 0 };
     resetToStart();
     setScreen('home');
   }, [boosterOrbs, resetToStart, tickets, trialAvailable, walletConnected]);
@@ -573,7 +723,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
 
   useEffect(() => {
     if (!walletConnected || !shortAddress) return;
-    console.log(`HEADER: short="${shortAddress}" bubbles=${boosterOrbs} toastCopy=idle`);
+    console.log(`HEADER: short="${shortAddress}" bubbles=${boosterOrbs} copyToast=idle`);
   }, [boosterOrbs, shortAddress, walletConnected]);
 
   useEffect(() => {
@@ -583,6 +733,12 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       setShowMore(false);
     }
   }, [screen]);
+
+  useEffect(() => {
+    if (showMore) {
+      logEvent('shop_opened', { source: shopSourceRef.current });
+    }
+  }, [showMore]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -653,6 +809,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
               <div className="flex flex-col">
                 <span className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">Arcade by Rubble</span>
                 <h1 className="text-4xl font-black sm:text-5xl">Bubble’it!</h1>
+                <span className="text-sm font-medium text-white/60">{tagline}</span>
               </div>
               <div className="flex items-center gap-3">
                 {showIdentityChip ? (
@@ -661,7 +818,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                     shortAddress={shortAddress}
                     bubbles={boosterOrbs}
                     onCopy={handleCopyAddress}
-                    onManage={handleManage}
+                    onManage={handleManageFromChip}
                     onDisconnect={handleDisconnect}
                     background={identityGradient}
                   />
@@ -874,7 +1031,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                           Play Free
                         </button>
                       ) : null}
-                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleManage}>
+                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleManageFromGate}>
                         Earn / Buy
                       </button>
                     </div>
@@ -909,14 +1066,14 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                       Grab another boost, retry ticket, or invite a friend to earn one more shot before midnight.
                     </p>
                     <div className="mt-6 grid gap-3">
-                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleManage}>
+                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleManageFromNoRuns}>
                         Buy
                       </button>
                       <button
                         type="button"
                         className={GLASS_BUTTON_CLASS}
                         onClick={() => {
-                          handleOpenMore();
+                          openShop('no_runs');
                           setNoRunsOpen(false);
                         }}
                       >
