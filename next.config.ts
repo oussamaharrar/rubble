@@ -1,8 +1,8 @@
 import type { NextConfig } from 'next';
-import { PUBLIC_ENV } from './lib/env';
+import { getPublicEnv } from './lib/env';
 
 const nextConfig: NextConfig = {
-  env: PUBLIC_ENV,
+  env: getPublicEnv(),
   webpack: (config) => {
     config.externals = config.externals || [];
     if (Array.isArray(config.externals)) {

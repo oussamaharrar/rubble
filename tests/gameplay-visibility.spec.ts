@@ -1,54 +1,34 @@
 import { test, expect } from '@playwright/test';
+import { initWalletStub } from './utils/wallet';
 
-test.describe('Rubble gameplay visibility', () => {
-  test('canvas visible, sized, and HUD layered', async ({ page }) => {
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000/';
-    await page.addInitScript(() => {
-      window.localStorage.setItem('rubble:autoplay', 'true');
-    });
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/';
 
-    const inner = page.locator('.app-frame__inner');
-    await expect(inner).toBeVisible();
+test.describe('Bubble’it! layout', () => {
+  test('stage renders with HUD overlay during gameplay', async ({ page }) => {
+    await initWalletStub(page);
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
 
-    const box = await inner.boundingBox();
-    expect(box?.width || 0).toBeGreaterThan(100);
-    expect(box?.height || 0).toBeGreaterThan(100);
+    const playButton = page.getByTestId('play-button');
+    await expect(playButton).toBeVisible();
+    const connectButton = page.getByTestId('connect-wallet-home');
+    await expect(connectButton).toBeVisible();
+    await connectButton.click();
+    await expect(page.getByTestId('connect-wallet-home')).toHaveCount(0);
+    await expect(page.getByTestId('wallet-balance')).toBeVisible();
+    await playButton.click();
 
-    const canvas = page.locator('canvas.app-canvas');
-    await expect(canvas).toBeVisible();
+    const stage = page.getByTestId('game-stage');
+    await expect(stage).toBeVisible();
+    const stageBox = await stage.boundingBox();
+    expect(stageBox?.width ?? 0).toBeGreaterThan(200);
+    expect(stageBox?.height ?? 0).toBeGreaterThan(200);
 
-    const hud = page.locator('.app-hud');
-    await page.waitForFunction(() => {
-      const el = document.querySelector('.app-hud');
-      if (!el) return false;
-      const style = window.getComputedStyle(el);
-      if (style.visibility === 'hidden' || style.display === 'none') {
-        return false;
-      }
-      const rect = el.getBoundingClientRect();
-      return rect.width > 0;
-    });
-    const hudZ = await hud.evaluate((el) => getComputedStyle(el).zIndex);
-    const canvasZ = await canvas.evaluate((el) => getComputedStyle(el).zIndex);
-    expect(parseInt(hudZ || '0')).toBeGreaterThan(parseInt(canvasZ || '0'));
+    const hud = page.getByTestId('hud-root');
+    await expect(hud).toBeVisible();
+    const hudBox = await hud.boundingBox();
+    expect(hudBox?.width ?? 0).toBeGreaterThan(120);
 
-    await page.waitForFunction(() => document.getElementById('rubble-root')?.getAttribute('data-playing') === '1');
-
-    const overflowY = await page.evaluate(() => window.getComputedStyle(document.body).overflowY);
-    expect(overflowY).toBe('hidden');
-
-    await page.evaluate(() => {
-      localStorage.setItem('rubble:diag', 'true');
-      location.reload();
-    });
-    await page.waitForLoadState('domcontentloaded');
-    const diag = page.locator('.rbl-diag');
-    await expect(diag).toBeVisible();
-    const diagText = await diag.textContent();
-    console.log('DIAG:', diagText);
-
-    expect(diagText || '').toMatch(/DPR/i);
-    expect(diagText || '').toMatch(/CSS/i);
+    const overflow = await page.evaluate(() => getComputedStyle(document.body).overflowY);
+    expect(overflow).toBe('hidden');
   });
 });

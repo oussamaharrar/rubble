@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ENV } from './env';
+import { getEnv } from './env';
 
 const BASE_CHAIN_ID_DECIMAL = 8453;
 const BASE_CHAIN_ID_HEX = '0x2105';
@@ -19,8 +19,9 @@ type JsonRpcResponse<T> = JsonRpcSuccess<T> | JsonRpcError;
 async function callJsonRpc<T>(method: string, params: unknown[] = []): Promise<{ ok: true; result: T } | { ok: false; detail: string }>
 {  const request: JsonRpcRequest = { jsonrpc: '2.0', id: Date.now(), method, params };
   let response: Response;
+  const { BASE_RPC_URL } = getEnv();
   try {
-    response = await fetch(ENV.BASE_RPC_URL, {
+    response = await fetch(BASE_RPC_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(request),
@@ -106,15 +107,17 @@ export async function createPaymentNativeBase({ amountWei, to, memo }: NativePay
     return { ok: false, code: 'BAD_REQUEST', detail: 'Amount must be provided in wei' };
   }
 
-  if (parsedAmount < ENV.MIN_PRICE_WEI) {
+  const env = getEnv();
+
+  if (parsedAmount < env.MIN_PRICE_WEI) {
     return {
       ok: false,
       code: 'BAD_REQUEST',
-      detail: `Amount is below minimum price of ${ENV.MIN_PRICE_WEI.toString()} wei`,
+      detail: `Amount is below minimum price of ${env.MIN_PRICE_WEI.toString()} wei`,
     };
   }
 
-  const shouldBypassRpc = ENV.BASE_PAY_MOCK === '1';
+  const shouldBypassRpc = env.BASE_PAY_MOCK === '1';
   const feeResult = shouldBypassRpc
     ? undefined
     : await callJsonRpc<string>('eth_gasPrice');
@@ -169,11 +172,13 @@ function normaliseBaseUrl(value: string) {
 }
 
 export async function createPaymentCommerce({ sku, amountWei }: CommercePaymentInput): Promise<CommercePaymentResult> {
-  if (!ENV.PAYMENTS_MODE_B_ENABLED) {
+  const env = getEnv();
+
+  if (!env.PAYMENTS_MODE_B_ENABLED) {
     return { ok: false, code: 'MODE_B_DISABLED' };
   }
 
-  if (ENV.BASE_PAY_MOCK === '1') {
+  if (env.BASE_PAY_MOCK === '1') {
     return {
       ok: true,
       session: {
@@ -185,9 +190,9 @@ export async function createPaymentCommerce({ sku, amountWei }: CommercePaymentI
     } satisfies CommercePaymentSuccess;
   }
 
-  const apiBase = ENV.PAYMENTS_API_BASE;
-  const apiKeyId = ENV.PAYMENTS_API_KEY_ID;
-  const apiSecret = ENV.PAYMENTS_API_SECRET;
+  const apiBase = env.PAYMENTS_API_BASE;
+  const apiKeyId = env.PAYMENTS_API_KEY_ID;
+  const apiSecret = env.PAYMENTS_API_SECRET;
 
   if (!apiBase || !apiKeyId || !apiSecret) {
     return { ok: false, code: 'MODE_B_DISABLED' };
@@ -202,7 +207,7 @@ export async function createPaymentCommerce({ sku, amountWei }: CommercePaymentI
       value: amountWei.toString(),
     },
     chainId: BASE_CHAIN_ID_DECIMAL,
-    payToAddress: ENV.PAY_TO_ADDRESS,
+    payToAddress: env.PAY_TO_ADDRESS,
   };
 
   let response: Response;
@@ -272,11 +277,13 @@ function timingSafeEqual(expected: Buffer, provided: Buffer) {
 }
 
 export async function verifyCommerceWebhook(rawBody: string, signatureHeader: string | null | undefined): Promise<CommerceWebhookResult> {
-  if (!ENV.PAYMENTS_MODE_B_ENABLED) {
+  const env = getEnv();
+
+  if (!env.PAYMENTS_MODE_B_ENABLED) {
     return { ok: false, code: 'MODE_B_DISABLED' };
   }
 
-  const secret = ENV.PAYMENTS_WEBHOOK_SECRET;
+  const secret = env.PAYMENTS_WEBHOOK_SECRET;
   if (!secret) {
     return { ok: false, code: 'MODE_B_DISABLED' };
   }

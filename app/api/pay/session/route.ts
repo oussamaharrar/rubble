@@ -1,7 +1,7 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { ENV } from '@/lib/env';
+import { getEnv } from '@/lib/env';
 import { createPaymentCommerce, createPaymentNativeBase } from '@/lib/pay';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
@@ -33,13 +33,13 @@ function parseAmount(value: unknown): bigint | null {
   return null;
 }
 
-function parseBody(input: SessionRequestBody): ParsedBody | null {
+function parseBody(input: SessionRequestBody, minPrice: bigint): ParsedBody | null {
   const skuValue =
     typeof input.sku === 'string' && input.sku.trim().length > 0
       ? input.sku.trim()
       : 'booster_time_freeze';
 
-  const amountSource = input.amountWei ?? ENV.MIN_PRICE_WEI;
+  const amountSource = input.amountWei ?? minPrice;
   const amount = parseAmount(amountSource);
   if (amount === null) {
     return null;
@@ -48,8 +48,9 @@ function parseBody(input: SessionRequestBody): ParsedBody | null {
 }
 
 export async function POST(req: Request) {
+  const env = getEnv();
   const body = await req.json().catch(() => ({})) as SessionRequestBody;
-  const parsed = parseBody(body);
+  const parsed = parseBody(body, env.MIN_PRICE_WEI);
 
   if (!parsed) {
     return NextResponse.json(
@@ -58,18 +59,18 @@ export async function POST(req: Request) {
     );
   }
 
-  if (parsed.amountWei < ENV.MIN_PRICE_WEI) {
+  if (parsed.amountWei < env.MIN_PRICE_WEI) {
     return NextResponse.json(
       {
         ok: false,
         reason: 'BAD_REQUEST',
-        error: `Amount must be at least ${ENV.MIN_PRICE_WEI.toString()} wei`,
+        error: `Amount must be at least ${env.MIN_PRICE_WEI.toString()} wei`,
       },
       { status: 400, headers: NO_STORE_HEADERS }
     );
   }
 
-  const modeBEnabled = ENV.PAYMENTS_MODE_B_ENABLED;
+  const modeBEnabled = env.PAYMENTS_MODE_B_ENABLED;
 
   if (modeBEnabled) {
     const commerce = await createPaymentCommerce({ sku: parsed.sku, amountWei: parsed.amountWei });
@@ -94,7 +95,7 @@ export async function POST(req: Request) {
 
   const native = await createPaymentNativeBase({
     amountWei: parsed.amountWei,
-    to: ENV.PAY_TO_ADDRESS,
+    to: env.PAY_TO_ADDRESS,
   });
 
   if (native.ok) {
