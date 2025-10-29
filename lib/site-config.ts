@@ -32,7 +32,7 @@ function parseBooleanFlag(value: string | undefined, fallback = false) {
   return fallback;
 }
 
-export const getSiteConfig = cache(() => {
+function computeSiteConfig() {
   const baseUrl = normalizeUrl(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_URL);
   const heroImageUrl = `${baseUrl}/api/og/hero`;
   const tagline = parseOptional(process.env.NEXT_PUBLIC_SITE_TAGLINE, 'Pop. Win. Repeat.');
@@ -51,6 +51,12 @@ export const getSiteConfig = cache(() => {
     ogDescription,
     noindex,
   } as const;
-});
+}
+
+export function readSiteConfig() {
+  return computeSiteConfig();
+}
+
+export const getSiteConfig = cache(computeSiteConfig);
 
 export type SiteConfig = ReturnType<typeof getSiteConfig>;

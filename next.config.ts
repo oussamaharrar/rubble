@@ -1,18 +1,8 @@
 import type { NextConfig } from 'next';
 import { getPublicEnv } from './lib/env';
+import { readSiteConfig } from './lib/site-config';
 
-const shouldNoIndex = (() => {
-  const raw = process.env.SITE_NOINDEX;
-  if (!raw) return false;
-  const normalized = raw.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
-    return true;
-  }
-  if (['0', 'false', 'no', 'off'].includes(normalized)) {
-    return false;
-  }
-  return false;
-})();
+const siteConfig = readSiteConfig();
 
 const nextConfig: NextConfig = {
   env: getPublicEnv(),
@@ -24,7 +14,7 @@ const nextConfig: NextConfig = {
     return config;
   },
   headers: async () => {
-    if (!shouldNoIndex) {
+    if (!siteConfig.noindex) {
       return [];
     }
     return [
