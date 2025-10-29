@@ -66,10 +66,10 @@ export async function POST(request: Request) {
   }
 
   if (ok && address) {
-    return NextResponse.json({ ok: true, address });
+    return NextResponse.json({ ok: true, address, keyUsed });
   }
 
-  return NextResponse.json({ ok: false, reason: reason ?? 'inactive' });
+  return NextResponse.json({ ok: false, reason: reason ?? 'inactive', keyUsed });
 }
 
 export async function GET() {
