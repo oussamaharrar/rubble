@@ -1,37 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
-import { getDailyKeyUTC } from '@/lib/daily';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWalletStore } from '@/lib/wallet-store';
+import { ensureTrialRecord, markTrialUsed, verifyTrial, type TrialRecord } from '@/lib/trial';
+import { logEvent } from '@/lib/telemetry';
 import type { EntryMode } from '@/types/game';
-
-const TRIAL_PREFIX = 'trial_used_';
-
-function todayKey() {
-  return `${TRIAL_PREFIX}${getDailyKeyUTC()}`;
-}
-
-function hasUsedTrial() {
-  if (typeof window === 'undefined') return true;
-  try {
-    return window.localStorage.getItem(todayKey()) === '1';
-  } catch {
-    return true;
-  }
-}
-
-function markTrialUsed() {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(todayKey(), '1');
-  } catch {
-    // ignore errors
-  }
-}
 
 interface GateModalProps {
   open: boolean;
@@ -48,18 +25,57 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
   const address = useWalletStore((state) => state.address);
   const setWallet = useWalletStore((state) => state.setWallet);
 
-  const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
+  const [trialUnavailable, setTrialUnavailable] = useState(true);
+  const [trialRecord, setTrialRecord] = useState<TrialRecord | null>(null);
+  const [trialLoading, setTrialLoading] = useState(false);
+  const [trialError, setTrialError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
   const connected = Boolean(address);
+  const loggedRef = useRef(false);
+
+  useEffect(() => {
+    if (open && !loggedRef.current) {
+      logEvent('gate_shown', { reason: connected ? 'modal' : 'wallet_required' });
+      loggedRef.current = true;
+    }
+    if (!open) {
+      loggedRef.current = false;
+    }
+  }, [connected, open]);
 
   useEffect(() => {
     if (!open) return;
-    setTrialUnavailable(hasUsedTrial());
     setConnectError(null);
+    setTrialError(null);
     resetError();
-  }, [open, resetError]);
+    if (!address) {
+      setTrialUnavailable(true);
+      setTrialRecord(null);
+      return;
+    }
+    let cancelled = false;
+    setTrialLoading(true);
+    void ensureTrialRecord(address)
+      .then((record) => {
+        if (cancelled) return;
+        setTrialRecord(record);
+        setTrialUnavailable(record.status !== 'available');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTrialUnavailable(true);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTrialLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, open, resetError]);
 
   const handleConnect = useCallback(async () => {
     if (connecting) return;
@@ -87,11 +103,30 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
     }
   }, [connecting, setWallet]);
 
-  const handleTrial = useCallback(() => {
-    markTrialUsed();
+  const handleTrial = useCallback(async () => {
+    if (!address) {
+      setTrialUnavailable(true);
+      return;
+    }
+    if (!trialRecord || trialRecord.status !== 'available') {
+      setTrialUnavailable(true);
+      return;
+    }
+    setTrialLoading(true);
+    setTrialError(null);
+    const result = await verifyTrial(address, trialRecord);
+    setTrialRecord(result.record);
+    setTrialUnavailable(result.record.status !== 'available');
+    setTrialLoading(false);
+    if (!result.ok) {
+      setTrialError(result.reason ?? 'Trial verification failed.');
+      return;
+    }
+    markTrialUsed(address, result.record);
+    setTrialRecord({ ...result.record, status: 'used' });
     setTrialUnavailable(true);
     onComplete('trial');
-  }, [onComplete]);
+  }, [address, onComplete, trialRecord]);
 
   const handlePaid = useCallback(async () => {
     const success = await payToPlay(1n);
@@ -163,11 +198,17 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
             <div className="mt-6 space-y-3">
               <button
                 type="button"
-                onClick={handleTrial}
+                onClick={() => {
+                  void handleTrial();
+                }}
                 className="button-tap inline-flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!connected || trialUnavailable || loading}
+                disabled={!connected || trialUnavailable || loading || trialLoading}
               >
-                {trialUnavailable ? 'Trial used today' : 'Play free trial'}
+                {trialLoading
+                  ? 'Checking…'
+                  : trialUnavailable
+                    ? 'Trial used today'
+                    : 'Play free trial'}
               </button>
               <button
                 type="button"
@@ -177,6 +218,7 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
               >
                 {loading ? 'Authorising…' : 'Boosted entry · 1 wei'}
               </button>
+              {trialError ? <p className="text-xs text-rose-200">{trialError}</p> : null}
               {status ? <p className="text-xs text-sky-200">{status}</p> : null}
               {error ? <p className="text-xs text-rose-200">{error}</p> : null}
             </div>

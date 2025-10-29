@@ -38,18 +38,20 @@ export async function GET(request: Request) {
   const webhookUrl = resolveWebhookUrl(origin, env.NEXT_PUBLIC_WEBHOOK_URL);
 
   const embedUrl = `${origin}/game-icons/embed.png`;
-
+  const heroImageUrl = `${env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/api/og/hero`;
   const miniapp = {
     version: '1',
-    name: 'Rubble (Bubble Hunt)',
-    subtitle: 'Tap • Combo • Boost on Base',
-    description:
-      'Tap bubbles, rack combos, and trigger Base boosts to freeze time on-chain.',
+    name: 'Bubble’it!',
+    subtitle: 'Pop. Win. Repeat.',
+    description: 'Fast arcade popping with boosts, rewards, and daily challenges on Base.',
     homeUrl: origin,
     iconUrl: `${origin}/game-icons/icon.png`,
     splashImageUrl: `${origin}/game-icons/splash.png`,
     splashBackgroundColor: '#04060B',
-    ogImageUrl: `${origin}/game-icons/og.png`,
+    heroImageUrl,
+    ogImageUrl: heroImageUrl,
+    ogTitle: 'Bubble’it! — Pop & Win',
+    ogDescription: 'Fast arcade popping with boosts, rewards, and daily challenges on Base.',
     webhookUrl,
     primaryCategory: 'games',
     tags: ['game', 'arcade', 'base', 'booster'],
@@ -63,6 +65,7 @@ export async function GET(request: Request) {
       },
     ],
     buttonTitle: 'Play',
+    noindex: env.SITE_NOINDEX ?? false,
   } as const;
 
   const body: Record<string, unknown> = {

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
 import type { BoardKind } from '@/types/game';
 import type { DrawerView } from '@/components/Drawer';
+import { logEvent } from '@/lib/telemetry';
 
 interface SummaryScreenProps {
   board: BoardKind;
@@ -106,6 +107,9 @@ export default function SummaryScreen({
               target="_blank"
               rel="noreferrer"
               className="button-tap inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-500/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
+              onClick={() => {
+                logEvent('invite_shared', { board, score: stats.score });
+              }}
             >
               Share to Farcaster
             </a>

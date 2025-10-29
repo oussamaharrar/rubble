@@ -124,7 +124,8 @@ try {
 
   assert(version === '1', 'manifest.version must be "1"');
   assert(miniapp?.version === '1', 'miniapp.version must be "1"');
-  assert(miniapp?.name === 'Rubble (Bubble Hunt)', 'miniapp.name mismatch');
+  assert(miniapp?.name === 'Bubble’it!', 'miniapp.name mismatch');
+  assert(miniapp?.subtitle === 'Pop. Win. Repeat.', 'miniapp.subtitle mismatch');
 
   const manifestHomeRaw = String(miniapp?.homeUrl ?? '');
   let manifestHomeUrl;
@@ -157,8 +158,15 @@ try {
   const expectedSplash = `${manifestOrigin}/game-icons/splash.png`;
   assert(miniapp?.splashImageUrl === expectedSplash, 'miniapp.splashImageUrl mismatch');
 
-  const expectedOg = `${manifestOrigin}/game-icons/og.png`;
+  const expectedOg = `${manifestOrigin}/api/og/hero`;
   assert(miniapp?.ogImageUrl === expectedOg, 'miniapp.ogImageUrl mismatch');
+  assert(miniapp?.heroImageUrl === expectedOg, 'miniapp.heroImageUrl mismatch');
+  assert(miniapp?.ogTitle === 'Bubble’it! — Pop & Win', 'miniapp.ogTitle mismatch');
+  assert(
+    miniapp?.ogDescription ===
+      'Fast arcade popping with boosts, rewards, and daily challenges on Base.',
+    'miniapp.ogDescription mismatch'
+  );
 
   const webhookUrlRaw = String(miniapp?.webhookUrl ?? '');
   let webhookUrl;
