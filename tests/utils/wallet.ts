@@ -4,7 +4,15 @@ const ADDRESS = '0x1234567890abcdef1234567890abcdef12345678';
 
 export async function initWalletStub(page: Page) {
   await page.addInitScript(({ address }) => {
-    let connected = false;
+    const global = window as typeof window & { __mockWalletConnected?: boolean };
+    const remembered = (() => {
+      try {
+        return window.localStorage?.getItem('rubble:remember') === '1';
+      } catch {
+        return false;
+      }
+    })();
+    let connected = Boolean(global.__mockWalletConnected || remembered);
     const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
     const notify = (event: string, ...args: unknown[]) => {
       const set = listeners.get(event);
@@ -16,9 +24,18 @@ export async function initWalletStub(page: Page) {
       request: async ({ method }: { method: string; params?: unknown[] }) => {
         switch (method) {
           case 'eth_accounts':
+            try {
+              if (window.localStorage?.getItem('rubble:remember') === '1') {
+                connected = true;
+                return [address];
+              }
+            } catch {
+              // ignore
+            }
             return connected ? [address] : [];
           case 'eth_requestAccounts':
             connected = true;
+            global.__mockWalletConnected = true;
             notify('accountsChanged', [address]);
             return [address];
           case 'eth_chainId':

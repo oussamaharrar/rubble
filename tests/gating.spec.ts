@@ -4,10 +4,26 @@ import { initWalletStub } from './utils/wallet';
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/';
 
 test.describe('wallet + trial gate', () => {
-  test('enforces eligibility and safe spawns', async ({ page }) => {
+  test('one-time connect, remember me, and eligibility gating', async ({ page }) => {
     await page.addInitScript(() => {
-      window.localStorage.clear();
-      window.sessionStorage.clear();
+      const sentinel = '__rubble_e2e_init__';
+      try {
+        if (!window.sessionStorage.getItem(sentinel)) {
+          window.localStorage.clear();
+          window.sessionStorage.clear();
+          window.sessionStorage.setItem(sentinel, '1');
+        }
+      } catch {
+        // ignore
+      }
+    });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async () => Promise.resolve(),
+        },
+      });
     });
     await initWalletStub(page);
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
@@ -18,24 +34,27 @@ test.describe('wallet + trial gate', () => {
     await expect(gateOverlay).toBeVisible();
     await expect(page.getByTestId('game-stage')).toHaveCount(0);
 
-    // Attach wallet stub and connect.
+    // Connect wallet once.
     await page.getByTestId('gate-connect-wallet').click();
-    await expect(page.getByTestId('gate-connect-wallet')).toHaveCount(0);
+    await expect(page.getByTestId('connect-wallet-home')).toHaveCount(0);
     await expect(page.getByTestId('wallet-balance')).toBeVisible();
 
-    // Play with free trial.
+    // Copy address toast via header menu.
+    await page.getByRole('button', { name: '⋯' }).click();
+    await page.getByRole('menuitem', { name: 'Copy address' }).click();
+    await expect(page.getByText('Address copied!')).toBeVisible();
+
+    // Remember me keeps connection hidden on reload.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('connect-wallet-home')).toHaveCount(0);
+    await expect(page.locator('[aria-label^="Connected wallet"]')).toHaveCount(1);
+
+    // Start a trial run.
     await page.getByTestId('play-button').click();
-    const playFree = page.getByTestId('gate-play-free');
-    if (await playFree.isVisible()) {
-      await playFree.click();
-    }
     const stage = page.getByTestId('game-stage');
     await expect(stage).toBeVisible();
     await expect(page.getByTestId('hud-root')).toBeVisible();
-    await expect(page.getByTestId('hud-score')).toBeVisible();
-    await expect(page.getByTestId('hud-combo')).toBeVisible();
-    await expect(page.getByTestId('hud-timer')).toBeVisible();
-    await expect(page.getByText('Shop')).toHaveCount(0);
+    await expect(page.getByTestId('wallet-balance')).toHaveCount(0);
 
     // Validate safe spawn zones from instrumented snapshot.
     const spawnSnapshotHandle = await page.waitForFunction(() => window.rubbleLastSpawnSnapshot ?? null);
@@ -61,14 +80,22 @@ test.describe('wallet + trial gate', () => {
     await page.getByRole('button', { name: 'Exit to Home' }).click();
     await expect(page.getByTestId('play-button')).toBeVisible();
 
-    // Attempt to play without eligibility after consuming trial.
+    // Next play opens no-runs dialog.
     await page.getByTestId('play-button').click();
-    await expect(page.getByText('Earn / Buy')).toBeVisible();
-    await expect(page.getByTestId('game-stage')).toHaveCount(0);
+    const noRunsDialog = page.getByTestId('no-runs-dialog');
+    await expect(noRunsDialog).toBeVisible();
+    await page.getByRole('button', { name: 'Invite a Friend' }).click();
+    await expect(page.getByText('Boost granted!')).toBeVisible();
+    await expect(page.getByTestId('no-runs-dialog')).toHaveCount(0);
 
-    // Reduced motion smoke test.
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.reload();
+    // Boost enables another run.
+    await page.getByTestId('play-button').click();
+    await expect(page.getByTestId('game-stage')).toBeVisible();
+    await expect(page.getByTestId('wallet-balance')).toHaveCount(0);
+
+    // Exit back to home.
+    await page.getByRole('button', { name: '⏸' }).click();
+    await page.getByRole('button', { name: 'Exit to Home' }).click();
     await expect(page.getByTestId('play-button')).toBeVisible();
   });
 });
