@@ -2,11 +2,32 @@ import type { Metadata } from 'next';
 import { Analytics } from '@vercel/analytics/react';
 import './globals.css';
 import '@/styles/mobile-frame.css';
+import { siteMetadata } from '@/lib/site-info';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_URL ?? 'http://localhost:3000'),
-  title: 'Rubble — Bubble Hunt',
-  description: 'A Farcaster mini app arcade built for Base.',
+  metadataBase: new URL(siteMetadata.siteUrl),
+  title: siteMetadata.ogTitle,
+  description: siteMetadata.ogDescription,
+  openGraph: {
+    title: siteMetadata.ogTitle,
+    description: siteMetadata.ogDescription,
+    url: '/',
+    type: 'website',
+    images: [{ url: siteMetadata.heroImageUrl, width: 1200, height: 630 }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: siteMetadata.ogTitle,
+    description: siteMetadata.ogDescription,
+    images: [siteMetadata.heroImageUrl],
+  },
+  robots: siteMetadata.noindex
+    ? { index: false, follow: false }
+    : { index: true, follow: true },
+  other: {
+    'base:app:tagline': siteMetadata.tagline,
+    'base:app:hero': siteMetadata.heroImageUrl,
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

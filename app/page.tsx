@@ -1,31 +1,31 @@
 import type { Metadata } from 'next';
 import EntryExperience from '@/components/EntryExperience';
-
-const description =
-  'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
+import { siteMetadata } from '@/lib/site-info';
 
 export const metadata: Metadata = {
-  title: 'Rubble Rush — Daily Storm Challenge',
-  description,
+  title: siteMetadata.title,
+  description: siteMetadata.ogDescription,
   openGraph: {
-    title: 'Rubble Rush — Daily Storm Challenge',
-    description,
+    title: siteMetadata.ogTitle,
+    description: siteMetadata.ogDescription,
     url: '/',
     type: 'website',
-    siteName: 'Rubble',
-    images: ['/game-icons/og.png'],
+    siteName: siteMetadata.title,
+    images: [siteMetadata.heroImageUrl],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Rubble Rush — Daily Storm Challenge',
-    description,
-    images: ['/game-icons/og.png'],
+    title: siteMetadata.ogTitle,
+    description: siteMetadata.ogDescription,
+    images: [siteMetadata.heroImageUrl],
   },
   other: {
-    'fc:miniapp:name': 'Rubble Rush',
-    'fc:miniapp:image': '/game-icons/embed.png',
+    'fc:miniapp:name': siteMetadata.title,
+    'fc:miniapp:image': siteMetadata.heroImageUrl,
     'fc:miniapp:url': '/',
-    'fc:miniapp:button:text': 'Play',
+    'fc:miniapp:button:text': 'Bubble’it!',
+    'base:app:tagline': siteMetadata.tagline,
+    'base:app:hero': siteMetadata.heroImageUrl,
   },
 };
 

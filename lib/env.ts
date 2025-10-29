@@ -33,6 +33,7 @@ const booleanFlag = z.enum(['0', '1']);
 
 type RawEnv = {
   NEXT_PUBLIC_URL: string;
+  NEXT_PUBLIC_SITE_URL?: string;
   NEXT_PUBLIC_WEBHOOK_URL: string;
   NEXT_PUBLIC_BASE_RPC_URL: string;
   NEXT_PUBLIC_MIN_PRICE_WEI: string;
@@ -42,12 +43,15 @@ type RawEnv = {
   FARCASTER_ACCOUNT_HEADER?: string;
   FARCASTER_ACCOUNT_PAYLOAD?: string;
   FARCASTER_ACCOUNT_SIGNATURE?: string;
+  PUBLIC_OWNER_ADDRESS?: string;
   PAYMENTS_API_BASE?: string;
   PAYMENTS_API_KEY_ID?: string;
   PAYMENTS_API_SECRET?: string;
   PAYMENTS_WEBHOOK_SECRET?: string;
   BASE_PAY_MOCK: string;
   BASE_BUILDER_OWNER_ADDRESS?: string;
+  SITE_NOINDEX?: string;
+  TRIAL_SIGN_KEY?: string;
   NEXT_PUBLIC_WALLET_REQUIRED?: string;
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;
@@ -56,6 +60,7 @@ type RawEnv = {
 
 const DEFAULT_RAW: RawEnv = {
   NEXT_PUBLIC_URL: 'http://localhost:3000',
+  NEXT_PUBLIC_SITE_URL: undefined,
   NEXT_PUBLIC_WEBHOOK_URL: '/api/pay/webhook',
   NEXT_PUBLIC_BASE_RPC_URL: 'https://api.developer.coinbase.com/rpc/v1/base',
   NEXT_PUBLIC_MIN_PRICE_WEI: '1',
@@ -65,12 +70,15 @@ const DEFAULT_RAW: RawEnv = {
   FARCASTER_ACCOUNT_HEADER: undefined,
   FARCASTER_ACCOUNT_PAYLOAD: undefined,
   FARCASTER_ACCOUNT_SIGNATURE: undefined,
+  PUBLIC_OWNER_ADDRESS: undefined,
   PAYMENTS_API_BASE: undefined,
   PAYMENTS_API_KEY_ID: undefined,
   PAYMENTS_API_SECRET: undefined,
   PAYMENTS_WEBHOOK_SECRET: undefined,
   BASE_PAY_MOCK: '0',
   BASE_BUILDER_OWNER_ADDRESS: undefined,
+  SITE_NOINDEX: undefined,
+  TRIAL_SIGN_KEY: undefined,
   NEXT_PUBLIC_WALLET_REQUIRED: undefined,
   NEXT_PUBLIC_TRIAL_ENABLED: undefined,
   NEXT_PUBLIC_PRICE_MIN: undefined,
@@ -80,6 +88,7 @@ const DEFAULT_RAW: RawEnv = {
 const EnvSchema = z
   .object({
     NEXT_PUBLIC_URL: url,
+    NEXT_PUBLIC_SITE_URL: url.optional(),
     NEXT_PUBLIC_WEBHOOK_URL: relativeOrAbsolute,
     NEXT_PUBLIC_BASE_RPC_URL: url,
     NEXT_PUBLIC_MIN_PRICE_WEI: integerString,
@@ -89,12 +98,15 @@ const EnvSchema = z
     FARCASTER_ACCOUNT_HEADER: optionalString,
     FARCASTER_ACCOUNT_PAYLOAD: optionalString,
     FARCASTER_ACCOUNT_SIGNATURE: optionalString,
+    PUBLIC_OWNER_ADDRESS: evmAddress.optional(),
     PAYMENTS_API_BASE: url.optional(),
     PAYMENTS_API_KEY_ID: optionalString,
     PAYMENTS_API_SECRET: optionalString,
     PAYMENTS_WEBHOOK_SECRET: optionalString,
     BASE_PAY_MOCK: booleanFlag,
     BASE_BUILDER_OWNER_ADDRESS: evmAddress.optional(),
+    SITE_NOINDEX: z.string().optional(),
+    TRIAL_SIGN_KEY: z.string().optional(),
     NEXT_PUBLIC_WALLET_REQUIRED: z.string().optional(),
     NEXT_PUBLIC_TRIAL_ENABLED: z.string().optional(),
     NEXT_PUBLIC_PRICE_MIN: z.string().optional(),
@@ -135,6 +147,7 @@ const EnvSchema = z
 function readRawEnv(): RawEnv {
   return {
     NEXT_PUBLIC_URL: process.env.NEXT_PUBLIC_URL ?? DEFAULT_RAW.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL ?? undefined,
     NEXT_PUBLIC_WEBHOOK_URL:
       process.env.NEXT_PUBLIC_WEBHOOK_URL ?? DEFAULT_RAW.NEXT_PUBLIC_WEBHOOK_URL,
     NEXT_PUBLIC_BASE_RPC_URL:
@@ -157,12 +170,15 @@ function readRawEnv(): RawEnv {
     FARCASTER_ACCOUNT_HEADER: process.env.FARCASTER_ACCOUNT_HEADER ?? undefined,
     FARCASTER_ACCOUNT_PAYLOAD: process.env.FARCASTER_ACCOUNT_PAYLOAD ?? undefined,
     FARCASTER_ACCOUNT_SIGNATURE: process.env.FARCASTER_ACCOUNT_SIGNATURE ?? undefined,
+    PUBLIC_OWNER_ADDRESS: process.env.PUBLIC_OWNER_ADDRESS ?? undefined,
     PAYMENTS_API_BASE: process.env.PAYMENTS_API_BASE ?? undefined,
     PAYMENTS_API_KEY_ID: process.env.PAYMENTS_API_KEY_ID ?? undefined,
     PAYMENTS_API_SECRET: process.env.PAYMENTS_API_SECRET ?? undefined,
     PAYMENTS_WEBHOOK_SECRET: process.env.PAYMENTS_WEBHOOK_SECRET ?? undefined,
     BASE_PAY_MOCK: process.env.BASE_PAY_MOCK ?? DEFAULT_RAW.BASE_PAY_MOCK,
     BASE_BUILDER_OWNER_ADDRESS: process.env.BASE_BUILDER_OWNER_ADDRESS ?? undefined,
+    SITE_NOINDEX: process.env.SITE_NOINDEX ?? process.env.NEXT_PUBLIC_SITE_NOINDEX ?? undefined,
+    TRIAL_SIGN_KEY: process.env.TRIAL_SIGN_KEY ?? undefined,
     NEXT_PUBLIC_WALLET_REQUIRED: process.env.NEXT_PUBLIC_WALLET_REQUIRED ?? undefined,
     NEXT_PUBLIC_TRIAL_ENABLED: process.env.NEXT_PUBLIC_TRIAL_ENABLED ?? undefined,
     NEXT_PUBLIC_PRICE_MIN: process.env.NEXT_PUBLIC_PRICE_MIN ?? undefined,
@@ -213,6 +229,7 @@ function loadEnv(): ParsedEnv {
     FARCASTER_ACCOUNT_HEADER: parsed.FARCASTER_ACCOUNT_HEADER,
     FARCASTER_ACCOUNT_PAYLOAD: parsed.FARCASTER_ACCOUNT_PAYLOAD,
     FARCASTER_ACCOUNT_SIGNATURE: parsed.FARCASTER_ACCOUNT_SIGNATURE,
+    PUBLIC_OWNER_ADDRESS: parsed.PUBLIC_OWNER_ADDRESS,
     PAYMENTS_API_BASE: parsed.PAYMENTS_API_BASE?.replace(/\/$/, ''),
     PAYMENTS_API_KEY_ID: parsed.PAYMENTS_API_KEY_ID,
     PAYMENTS_API_SECRET: parsed.PAYMENTS_API_SECRET,
@@ -222,9 +239,12 @@ function loadEnv(): ParsedEnv {
     BASE_BUILDER_OWNER_ADDRESS:
       parsed.BASE_BUILDER_OWNER_ADDRESS ?? parsed.PAY_TO_ADDRESS,
     NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_URL: parsed.NEXT_PUBLIC_SITE_URL ?? parsed.NEXT_PUBLIC_URL,
     NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
     NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
     NEXT_PUBLIC_MIN_PRICE_WEI,
+    SITE_NOINDEX: parsed.SITE_NOINDEX,
+    TRIAL_SIGN_KEY: parsed.TRIAL_SIGN_KEY,
     NEXT_PUBLIC_WALLET_REQUIRED: parsed.NEXT_PUBLIC_WALLET_REQUIRED,
     NEXT_PUBLIC_TRIAL_ENABLED: parsed.NEXT_PUBLIC_TRIAL_ENABLED,
     NEXT_PUBLIC_PRICE_MIN: parsed.NEXT_PUBLIC_PRICE_MIN,
@@ -233,9 +253,11 @@ function loadEnv(): ParsedEnv {
 
   const publicEnv: PublicEnv = {
     NEXT_PUBLIC_URL: parsed.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_URL: parsed.NEXT_PUBLIC_SITE_URL ?? parsed.NEXT_PUBLIC_URL,
     NEXT_PUBLIC_WEBHOOK_URL: parsed.NEXT_PUBLIC_WEBHOOK_URL,
     NEXT_PUBLIC_BASE_RPC_URL: parsed.NEXT_PUBLIC_BASE_RPC_URL,
     NEXT_PUBLIC_MIN_PRICE_WEI,
+    NEXT_PUBLIC_SITE_NOINDEX: parsed.SITE_NOINDEX,
     NEXT_PUBLIC_WALLET_REQUIRED: parsed.NEXT_PUBLIC_WALLET_REQUIRED,
     NEXT_PUBLIC_TRIAL_ENABLED: parsed.NEXT_PUBLIC_TRIAL_ENABLED,
     NEXT_PUBLIC_PRICE_MIN: parsed.NEXT_PUBLIC_PRICE_MIN,
@@ -263,6 +285,7 @@ export type Env = {
   FARCASTER_ACCOUNT_HEADER?: string;
   FARCASTER_ACCOUNT_PAYLOAD?: string;
   FARCASTER_ACCOUNT_SIGNATURE?: string;
+  PUBLIC_OWNER_ADDRESS?: string;
   PAYMENTS_API_BASE?: string;
   PAYMENTS_API_KEY_ID?: string;
   PAYMENTS_API_SECRET?: string;
@@ -271,9 +294,12 @@ export type Env = {
   BASE_PAY_MOCK: string;
   BASE_BUILDER_OWNER_ADDRESS: string;
   NEXT_PUBLIC_URL: string;
+  NEXT_PUBLIC_SITE_URL: string;
   NEXT_PUBLIC_WEBHOOK_URL: string;
   NEXT_PUBLIC_BASE_RPC_URL: string;
   NEXT_PUBLIC_MIN_PRICE_WEI: string;
+  SITE_NOINDEX?: string;
+  TRIAL_SIGN_KEY?: string;
   NEXT_PUBLIC_WALLET_REQUIRED?: string;
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;
@@ -282,9 +308,11 @@ export type Env = {
 
 export type PublicEnv = {
   NEXT_PUBLIC_URL: string;
+  NEXT_PUBLIC_SITE_URL: string;
   NEXT_PUBLIC_WEBHOOK_URL: string;
   NEXT_PUBLIC_BASE_RPC_URL: string;
   NEXT_PUBLIC_MIN_PRICE_WEI: string;
+  NEXT_PUBLIC_SITE_NOINDEX?: string;
   NEXT_PUBLIC_WALLET_REQUIRED?: string;
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;

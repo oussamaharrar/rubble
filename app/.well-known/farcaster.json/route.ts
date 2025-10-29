@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getEnv } from '@/lib/env';
+import { siteMetadata } from '@/lib/site-info';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,18 +39,18 @@ export async function GET(request: Request) {
   const webhookUrl = resolveWebhookUrl(origin, env.NEXT_PUBLIC_WEBHOOK_URL);
 
   const embedUrl = `${origin}/game-icons/embed.png`;
+  const heroImageUrl = new URL('/api/og/hero', origin).toString();
 
   const miniapp = {
     version: '1',
-    name: 'Rubble (Bubble Hunt)',
-    subtitle: 'Tap • Combo • Boost on Base',
-    description:
-      'Tap bubbles, rack combos, and trigger Base boosts to freeze time on-chain.',
+    name: siteMetadata.title,
+    subtitle: siteMetadata.tagline,
+    description: siteMetadata.ogDescription,
     homeUrl: origin,
     iconUrl: `${origin}/game-icons/icon.png`,
     splashImageUrl: `${origin}/game-icons/splash.png`,
     splashBackgroundColor: '#04060B',
-    ogImageUrl: `${origin}/game-icons/og.png`,
+    ogImageUrl: heroImageUrl,
     webhookUrl,
     primaryCategory: 'games',
     tags: ['game', 'arcade', 'base', 'booster'],
@@ -62,7 +63,8 @@ export async function GET(request: Request) {
         height: 695,
       },
     ],
-    buttonTitle: 'Play',
+    buttonTitle: 'Bubble’it!',
+    heroImageUrl,
   } as const;
 
   const body: Record<string, unknown> = {
