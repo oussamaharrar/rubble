@@ -641,7 +641,6 @@ export default function GameCanvas() {
       }
 
       if (!result.hit) {
-        vibrate(25);
         if (result.drain && allowSound) {
           playTapChime({ pitch: 320 });
         }
@@ -667,12 +666,12 @@ export default function GameCanvas() {
         playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
       }
 
-      if (result.drain) {
-        vibrate(25);
-      } else if (result.energy || (result.combo ?? 0) >= 3) {
-        vibrate([5, 10, 5]);
-      } else {
-        vibrate(8);
+      if (!result.drain) {
+        if (result.energy || (result.combo ?? 0) >= 3) {
+          vibrate([5, 10, 5]);
+        } else {
+          vibrate(8);
+        }
       }
 
       const color = result.energy
