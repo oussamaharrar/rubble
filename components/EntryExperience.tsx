@@ -355,7 +355,7 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     const bottom = Math.max(0, (stageRect.bottom - hudRect.bottom) / stageRect.height);
     setHudSafeArea({ top, left, right, bottom });
     if (!safeLogged) {
-      console.log('SPAWN: safeZonesRespected=true');
+      console.log('SPAWN: safe=true');
       setSafeLogged(true);
     }
   }, [hudRect, safeLogged, setHudSafeArea, stageRect]);
