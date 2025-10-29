@@ -3,35 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
-import { getDailyKeyUTC } from '@/lib/daily';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWalletStore } from '@/lib/wallet-store';
+import { getTrialStatus } from '@/lib/trial-client';
 import type { EntryMode } from '@/types/game';
-
-const TRIAL_PREFIX = 'trial_used_';
-
-function todayKey() {
-  return `${TRIAL_PREFIX}${getDailyKeyUTC()}`;
-}
-
-function hasUsedTrial() {
-  if (typeof window === 'undefined') return true;
-  try {
-    return window.localStorage.getItem(todayKey()) === '1';
-  } catch {
-    return true;
-  }
-}
-
-function markTrialUsed() {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(todayKey(), '1');
-  } catch {
-    // ignore errors
-  }
-}
 
 interface GateModalProps {
   open: boolean;
@@ -48,7 +24,7 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
   const address = useWalletStore((state) => state.address);
   const setWallet = useWalletStore((state) => state.setWallet);
 
-  const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
+  const [trialUnavailable, setTrialUnavailable] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
@@ -56,10 +32,10 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
 
   useEffect(() => {
     if (!open) return;
-    setTrialUnavailable(hasUsedTrial());
+    setTrialUnavailable(getTrialStatus(address) === 'used');
     setConnectError(null);
     resetError();
-  }, [open, resetError]);
+  }, [address, open, resetError]);
 
   const handleConnect = useCallback(async () => {
     if (connecting) return;
@@ -88,7 +64,6 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
   }, [connecting, setWallet]);
 
   const handleTrial = useCallback(() => {
-    markTrialUsed();
     setTrialUnavailable(true);
     onComplete('trial');
   }, [onComplete]);

@@ -11,6 +11,7 @@ async function main() {
 
     const expectedEnvs = [
       'NEXT_PUBLIC_URL',
+      'NEXT_PUBLIC_SITE_URL',
       'NEXT_PUBLIC_WEBHOOK_URL',
       'NEXT_PUBLIC_BASE_RPC_URL',
       'NEXT_PUBLIC_MIN_PRICE_WEI',
@@ -18,6 +19,8 @@ async function main() {
       'NEXT_PUBLIC_TRIAL_ENABLED',
       'NEXT_PUBLIC_PRICE_MIN',
       'NEXT_PUBLIC_PRICE_MAX',
+      'PUBLIC_OWNER_ADDRESS',
+      'SITE_NOINDEX',
     ];
 
     const presenceReport = expectedEnvs.map((name) => {

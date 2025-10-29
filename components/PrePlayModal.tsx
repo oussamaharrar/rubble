@@ -8,35 +8,7 @@ import { useWallet } from '@/lib/hooks/useWallet';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import { useWalletStore } from '@/lib/wallet-store';
-import { getDailyKeyUTC } from '@/lib/daily';
-
-const TRIAL_PREFIX = 'trial_used_';
-
-function todayKey() {
-  return `${TRIAL_PREFIX}${getDailyKeyUTC()}`;
-}
-
-function hasUsedTrial() {
-  if (typeof window === 'undefined') {
-    return true;
-  }
-  try {
-    return window.localStorage.getItem(todayKey()) === '1';
-  } catch {
-    return true;
-  }
-}
-
-function markTrialUsed() {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    window.localStorage.setItem(todayKey(), '1');
-  } catch {
-    // ignore storage errors
-  }
-}
+import { getTrialStatus } from '@/lib/trial-client';
 
 interface PrePlayModalProps {
   open: boolean;
@@ -46,6 +18,7 @@ interface PrePlayModalProps {
 
 export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalProps) {
   const { walletConnected } = useWallet();
+  const address = useWalletStore((state) => state.address);
   const setWallet = useWalletStore((state) => state.setWallet);
   const grantPaidOrb = useGameStore((state) => state.grantOrbOnPaidEntry);
   const boardKind = useGameStore((state) => state.boardKind);
@@ -53,17 +26,17 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
   const dailyRunCount = useGameStore((state) => state.dailyRunCount);
   const { payToPlay, loading, error, status, resetError } = useBoost();
 
-  const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
+  const [trialUnavailable, setTrialUnavailable] = useState(() => getTrialStatus(address) === 'used');
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setTrialUnavailable(hasUsedTrial());
+      setTrialUnavailable(getTrialStatus(address) === 'used');
       setConnectError(null);
       resetError();
     }
-  }, [open, resetError]);
+  }, [address, open, resetError]);
 
   const handleConnect = useCallback(async () => {
     if (connecting) return;
@@ -92,7 +65,6 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
   }, [connecting, setWallet]);
 
   const handleTrial = useCallback(() => {
-    markTrialUsed();
     setTrialUnavailable(true);
     onStart('trial');
   }, [onStart]);

@@ -7,6 +7,7 @@ import type { BoosterType } from '@/lib/game/types';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
+import { logEvent, summarizeAddress } from '@/lib/telemetry';
 
 const MIN_PRICE_WEI = (() => {
   const fallback = process.env.NEXT_PUBLIC_MIN_PRICE_WEI ?? '1';
@@ -242,6 +243,8 @@ export default function PayButton({
   const mountedRef = useRef(true);
 
   const setWallet = useWalletStore((state) => state.setWallet);
+  const walletAddress = useWalletStore((state) => state.address);
+  const purchaseModeRef = useRef<'native' | 'commerce' | 'mock' | 'unknown'>('unknown');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -278,8 +281,14 @@ export default function PayButton({
     if (shouldGrantBooster) {
       dispatchBooster(boosterType, durationMs);
     }
+    logEvent('purchase_success', {
+      sku,
+      amountWei: amountWei.toString(),
+      mode: purchaseModeRef.current,
+      address: summarizeAddress(walletAddress),
+    });
     onGranted?.();
-  }, [boosterType, durationMs, onGranted, shouldGrantBooster]);
+  }, [amountWei, boosterType, durationMs, onGranted, shouldGrantBooster, sku, walletAddress]);
 
   const handleNativeIntent = useCallback(
     async (intent: PayIntent, fromAddress: string) => {
@@ -302,6 +311,7 @@ export default function PayButton({
         tx.maxPriorityFeePerGas = intent.maxPriorityFeePerGas;
       }
 
+      purchaseModeRef.current = 'native';
       await provider.request<string>({
         method: 'eth_sendTransaction',
         params: [tx],
@@ -317,6 +327,7 @@ export default function PayButton({
   const handleCommerceSession = useCallback(
     async (session: UnknownRecord) => {
       if (readBooleanField(session, 'mock')) {
+        purchaseModeRef.current = 'mock';
         handleGrant();
         showToast({ type: 'success', message: resolvedSuccessMessage });
         return;
@@ -334,6 +345,7 @@ export default function PayButton({
       }
 
       setInfoMessage('Waiting for Coinbase confirmation…');
+      purchaseModeRef.current = 'commerce';
       const granted = await pollForGrant(sessionId, isMounted);
       setInfoMessage(null);
 
@@ -353,6 +365,7 @@ export default function PayButton({
       return;
     }
 
+    purchaseModeRef.current = 'unknown';
     try {
       setIsSubmitting(true);
       setInfoMessage('Preparing Base checkout…');
@@ -376,6 +389,14 @@ export default function PayButton({
         return;
       }
 
+      const intentMode = hasIntent(payload) ? 'native' : hasSession(payload) ? 'commerce' : 'unknown';
+      logEvent('purchase_intent', {
+        sku,
+        amountWei: amountWei.toString(),
+        mode: intentMode,
+        address: summarizeAddress(account),
+      });
+
       if (hasIntent(payload)) {
         await handleNativeIntent(payload.intent, account);
       } else if (hasSession(payload)) {
@@ -397,9 +418,9 @@ export default function PayButton({
     handleNativeIntent,
     isSubmitting,
     setWallet,
-      showToast,
-      sku,
-    ]);
+    showToast,
+    sku,
+  ]);
 
   return (
     <div className="space-y-2">
