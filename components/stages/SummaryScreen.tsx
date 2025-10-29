@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
+import { useDailyRewardStore } from '@/lib/daily-reward-store';
 import type { BoardKind } from '@/types/game';
 import type { DrawerView } from '@/components/Drawer';
 
@@ -26,6 +27,7 @@ export default function SummaryScreen({
   const missions = useGameStore((state) => state.missions);
   const now = useGameStore((state) => state.now);
   const boosterBank = useGameStore((state) => state.boosterBank);
+  const dailyAvailable = useDailyRewardStore((state) => state.available);
 
   const elapsed = Math.max(0, Math.round(now / 1000));
   const boardLabel = board === 'daily' ? 'Daily Challenge' : 'Arcade Run';
@@ -74,6 +76,12 @@ export default function SummaryScreen({
             </div>
           </div>
         </div>
+        {dailyAvailable ? (
+          <div className="rounded-3xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-4 text-left shadow-inner shadow-fuchsia-500/20">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-fuchsia-200/80">Daily Reward</p>
+            <p className="mt-1 text-sm font-semibold text-fuchsia-100">Daily reward available! Tap the gift icon on the home screen to claim today’s boost.</p>
+          </div>
+        ) : null}
         <motion.button
           type="button"
           onClick={() => onOpenDrawer('leaderboard')}
