@@ -50,12 +50,24 @@ type AmbientDot = {
   phase: number;
 };
 
+type TextPop = {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  life: number;
+  maxLife: number;
+  size: number;
+  rise: number;
+};
+
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const particlePoolRef = useRef<Particle[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
+  const textPopsRef = useRef<TextPop[]>([]);
   const lastTimeRef = useRef<number | null>(null);
   const prefersReducedMotion = useRef(false);
   const gameSizeRef = useRef({ w: 0, h: 0, dpr: 1 });
@@ -329,23 +341,87 @@ export default function GameCanvas() {
         const y = bubble.y;
         const r = bubble.r;
         const fill = COLOR_MAP[bubble.color];
+        const kind = bubble.kind;
+        const isRare = kind === 'rare';
+        const isTreasure = kind === 'treasure';
+        const isBad = kind === 'bad';
         ctx.beginPath();
-        ctx.fillStyle = fill;
-        ctx.globalAlpha = bubble.storm ? 0.95 : 0.88;
-        ctx.shadowBlur = bubble.storm ? 35 : 16;
-        ctx.shadowColor = bubble.storm
-          ? bubble.poison
-            ? 'rgba(248,113,113,0.55)'
-            : 'rgba(59,130,246,0.55)'
-          : GLOW_MAP[bubble.color];
+        let fillStyle: CanvasGradient | string = fill;
+        if (isTreasure) {
+          const gradient = ctx.createRadialGradient(x, y, r * 0.3, x, y, r);
+          gradient.addColorStop(0, 'rgba(253,224,71,0.95)');
+          gradient.addColorStop(1, 'rgba(234,179,8,0.75)');
+          fillStyle = gradient;
+        } else if (isRare) {
+          const gradient = ctx.createRadialGradient(x, y, r * 0.25, x, y, r);
+          gradient.addColorStop(0, 'rgba(216,180,254,0.9)');
+          gradient.addColorStop(1, 'rgba(168,85,247,0.8)');
+          fillStyle = gradient;
+        } else if (isBad) {
+          const gradient = ctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+          gradient.addColorStop(0, fill);
+          gradient.addColorStop(1, 'rgba(248,113,113,0.85)');
+          fillStyle = gradient;
+        }
+        ctx.fillStyle = fillStyle;
+        ctx.globalAlpha = bubble.storm ? 0.95 : isTreasure ? 0.94 : isRare ? 0.92 : isBad ? 0.9 : 0.88;
+        ctx.shadowBlur = bubble.storm ? 35 : isTreasure ? 32 : isRare ? 28 : isBad ? 22 : 16;
+        if (bubble.storm) {
+          ctx.shadowColor = bubble.poison ? 'rgba(248,113,113,0.55)' : 'rgba(59,130,246,0.55)';
+        } else if (isTreasure) {
+          ctx.shadowColor = 'rgba(253,224,71,0.6)';
+        } else if (isRare) {
+          ctx.shadowColor = 'rgba(192,132,252,0.6)';
+        } else if (isBad) {
+          ctx.shadowColor = 'rgba(248,113,113,0.45)';
+        } else {
+          ctx.shadowColor = GLOW_MAP[bubble.color];
+        }
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
 
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = bubble.storm ? 'rgba(255,255,255,0.3)' : 'rgba(15,23,42,0.25)';
+        ctx.lineWidth = isTreasure || isRare ? 3 : 2;
+        ctx.strokeStyle = bubble.storm
+          ? 'rgba(255,255,255,0.3)'
+          : isTreasure
+          ? 'rgba(253,224,71,0.8)'
+          : isRare
+          ? 'rgba(192,132,252,0.8)'
+          : isBad
+          ? 'rgba(248,113,113,0.6)'
+          : 'rgba(15,23,42,0.25)';
         ctx.stroke();
+
+        if (isTreasure) {
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.globalAlpha = 0.5;
+          const sparkleRadius = r * 1.25;
+          const sparkCount = 6;
+          ctx.strokeStyle = 'rgba(253,224,71,0.75)';
+          ctx.lineWidth = 1.4;
+          const rotation = (now / 420 + bubble.createdAt / 600) % (Math.PI * 2);
+          ctx.rotate(rotation);
+          for (let i = 0; i < sparkCount; i += 1) {
+            ctx.beginPath();
+            const angle = (i / sparkCount) * Math.PI * 2;
+            ctx.moveTo(Math.cos(angle) * sparkleRadius * 0.35, Math.sin(angle) * sparkleRadius * 0.35);
+            ctx.lineTo(Math.cos(angle) * sparkleRadius, Math.sin(angle) * sparkleRadius);
+            ctx.stroke();
+          }
+          ctx.restore();
+        } else if (isRare && !prefersReducedMotion.current) {
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'rgba(192,132,252,0.7)';
+          ctx.beginPath();
+          ctx.arc(x, y, r * (1.1 + Math.sin(now / 360 + bubble.createdAt) * 0.05), 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
 
         if (bubble.storm && !bubble.poison) {
           ctx.beginPath();
@@ -355,6 +431,21 @@ export default function GameCanvas() {
           ctx.arc(x, y, r * 1.25, 0, Math.PI * 2);
           ctx.stroke();
           ctx.setLineDash([]);
+        }
+
+        if (isBad) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(248,113,113,0.75)';
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.arc(x - r * 0.35, y - r * 0.2, r * 0.12, 0, Math.PI * 2);
+          ctx.arc(x + r * 0.35, y - r * 0.2, r * 0.12, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x - r * 0.4, y + r * 0.2);
+          ctx.quadraticCurveTo(x, y + r * 0.4, x + r * 0.4, y + r * 0.2);
+          ctx.stroke();
+          ctx.restore();
         }
       }
 
@@ -406,6 +497,29 @@ export default function GameCanvas() {
 
         ctx.restore();
       }
+
+      for (let index = textPopsRef.current.length - 1; index >= 0; index -= 1) {
+        const pop = textPopsRef.current[index];
+        pop.life -= dt;
+        if (pop.life <= 0) {
+          textPopsRef.current.splice(index, 1);
+          continue;
+        }
+        const progress = 1 - pop.life / pop.maxLife;
+        const alpha = Math.min(1, Math.max(0, pop.life / pop.maxLife));
+        ctx.save();
+        ctx.globalAlpha = Math.pow(alpha, 0.75);
+        ctx.font = `700 ${Math.round(pop.size * (1 + 0.25 * (1 - alpha)))}px 'Inter', sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = pop.color;
+        ctx.shadowBlur = 12 * (1 - progress);
+        ctx.shadowColor = pop.color;
+        ctx.translate(pop.x, pop.y - progress * pop.rise);
+        ctx.fillText(pop.text, 0, 0);
+        ctx.restore();
+      }
+      ctx.shadowBlur = 0;
 
       const particles = particlesRef.current;
       const remaining: Particle[] = [];
@@ -593,6 +707,13 @@ export default function GameCanvas() {
       }
     };
 
+    const pushTextPop = (pop: TextPop) => {
+      textPopsRef.current.unshift(pop);
+      if (textPopsRef.current.length > 8) {
+        textPopsRef.current.length = 8;
+      }
+    };
+
     const resolveResult = (result: TapResult | null, x: number, y: number) => {
       if (!result) return;
       if (result.burst) {
@@ -663,11 +784,79 @@ export default function GameCanvas() {
         return;
       }
 
-      if (allowSound) {
-        playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
+      const kind = result.kind ?? 'normal';
+
+      if (kind === 'treasure') {
+        pushTextPop({
+          x,
+          y,
+          text: 'TREASURE!',
+          color: 'rgba(253,224,71,0.95)',
+          life: 900,
+          maxLife: 900,
+          size: 26,
+          rise: 80,
+        });
+        pushRipple({ x, y, progress: 0, maxRadius: Math.max(result.radius ?? 48, 180), color: 'rgba(253,224,71,0.45)' });
+        for (let index = 0; index < 6; index += 1) {
+          const angle = (Math.PI * 2 * index) / 6 + Math.random() * 0.5;
+          const speed = 0.18 + Math.random() * 0.1;
+          spawnParticle({
+            x,
+            y,
+            radius: 8 + Math.random() * 3,
+            life: 520,
+            color: 'rgba(253,224,71,0.8)',
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 0.04,
+            gravity: 0.0009,
+          });
+        }
+      } else if (kind === 'rare') {
+        pushTextPop({
+          x,
+          y,
+          text: 'RARE!',
+          color: 'rgba(192,132,252,0.9)',
+          life: 780,
+          maxLife: 780,
+          size: 22,
+          rise: 64,
+        });
+        pushRipple({ x, y, progress: 0, maxRadius: Math.max(result.radius ?? 36, 140), color: 'rgba(192,132,252,0.4)' });
+      } else if (kind === 'bad') {
+        pushTextPop({
+          x,
+          y,
+          text: 'WHOOPS!',
+          color: 'rgba(248,113,113,0.85)',
+          life: 680,
+          maxLife: 680,
+          size: 20,
+          rise: 52,
+        });
+        pushRipple({ x, y, progress: 0, maxRadius: Math.max(result.radius ?? 36, 120), color: 'rgba(248,113,113,0.4)' });
       }
 
-      if (result.drain) {
+      if (allowSound) {
+        if (kind === 'treasure') {
+          playTapChime({ pitch: 940 });
+        } else if (kind === 'rare') {
+          playTapChime({ pitch: 820 });
+        } else if (kind === 'bad') {
+          playTapChime({ pitch: 320 });
+        } else {
+          playTapChime({ perfect: result.perfect, pitch: result.drain ? 360 : undefined });
+        }
+      }
+
+      if (kind === 'treasure') {
+        vibrate([20, 12, 20]);
+      } else if (kind === 'rare') {
+        vibrate(20);
+      } else if (kind === 'bad') {
+        vibrate([0, 28, 28]);
+      } else if (result.drain) {
         vibrate(24);
       } else if (result.energy || (result.combo ?? 0) >= 3) {
         vibrate([20, 24, 20]);
@@ -675,7 +864,13 @@ export default function GameCanvas() {
         vibrate(22);
       }
 
-      const color = result.energy
+      const color = kind === 'treasure'
+        ? 'rgba(253,224,71,0.75)'
+        : kind === 'rare'
+        ? 'rgba(192,132,252,0.65)'
+        : kind === 'bad'
+        ? 'rgba(248,113,113,0.6)'
+        : result.energy
         ? 'rgba(56,189,248,0.6)'
         : result.drain
         ? 'rgba(248,113,113,0.6)'
@@ -683,7 +878,8 @@ export default function GameCanvas() {
         ? 'rgba(56,189,248,0.65)'
         : 'rgba(255,255,255,0.35)';
       const baseCount = result.perfect ? 8 : 6;
-      for (let index = 0; index < baseCount; index += 1) {
+      const particleCount = kind === 'treasure' ? baseCount + 6 : kind === 'rare' ? baseCount + 2 : baseCount;
+      for (let index = 0; index < particleCount; index += 1) {
         const angle = Math.random() * Math.PI * 2;
         const speed = 0.12 + Math.random() * 0.08;
         spawnParticle({
@@ -694,11 +890,8 @@ export default function GameCanvas() {
           color,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed - 0.02,
-          gravity: 0.001,
+          gravity: kind === 'treasure' ? 0.0009 : 0.001,
         });
-      }
-      if (allowSound && result.hit && !result.burst) {
-        playTapChime({ perfect: result.perfect });
       }
 
       if (result.perfect && !prefersReducedMotion.current) {
@@ -706,7 +899,7 @@ export default function GameCanvas() {
         const maxRadius = Math.max(result.radius ?? 36, 28) * 2.8;
         pushRipple({ x, y, progress: 0, maxRadius, color: rippleColor });
       }
-      if (sparkleEnabled && result.perfect) {
+      if (sparkleEnabled && (result.perfect || kind === 'treasure' || kind === 'rare')) {
         for (let index = 0; index < 4; index += 1) {
           const angle = Math.random() * Math.PI * 2;
           const speed = 0.16 + Math.random() * 0.05;

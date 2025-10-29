@@ -2,6 +2,7 @@
 
 import Modal from './Modal';
 import { useGameStore } from '@/lib/store';
+import { useDailyRewardStore } from '@/lib/stores/daily-reward';
 import type { BoardKind } from '@/types/game';
 
 interface SummaryModalProps {
@@ -18,6 +19,8 @@ export default function SummaryModal({ open, onClose, onReplay, onOpenLeaderboar
   const missions = useGameStore((state) => state.missions);
   const now = useGameStore((state) => state.now);
   const boosterBank = useGameStore((state) => state.boosterBank);
+  const treasureFound = useGameStore((state) => state.treasureFound);
+  const dailyAvailable = useDailyRewardStore((state) => state.available);
 
   const elapsed = Math.max(0, Math.round(now / 1000));
   const retryLabel = boosterBank.freeOrbs > 0 ? 'Retry now (Boost active)' : 'Retry (free if Boost active)';
@@ -64,6 +67,18 @@ export default function SummaryModal({ open, onClose, onReplay, onOpenLeaderboar
           </span>
         ) : null}
       </div>
+      {treasureFound ? (
+        <div className="mt-3 flex items-center justify-center gap-2 rounded-2xl border border-amber-400/30 bg-amber-500/15 px-3 py-2 text-xs font-semibold text-amber-100">
+          <span className="text-base">🎉</span>
+          <span>You found a Treasure bubble! Bonus boost activated.</span>
+        </div>
+      ) : null}
+      {dailyAvailable ? (
+        <div className="mt-3 flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100">
+          <span className="text-base">🎁</span>
+          <span>Daily Reward available—tap the gift icon on home to claim.</span>
+        </div>
+      ) : null}
       <div className="mt-4 grid grid-cols-2 gap-4 text-center">
         <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-300/80">Score</p>
