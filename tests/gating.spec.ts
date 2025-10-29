@@ -26,7 +26,72 @@ test.describe('wallet + trial gate', () => {
       });
     });
     await initWalletStub(page);
+    page.on('console', (message) => {
+      const text = message.text();
+      if (/^(GATE:|RUN:|HUD:|SPAWN:)/.test(text)) {
+        console.log(text);
+      }
+    });
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+
+    const baseOrigin = new URL(BASE_URL).origin;
+
+    const metadataResponse = await page.request.get(`${baseOrigin}/api/site/metadata`);
+    expect(metadataResponse.status()).toBe(200);
+    const metadataPayload = (await metadataResponse.json()) as {
+      ok: boolean;
+      heroImageUrl: string;
+      tagline: string;
+      ogTitle: string;
+      ogDescription: string;
+      noindex?: boolean;
+    };
+    expect(metadataPayload.ok).toBeTruthy();
+    expect(metadataPayload.heroImageUrl).toMatch(/\/api\/og\/hero$/);
+    expect(metadataPayload.tagline.length).toBeGreaterThan(0);
+    expect(metadataPayload.ogTitle.length).toBeGreaterThan(0);
+    expect(metadataPayload.ogDescription.length).toBeGreaterThan(0);
+
+    const heroUrl = new URL(metadataPayload.heroImageUrl, baseOrigin);
+    const heroRequestUrl = heroUrl.origin === baseOrigin ? heroUrl.toString() : `${baseOrigin}${heroUrl.pathname}${
+      heroUrl.search
+    }`;
+    const heroResponse = await page.request.get(heroRequestUrl);
+    expect(heroResponse.status()).toBe(200);
+    expect(heroResponse.headers()['content-type']).toContain('image/');
+
+    const accountResponse = await page.request.get(`${baseOrigin}/.well-known/app-account.json`);
+    expect(accountResponse.status()).toBe(200);
+    const accountPayload = (await accountResponse.json()) as
+      | { ok: false }
+      | { address: string; chainId: number; timestamp: string; domain: string };
+    if ('ok' in accountPayload && accountPayload.ok === false) {
+      // ok false is acceptable when no PUBLIC_OWNER_ADDRESS is configured.
+    } else {
+      expect(accountPayload.address).toMatch(/^0x[a-fA-F0-9]{40}$/u);
+      expect(accountPayload.chainId).toBe(8453);
+      expect(new Date(accountPayload.timestamp).toString()).not.toBe('Invalid Date');
+      expect(accountPayload.domain.length).toBeGreaterThan(0);
+    }
+
+    const signerResponse = await page.request.post(`${baseOrigin}/api/signer/health`, {
+      data: { signer: { status: 'approved' } },
+      headers: { 'content-type': 'application/json' },
+    });
+    const signerPayload = (await signerResponse.json()) as { ok: boolean; reason?: string; keyUsed?: string };
+
+    console.log(
+      `META: heroImageUrl ${heroResponse.ok() ? 'ok' : 'missing'}, tagline ${
+        metadataPayload.tagline ? 'ok' : 'missing'
+      }, ogTitle ${metadataPayload.ogTitle ? 'ok' : 'missing'}, ogDescription ${
+        metadataPayload.ogDescription ? 'ok' : 'missing'
+      }, noindex=${metadataPayload.noindex === true}`
+    );
+    console.log(
+      `SIGNER: ok=${signerPayload.ok === true} keyUsed=${signerPayload.keyUsed ?? 'none'} reason=${
+        signerPayload.reason ?? 'none'
+      }`
+    );
 
     // Without wallet, play opens gate overlay.
     await page.getByTestId('play-button').click();
@@ -73,7 +138,7 @@ test.describe('wallet + trial gate', () => {
       expect(bubble.y - bubble.r).toBeGreaterThanOrEqual(safeTop - 2);
     }
 
-    console.log('SPAWN: safeZonesRespected=true');
+    console.log('SPAWN: safe=true');
 
     // Pause and exit to home to consume the trial.
     await page.getByRole('button', { name: '⏸' }).click();
