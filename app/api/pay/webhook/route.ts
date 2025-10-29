@@ -1,7 +1,7 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { ENV } from '@/lib/env';
+import { getEnv } from '@/lib/env';
 import { verifyCommerceWebhook } from '@/lib/pay';
 import { markSessionGranted } from '@/lib/pay-session-store';
 
@@ -225,7 +225,8 @@ function isBaseChain(chain: string | null) {
 }
 
 export async function POST(req: Request) {
-  if (!ENV.PAYMENTS_MODE_B_ENABLED) {
+  const env = getEnv();
+  if (!env.PAYMENTS_MODE_B_ENABLED) {
     return NextResponse.json({ ok: false, reason: 'MODE_B_DISABLED' }, { status: 400 });
   }
 
@@ -269,7 +270,7 @@ export async function POST(req: Request) {
   }
 
   const recipient = extractRecipient(payload)?.toLowerCase();
-  const expectedRecipient = ENV.PAY_TO_ADDRESS.toLowerCase();
+  const expectedRecipient = env.PAY_TO_ADDRESS.toLowerCase();
   if (!recipient || recipient !== expectedRecipient) {
     return NextResponse.json(
       { ok: false, reason: 'INVALID_RECIPIENT' },
@@ -278,7 +279,7 @@ export async function POST(req: Request) {
   }
 
   const amountWei = extractAmount(payload);
-  if (amountWei === null || amountWei < ENV.MIN_PRICE_WEI) {
+  if (amountWei === null || amountWei < env.MIN_PRICE_WEI) {
     return NextResponse.json(
       { ok: false, reason: 'UNDER_MINIMUM' },
       { status: 400, headers: RESPONSE_HEADERS }

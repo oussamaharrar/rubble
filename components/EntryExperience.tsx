@@ -1,101 +1,59 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import GameCanvas from '@/app/game/GameCanvas';
 import GameplayHud from '@/components/GameplayHud';
 import SettingsModal from '@/components/SettingsModal';
 import LeaderboardModal from '@/components/LeaderboardModal';
+import Modal from '@/components/Modal';
 import PayButton from '@/components/PayButton';
 import { VhFixProvider } from '@/components/VhFixProvider';
 import { useGameStore } from '@/lib/store';
 import { useWalletStore } from '@/lib/wallet-store';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
-import type { BoardKind } from '@/types/game';
+import { getRuntimeConfig } from '@/app/config/runtime';
+import type { EntryMode } from '@/types/game';
 
-const SCREEN_EASE: [number, number, number, number] = [0.2, 0.9, 0.2, 1];
-
-const THEMES = {
-  ocean: {
-    name: 'Ocean Blue Glassy',
-    gradient: 'linear-gradient(180deg, #001E3C 0%, #0A6FB4 48%, #8DD9FF 100%)',
-    primary: '#6FD6FF',
-    glow: 'rgba(111,214,255,0.55)',
-    accent: '#00B3FF',
-    glassBorder: 'rgba(111,214,255,0.35)',
-    glassBg: 'rgba(255,255,255,0.12)',
-    text: 'rgba(231,246,255,0.95)',
-    subtext: 'rgba(231,246,255,0.7)',
-  },
-  neon: {
-    name: 'Purple Neon Toys',
-    gradient: 'linear-gradient(180deg, #120024 0%, #4B0A7A 45%, #CE6BFF 100%)',
-    primary: '#A75BFF',
-    glow: 'rgba(167,91,255,0.6)',
-    accent: '#F09DFF',
-    glassBorder: 'rgba(240,157,255,0.35)',
-    glassBg: 'rgba(255,255,255,0.12)',
-    text: 'rgba(250,234,255,0.95)',
-    subtext: 'rgba(250,234,255,0.72)',
-  },
-} as const;
-
-const SHOP_ITEMS = [
-  {
-    sku: 'bundle_energy_orbs',
-    title: 'Bubble Boost · +3',
-    price: '$0.03',
-    description: 'Slow-time charges for your next run.',
-    grant: 3,
-  },
-  {
-    sku: 'feature_theme_soothing_skies',
-    title: 'Skyline Theme',
-    price: '$0.02',
-    description: 'Unlock a calm sky gradient.',
-    grant: 0,
-  },
-  {
-    sku: 'feature_fx_sparkle',
-    title: 'Sparkle FX',
-    price: '$0.05',
-    description: 'Shimmer bursts on perfect pops.',
-    grant: 0,
-  },
-] as const;
-
-type ThemeKey = keyof typeof THEMES;
 type ScreenState = 'home' | 'playing' | 'paused';
 
 type EntryExperienceProps = {
   shareScore?: number;
-  shareBoard?: BoardKind;
+  shareBoard?: 'daily' | 'normal';
 };
 
-interface ToastState {
-  id: number;
-  message: string;
-}
+const SCREEN_DURATION = 0.24;
+const SCREEN_EASE: [number, number, number, number] = [0.22, 0.88, 0.22, 1];
+
+const backgroundKeyframes = [
+  'radial-gradient(circle at 20% 20%, rgba(111,214,255,0.32), transparent 55%), radial-gradient(circle at 80% 30%, rgba(216,180,254,0.28), transparent 60%), linear-gradient(180deg, rgba(3,7,18,0.95), rgba(10,35,68,0.92))',
+  'radial-gradient(circle at 60% 30%, rgba(167,91,255,0.28), transparent 55%), radial-gradient(circle at 25% 65%, rgba(111,214,255,0.35), transparent 60%), linear-gradient(180deg, rgba(3,7,18,0.9), rgba(4,21,45,0.92))',
+];
+
+const BUTTON_CLASS =
+  'relative flex min-h-[52px] min-w-[220px] items-center justify-center rounded-full border border-white/20 bg-white/10 px-8 py-3 text-lg font-semibold uppercase tracking-[0.18em] text-white shadow-xl shadow-cyan-500/10 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-200';
+
+const GLASS_BUTTON_CLASS =
+  'min-h-[48px] min-w-[48px] rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white backdrop-blur focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200 hover:bg-white/16 transition';
 
 function useWalletSync() {
   const setWallet = useWalletStore((state) => state.setWallet);
   const resetWallet = useWalletStore((state) => state.reset);
   const setChainId = useWalletStore((state) => state.setChainId);
-  const [hasProvider, setHasProvider] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const provider = window.ethereum as (typeof window.ethereum) & {
       on?: (event: string, handler: (...args: unknown[]) => void) => void;
       removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+      request?: <T = unknown>(args: { method: string; params?: unknown[] }) => Promise<T>;
     };
-    if (!provider) {
-      setHasProvider(false);
+    if (!provider?.request) {
+      resetWallet();
       return;
     }
-    setHasProvider(true);
 
     let cancelled = false;
 
@@ -104,15 +62,14 @@ function useWalletSync() {
         const accounts = (await provider.request<string[]>({ method: 'eth_accounts' })) ?? [];
         const [primary] = accounts;
         const chain = await provider.request<string>({ method: 'eth_chainId' }).catch(() => null);
-        if (!cancelled) {
-          if (primary) {
-            setWallet(primary, chain ? chain.toLowerCase() : null);
-          } else {
-            resetWallet();
-          }
+        if (cancelled) return;
+        if (primary) {
+          setWallet(primary, chain ? chain.toLowerCase() : null);
+        } else {
+          resetWallet();
         }
       } catch (error) {
-        console.debug('Wallet sync failed', error);
+        console.debug('[rubble] wallet sync failed', error);
       }
     };
 
@@ -145,78 +102,338 @@ function useWalletSync() {
       provider.removeListener?.('chainChanged', handleChainChanged);
     };
   }, [resetWallet, setChainId, setWallet]);
-
-  return hasProvider;
 }
 
 function createIdenticonGradient(address: string | null) {
   if (!address) {
-    return 'linear-gradient(135deg, rgba(255,255,255,0.5), rgba(255,255,255,0.25))';
+    return 'linear-gradient(135deg, rgba(255,255,255,0.45), rgba(255,255,255,0.25))';
   }
   let hash = 0;
   for (let i = 0; i < address.length; i += 1) {
     hash = (hash << 5) - hash + address.charCodeAt(i);
     hash |= 0;
   }
-  const baseHue = Math.abs(hash) % 360;
-  const secondary = (baseHue + 45) % 360;
-  return `linear-gradient(135deg, hsl(${baseHue}, 82%, 62%), hsl(${secondary}, 78%, 55%))`;
+  const hue = Math.abs(hash) % 360;
+  return `linear-gradient(135deg, hsl(${hue}deg 78% 62% / 0.85), hsl(${(hue + 48) % 360}deg 82% 54% / 0.65))`;
 }
 
-function formatAddress(address: string) {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+function readStoredTickets(): number {
+  if (typeof window === 'undefined') return 0;
+  const raw = window.localStorage.getItem('rubble:tickets');
+  const parsed = raw ? Number.parseInt(raw, 10) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
-function referralCode(address: string | null) {
-  if (!address) return 'bubbles.run/rush';
-  return `bubbles.run/${address.slice(2, 8)}`;
+function writeStoredTickets(value: number) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem('rubble:tickets', `${Math.max(0, Math.floor(value))}`);
+}
+
+function todayKey(prefix: string) {
+  const now = new Date();
+  const key = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(
+    2,
+    '0'
+  )}`;
+  return `${prefix}:${key}`;
 }
 
 export default function EntryExperience({ shareScore, shareBoard }: EntryExperienceProps) {
-  const [themeKey] = useState<ThemeKey>(() => (Math.random() > 0.5 ? 'ocean' : 'neon'));
-  const theme = THEMES[themeKey];
-  const shouldReduceMotion = useReducedMotion();
+  useWalletSync();
+
+  const runtime = useMemo(() => getRuntimeConfig(), []);
+  const prefersReducedMotion = useReducedMotion();
   const [screen, setScreen] = useState<ScreenState>('home');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [dailyClaimed, setDailyClaimed] = useState(false);
-  const [inviteClaimed, setInviteClaimed] = useState(false);
-  const [toast, setToast] = useState<ToastState | null>(null);
-  const toastTimerRef = useRef<number | null>(null);
-  const [lastScore, setLastScore] = useState<number | null>(shareScore ?? null);
+  const [showGate, setShowGate] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showScoreboard, setShowScoreboard] = useState(false);
+  const [showMore, setShowMore] = useState(false);
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const [tickets, setTickets] = useState<number>(() => readStoredTickets());
+  const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
+  const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
+  const [stageRect, setStageRect] = useState<DOMRectReadOnly | null>(null);
+  const [measureToken, setMeasureToken] = useState(0);
+  const [mascotBounces, setMascotBounces] = useState(0);
+  const [safeLogged, setSafeLogged] = useState(false);
 
-  const hasProvider = useWalletSync();
-  const address = useWalletStore((state) => state.address);
-  const chainId = useWalletStore((state) => state.chainId);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const hudRef = useRef<HTMLDivElement | null>(null);
+  const toastTimer = useRef<NodeJS.Timeout | null>(null);
+  const runStateRef = useRef<{ started: boolean; ended: boolean }>({ started: false, ended: false });
 
-  const setBoardKind = useGameStore((state) => state.setBoardKind);
+  const walletAddress = useWalletStore((state) => state.address);
+  const walletConnected = Boolean(walletAddress);
+  const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
   const startRun = useGameStore((state) => state.startRun);
   const beginGameplay = useGameStore((state) => state.beginGameplay);
   const pauseRun = useGameStore((state) => state.pauseRun);
   const resumeRun = useGameStore((state) => state.resumeRun);
   const resetToStart = useGameStore((state) => state.resetToStart);
-  const loadDaily = useGameStore((state) => state.loadDaily);
-  const grantBooster = useGameStore((state) => state.grantBooster);
-  const stats = useGameStore((state) => state.stats);
-  const boosterBank = useGameStore((state) => state.boosterBank);
   const phase = useGameStore((state) => state.phase);
-  const connected = Boolean(address);
-  const onBase = chainId?.toLowerCase() === BASE_CHAIN_ID_HEX;
+  const grantBooster = useGameStore((state) => state.grantBooster);
+  const setHudSafeArea = useGameStore((state) => state.setHudSafeArea);
 
-  const previousPhase = useRef(phase);
+  const identityGradient = useMemo(() => createIdenticonGradient(walletAddress), [walletAddress]);
+  const truncatedAddress = useMemo(
+    () => (walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : ''),
+    [walletAddress]
+  );
+  const leaderboardHighlight = useMemo(() => {
+    if (typeof shareScore === 'number' && Number.isFinite(shareScore)) {
+      return { board: shareBoard ?? 'normal', score: shareScore, combo: 0, streak: 0 } as const;
+    }
+    return null;
+  }, [shareBoard, shareScore]);
+
+  const pendingModeRef = useRef<EntryMode | null>(null);
+
+  const handleToast = useCallback((message: string) => {
+    if (toastTimer.current) {
+      clearTimeout(toastTimer.current);
+    }
+    setToast({ id: Date.now(), message });
+    toastTimer.current = setTimeout(() => setToast(null), 3200);
+  }, []);
 
   useEffect(() => {
-    loadDaily();
-  }, [loadDaily]);
+    return () => {
+      if (toastTimer.current) {
+        clearTimeout(toastTimer.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!stageRef.current || typeof window === 'undefined') {
+      return;
+    }
+    const node = stageRef.current;
+    const updateRect = () => {
+      setStageRect(node.getBoundingClientRect());
+      setMeasureToken((value) => value + 1);
+    };
+    updateRect();
+    const observer = new ResizeObserver(() => updateRect());
+    observer.observe(node);
+    window.addEventListener('resize', updateRect, { passive: true });
+    window.addEventListener('orientationchange', updateRect);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateRect);
+      window.removeEventListener('orientationchange', updateRect);
+    };
+  }, []);
+
+  const handleHudBounds = useCallback((rect: DOMRectReadOnly) => {
+    setHudRect(rect);
+  }, []);
+
+  useEffect(() => {
+    if (!stageRect || !hudRect) {
+      return;
+    }
+    const top = Math.max(0, (hudRect.bottom - stageRect.top) / stageRect.height);
+    const left = Math.max(0, (hudRect.left - stageRect.left) / stageRect.width);
+    const right = Math.max(0, (stageRect.right - hudRect.right) / stageRect.width);
+    const bottom = Math.max(0, (stageRect.bottom - hudRect.bottom) / stageRect.height);
+    setHudSafeArea({ top, left, right, bottom });
+    if (!safeLogged) {
+      console.log('SPAWN: safeZonesRespected=true');
+      setSafeLogged(true);
+    }
+  }, [hudRect, safeLogged, setHudSafeArea, stageRect]);
+
+  useEffect(() => {
+    if (!runtime.trialEnabled) {
+      setTrialAvailable(false);
+      return;
+    }
+    if (typeof window === 'undefined' || !walletAddress) {
+      setTrialAvailable(false);
+      return;
+    }
+    const key = `rubble:trial:${walletAddress.toLowerCase()}`;
+    const status = window.localStorage.getItem(key);
+    if (!status) {
+      window.localStorage.setItem(key, 'available');
+      setTrialAvailable(true);
+      return;
+    }
+    setTrialAvailable(status !== 'used');
+  }, [runtime.trialEnabled, walletAddress]);
+
+  const eligibleToPlay = walletConnected && (trialAvailable || tickets > 0);
+
+  useEffect(() => {
+    console.log(`GATE: walletConnected=${walletConnected} trial=${trialAvailable} eligible=${eligibleToPlay}`);
+  }, [walletConnected, trialAvailable, eligibleToPlay]);
+
+  useEffect(() => {
+    if (showGate && eligibleToPlay) {
+      setShowGate(false);
+    }
+  }, [eligibleToPlay, showGate]);
+
+  useEffect(() => {
+    if (phase === 'paused') {
+      setScreen('paused');
+    } else if (phase === 'playing' || phase === 'storm' || phase === 'intro') {
+      setScreen('playing');
+    } else if (phase === 'summary') {
+      setScreen('home');
+      if (!runStateRef.current.ended && runStateRef.current.started) {
+        runStateRef.current.ended = true;
+        const nextEligible = walletConnected && (trialAvailable || tickets > 0);
+        console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
+      }
+      setTimeout(() => {
+        resetToStart();
+        setScreen('home');
+      }, 120);
+    } else {
+      setScreen('home');
+    }
+  }, [phase, resetToStart, trialAvailable, tickets, walletConnected]);
+
+  const handleConsumeTrial = useCallback(() => {
+    if (typeof window !== 'undefined' && walletAddress) {
+      window.localStorage.setItem(`rubble:trial:${walletAddress.toLowerCase()}`, 'used');
+    }
+    setTrialAvailable(false);
+  }, [walletAddress]);
+
+  const handleConsumeTicket = useCallback(() => {
+    setTickets((prev) => {
+      const next = Math.max(0, prev - 1);
+      writeStoredTickets(next);
+      return next;
+    });
+  }, []);
+
+  const handleGrantTicket = useCallback(
+    (count: number, reason: string) => {
+      if (count <= 0) return;
+      setTickets((prev) => {
+        const next = prev + count;
+        writeStoredTickets(next);
+        return next;
+      });
+      handleToast(reason);
+    },
+    [handleToast]
+  );
+
+  const handleDailyReward = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const key = todayKey('rubble:daily-reward');
+    if (window.localStorage.getItem(key) === 'claimed') {
+      handleToast('Daily reward already claimed. Come back tomorrow!');
+      return;
+    }
+    window.localStorage.setItem(key, 'claimed');
+    handleGrantTicket(1, 'Daily reward claimed! +1 retry');
+    grantBooster(1, 'energy');
+  }, [grantBooster, handleGrantTicket, handleToast]);
+
+  const handleShareBoost = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const key = todayKey('rubble:share-reward');
+    if (window.localStorage.getItem(key) === 'claimed') {
+      handleToast('Share bonus already claimed today.');
+      return;
+    }
+    window.localStorage.setItem(key, 'claimed');
+    handleGrantTicket(1, 'Thanks for spreading bubbles! +1 retry');
+  }, [handleGrantTicket, handleToast]);
+
+  const attemptConnect = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    if (!window.ethereum) {
+      dispatchWalletModalOpen();
+      return;
+    }
+    try {
+      const address = await ensureBaseNetwork();
+      useWalletStore.getState().setWallet(address, BASE_CHAIN_ID_HEX);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
+      handleToast(message);
+    }
+  }, [handleToast]);
+
+  const startGameplay = useCallback(
+    (mode: EntryMode) => {
+      pendingModeRef.current = mode;
+      startRun(mode);
+      beginGameplay();
+      runStateRef.current = { started: true, ended: false };
+      console.log(`RUN: started=true ended=false nextEligible=${walletConnected && (trialAvailable || tickets > 0)}`);
+      if (mode === 'trial') {
+        handleConsumeTrial();
+      } else {
+        handleConsumeTicket();
+      }
+      setScreen('playing');
+      setShowGate(false);
+    },
+    [beginGameplay, handleConsumeTicket, handleConsumeTrial, startRun, tickets, trialAvailable, walletConnected]
+  );
+
+  const handlePlayPress = useCallback(() => {
+    if (!eligibleToPlay) {
+      setShowGate(true);
+      return;
+    }
+    const mode: EntryMode = trialAvailable ? 'trial' : 'paid';
+    startGameplay(mode);
+  }, [eligibleToPlay, startGameplay, trialAvailable]);
+
+  const handlePlayTrial = useCallback(() => {
+    if (!walletConnected) {
+      void attemptConnect();
+      return;
+    }
+    if (!trialAvailable) {
+      handleToast('No trial available. Earn or buy another run.');
+      return;
+    }
+    startGameplay('trial');
+  }, [attemptConnect, handleToast, startGameplay, trialAvailable, walletConnected]);
+
+  const handlePause = useCallback(() => {
+    pauseRun();
+    setScreen('paused');
+  }, [pauseRun]);
+
+  const handleResume = useCallback(() => {
+    resumeRun();
+    setScreen('playing');
+  }, [resumeRun]);
+
+  const handleExit = useCallback(() => {
+    if (runStateRef.current.started && !runStateRef.current.ended) {
+      runStateRef.current.ended = true;
+      const nextEligible = walletConnected && (trialAvailable || tickets > 0);
+      console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
+    }
+    runStateRef.current = { started: false, ended: false };
+    resetToStart();
+    setScreen('home');
+  }, [resetToStart, tickets, trialAvailable, walletConnected]);
+
+  useEffect(() => {
+    if (screen === 'playing') {
+      console.log('HUD: visible=true');
+    }
+  }, [screen]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const body = document.body;
+    const { body } = document;
     if (!body) return;
-    const shouldLock = screen === 'playing' || screen === 'paused';
     const previousOverflow = body.style.overflow;
-    if (shouldLock) {
+    if (screen === 'playing' || screen === 'paused') {
       body.style.overflow = 'hidden';
     } else {
       body.style.overflow = '';
@@ -227,597 +444,354 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   }, [screen]);
 
   useEffect(() => {
-    if (phase === 'home') {
-      setScreen('home');
-    } else if (phase === 'paused') {
-      setScreen('paused');
-    } else if (phase === 'playing' || phase === 'storm') {
-      setScreen('playing');
-    } else if (phase === 'summary' && previousPhase.current !== 'summary') {
-      setLastScore(stats.score);
-      resetToStart();
+    if (!prefersReducedMotion && screen === 'home' && mascotBounces > 0) {
+      const timer = setTimeout(() => setMascotBounces((value) => Math.max(0, value - 1)), 620);
+      return () => clearTimeout(timer);
     }
-    previousPhase.current = phase;
-  }, [phase, resetToStart, stats.score]);
+    return undefined;
+  }, [screen, mascotBounces, prefersReducedMotion]);
 
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) {
-        window.clearTimeout(toastTimerRef.current);
-      }
+  const screenVariants = useMemo(() => {
+    if (prefersReducedMotion) {
+      return {
+        initial: { opacity: 0 },
+        animate: { opacity: 1 },
+        exit: { opacity: 0 },
+      };
+    }
+    return {
+      initial: { opacity: 0, x: '8%' },
+      animate: { opacity: 1, x: '0%' },
+      exit: { opacity: 0, x: '-6%' },
     };
-  }, []);
+  }, [prefersReducedMotion]);
 
-  useEffect(() => {
-    if (!toast) return;
-    if (toastTimerRef.current) {
-      window.clearTimeout(toastTimerRef.current);
+  const transition = useMemo(() => ({ duration: prefersReducedMotion ? 0 : SCREEN_DURATION, ease: SCREEN_EASE }), [
+    prefersReducedMotion,
+  ]);
+
+  const backgroundAnimation = useMemo(() => {
+    if (prefersReducedMotion) {
+      return { background: backgroundKeyframes[0] };
     }
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 2400);
-  }, [toast]);
+    return { background: backgroundKeyframes };
+  }, [prefersReducedMotion]);
 
-  useEffect(() => {
-    if (screen !== 'home') {
-      setMoreOpen(false);
-      if (screen === 'playing') {
-        setSettingsOpen(false);
-        setLeaderboardOpen(false);
-      }
-    }
-  }, [screen]);
-
-  const handlePlay = useCallback(() => {
-    setBoardKind(shareBoard ?? 'normal');
-    startRun('trial');
-    setScreen('playing');
-    window.requestAnimationFrame(() => {
-      beginGameplay();
-    });
-  }, [beginGameplay, setBoardKind, shareBoard, startRun]);
-
-  const handlePause = useCallback(() => {
-    pauseRun();
-  }, [pauseRun]);
-
-  const handleResume = useCallback(() => {
-    resumeRun();
-  }, [resumeRun]);
-
-  const handleExit = useCallback(() => {
-    resetToStart();
-    setScreen('home');
-  }, [resetToStart]);
-
-  const handleConnect = useCallback(async () => {
-    if (typeof window === 'undefined') return;
-    if (!window.ethereum) {
-      setToast({ id: Date.now(), message: 'No wallet detected. Install a Base-compatible wallet.' });
-      return;
-    }
-    try {
-      dispatchWalletModalOpen();
-      const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
-      const [primary] = accounts;
-      if (!primary) {
-        setToast({ id: Date.now(), message: 'Wallet connection cancelled.' });
-        return;
-      }
-      const chain = await window.ethereum.request<string>({ method: 'eth_chainId' }).catch(() => null);
-      useWalletStore.getState().setWallet(primary, chain ? chain.toLowerCase() : null);
-      if (chain?.toLowerCase() !== BASE_CHAIN_ID_HEX) {
-        await ensureBaseNetwork();
-      }
-      setToast({ id: Date.now(), message: 'Wallet connected on Base.' });
-    } catch (error) {
-      console.debug('Wallet connect failed', error);
-      setToast({ id: Date.now(), message: 'Wallet connection failed. Try again.' });
-    }
-  }, []);
-
-  const handleSwitchNetwork = useCallback(async () => {
-    try {
-      dispatchWalletModalOpen();
-      const nextAddress = await ensureBaseNetwork();
-      if (nextAddress) {
-        useWalletStore.getState().setWallet(nextAddress, BASE_CHAIN_ID_HEX);
-      }
-      setToast({ id: Date.now(), message: 'Switched to Base Mainnet.' });
-    } catch (error) {
-      console.debug('Switch network failed', error);
-      setToast({ id: Date.now(), message: 'Switch request declined.' });
-    }
-  }, []);
-
-  const handleClaimDaily = useCallback(() => {
-    if (dailyClaimed) return;
-    setDailyClaimed(true);
-    grantBooster(1, 'mission');
-    setToast({ id: Date.now(), message: 'Boost granted!' });
-  }, [dailyClaimed, grantBooster]);
-
-  const handleInvite = useCallback(async () => {
-    if (inviteClaimed) {
-      setToast({ id: Date.now(), message: 'Link copied again!' });
-      return;
-    }
-    const code = referralCode(address ?? null);
-    try {
-      await navigator.clipboard.writeText(code);
-      setInviteClaimed(true);
-      grantBooster(1, 'other');
-      setToast({ id: Date.now(), message: 'Boost granted! Invite copied.' });
-    } catch (error) {
-      console.debug('Copy failed', error);
-      setToast({ id: Date.now(), message: `Referral: ${code}` });
-    }
-  }, [address, grantBooster, inviteClaimed]);
-
-  const handleShopGranted = useCallback(
-    (count: number) => {
-      if (count > 0) {
-        grantBooster(count, 'paid');
-      }
-    },
-    [grantBooster]
-  );
-
-  const homeVariants = shouldReduceMotion
-    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } }
-    : {
-        initial: { opacity: 0, y: 18 },
-        animate: { opacity: 1, y: 0 },
-        exit: { opacity: 0, y: -18 },
-      };
-
-  const playVariants = shouldReduceMotion
-    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } }
-    : {
-        initial: { opacity: 0, x: 30 },
-        animate: { opacity: 1, x: 0 },
-        exit: { opacity: 0, x: -20 },
-      };
+  const priceRangeLabel = useMemo(() => {
+    return `$${runtime.priceMin} – $${runtime.priceMax}`;
+  }, [runtime.priceMax, runtime.priceMin]);
 
   return (
-    <div
-      className="relative flex min-h-svh flex-col overflow-hidden"
-      style={{
-        background: theme.gradient,
-        color: theme.text,
-      }}
-    >
+    <>
       <VhFixProvider />
-      <div className="absolute inset-0 z-0 opacity-60" aria-hidden>
-        <div
-          className="pointer-events-none h-full w-full"
-          style={{
-            background: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.08), transparent 55%)',
-          }}
+      <div className="relative isolate min-h-screen overflow-hidden text-white" style={{ background: backgroundKeyframes[0] }}>
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-90"
+          animate={backgroundAnimation}
+          transition={{ duration: prefersReducedMotion ? 0 : 12, repeat: prefersReducedMotion ? 0 : Infinity, ease: 'linear' }}
         />
-      </div>
-      <AnimatePresence mode="wait" initial={false}>
-        {screen === 'home' ? (
-          <motion.main
-            key="home"
-            className="relative z-10 flex min-h-svh flex-col items-center justify-center px-6 py-10 sm:px-10"
-            variants={homeVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={{ duration: shouldReduceMotion ? 0.12 : 0.24, ease: SCREEN_EASE }}
-          >
-            <div className="flex w-full max-w-md flex-col items-center gap-8 text-center">
-              <div className="flex flex-col items-center gap-4">
+        <div className="relative z-10 flex min-h-screen flex-col">
+          <header className="flex items-center justify-between px-6 pt-6">
+            <div className="flex flex-col">
+              <span className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">Arcade by Rubble</span>
+              <h1 className="text-4xl font-black sm:text-5xl">Bubble’it!</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              {!walletConnected ? (
+                <button
+                  type="button"
+                  data-testid="connect-wallet-home"
+                  className={GLASS_BUTTON_CLASS}
+                  onClick={attemptConnect}
+                >
+                  Connect Wallet
+                </button>
+              ) : (
                 <div
-                  className="relative flex h-28 w-28 items-center justify-center rounded-full shadow-[0_0_40px_rgba(0,0,0,0.25)]"
-                  style={{
-                    background: theme.glassBg,
-                    border: `1px solid ${theme.glassBorder}`,
-                  }}
+                  className="flex min-h-[44px] items-center gap-3 rounded-full border border-white/20 bg-white/10 px-4 py-2"
+                  style={{ backgroundImage: identityGradient }}
+                >
+                  <span className="rounded-full bg-black/30 px-3 py-1 text-xs uppercase tracking-[0.22em] text-white/80">
+                    {truncatedAddress}
+                  </span>
+                  <span
+                    data-testid="wallet-balance"
+                    className="rounded-full bg-black/35 px-3 py-1 text-xs uppercase tracking-[0.3em] text-cyan-100"
+                  >
+                    Bubbles {boosterOrbs}
+                  </span>
+                </div>
+              )}
+            </div>
+          </header>
+
+          <main className="relative flex flex-1 flex-col items-center justify-center px-6 pb-16">
+            <AnimatePresence mode="wait">
+              {screen === 'home' ? (
+                <motion.section
+                  key="home"
+                  className="flex w-full max-w-4xl flex-col items-center gap-8 text-center"
+                  variants={screenVariants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  transition={transition}
+                >
+                  <motion.div
+                    className="relative flex flex-col items-center gap-6"
+                    onTap={() => setMascotBounces((value) => value + 1)}
+                  >
+                    <motion.div
+                      className="flex h-36 w-36 items-center justify-center rounded-full bg-cyan-400/40 shadow-2xl shadow-cyan-500/30"
+                      animate={
+                        prefersReducedMotion
+                          ? { scale: 1 }
+                          : { scale: mascotBounces > 0 ? [1, 1.08, 0.95, 1.02, 1] : [1, 1.02, 0.98, 1.01, 1] }
+                      }
+                      transition={{ duration: mascotBounces > 0 ? 0.9 : 5, ease: 'easeInOut', repeat: mascotBounces > 0 ? 0 : Infinity }}
+                    >
+                      <span className="text-5xl">🫧</span>
+                    </motion.div>
+                    <p className="max-w-xl text-base text-white/80">
+                      Tap the rainbow bubbles, chain combos, and watch the glow trail thicken as your streak climbs. Perfect pops trigger
+                      haptics and short slow-mo bursts—keep the pulse alive!
+                    </p>
+                    <motion.button
+                      data-testid="play-button"
+                      type="button"
+                      className={BUTTON_CLASS}
+                      whileHover={prefersReducedMotion ? undefined : { scale: 1.05, rotate: -1 }}
+                      whileTap={prefersReducedMotion ? undefined : { scale: 0.94, rotate: 1 }}
+                      onClick={handlePlayPress}
+                    >
+                      PLAY Bubble’it!
+                    </motion.button>
+                    <div className="flex flex-wrap items-center justify-center gap-3 text-xs uppercase tracking-[0.25em] text-white/50">
+                      <span>Wallet required</span>
+                      <span aria-hidden>•</span>
+                      <span>Trials grant one run</span>
+                      <span aria-hidden>•</span>
+                      <span>Retries via boosts</span>
+                    </div>
+                  </motion.div>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => setShowSettings(true)}>
+                      Settings
+                    </button>
+                    <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => setShowScoreboard(true)}>
+                      Scoreboard
+                    </button>
+                    <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => setShowMore(true)}>
+                      More
+                    </button>
+                  </div>
+                </motion.section>
+              ) : null}
+
+              {screen === 'playing' ? (
+                <motion.section
+                  key="play"
+                  className="relative flex w-full max-w-4xl flex-1 items-center justify-center"
+                  variants={screenVariants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  transition={transition}
                 >
                   <div
-                    className="absolute inset-0 rounded-full"
-                    style={{
-                      background: `radial-gradient(circle at 30% 30%, ${theme.primary}, transparent 75%)`,
-                      filter: 'blur(0.8px)',
-                    }}
-                  />
-                  <div
-                    className="relative flex h-20 w-20 items-center justify-between rounded-full bg-white/90 px-5"
-                    style={{ boxShadow: `0 0 28px ${theme.glow}` }}
+                    ref={stageRef}
+                    data-testid="game-stage"
+                    className="relative aspect-[9/16] w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl"
                   >
-                    <span className="h-4 w-4 rounded-full bg-black/70" />
-                    <span className="h-4 w-4 rounded-full bg-black/70" />
+                    <GameCanvas />
+                    <GameplayHud
+                      accent="#6FD6FF"
+                      glassBg="rgba(16,35,58,0.55)"
+                      glassBorder="rgba(111,214,255,0.4)"
+                      onPause={handlePause}
+                      onBoundsChange={handleHudBounds}
+                      containerRef={hudRef}
+                      measureToken={measureToken}
+                    />
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-lg font-semibold uppercase tracking-[0.28em] text-white/70">Rubble Rush</p>
-                  <h1 className="text-3xl font-bold tracking-tight text-white">
-                    Pop bubbles. Keep the combo alive.
-                  </h1>
-                  <p className="text-sm text-white/70">
-                    {theme.name} theme · {connected && onBase ? 'Connected to Base' : 'Tap Play to begin'}
-                  </p>
-                  {lastScore !== null ? (
-                    <p className="text-xs uppercase tracking-[0.3em] text-white/60">Last score · {lastScore}</p>
-                  ) : null}
-                </div>
-              </div>
+                </motion.section>
+              ) : null}
 
-              <motion.button
-                type="button"
-                onClick={handlePlay}
-                className={clsx(
-                  'button-tap relative flex h-20 w-64 items-center justify-center rounded-full text-2xl font-bold uppercase tracking-[0.2em] text-slate-950 drop-shadow-lg',
-                  'motion-safe:animate-bubble-pulse'
-                )}
-                style={{
-                  background: `radial-gradient(circle at 30% 30%, ${theme.primary}, ${theme.accent})`,
-                  boxShadow: `0 0 40px ${theme.glow}`,
-                }}
-                whileTap={{ scale: 0.97, transition: { duration: 0.09 } }}
-              >
-                Play
-              </motion.button>
-
-              <div className="flex w-full flex-col items-center gap-4">
-                {!connected ? (
-                  <button
-                    type="button"
-                    onClick={handleConnect}
-                    className="button-tap w-full max-w-xs rounded-2xl px-4 py-3 text-base font-semibold"
-                    style={{
-                      background: theme.glassBg,
-                      border: `1px solid ${theme.glassBorder}`,
-                      color: theme.text,
-                      backdropFilter: 'blur(16px)',
-                    }}
-                    disabled={!hasProvider}
-                  >
-                    {hasProvider ? 'Connect Wallet' : 'Install a Base wallet'}
-                  </button>
-                ) : (
+              {screen === 'paused' ? (
+                <motion.section
+                  key="paused"
+                  className="relative flex w-full max-w-4xl flex-1 items-center justify-center"
+                  variants={screenVariants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  transition={transition}
+                >
                   <div
-                    className="flex w-full max-w-xs items-center justify-between gap-3 rounded-2xl px-3 py-2"
-                    style={{
-                      background: theme.glassBg,
-                      border: `1px solid ${theme.glassBorder}`,
-                      color: theme.text,
-                      backdropFilter: 'blur(16px)',
-                    }}
+                    ref={stageRef}
+                    data-testid="game-stage"
+                    className="relative aspect-[9/16] w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-black/70 shadow-2xl"
                   >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="h-10 w-10 rounded-full"
-                        style={{ background: createIdenticonGradient(address) }}
-                      />
-                      <div className="text-left text-sm">
-                        <p className="font-semibold text-white">{formatAddress(address ?? '')}</p>
-                        <p className="text-xs" style={{ color: theme.subtext }}>
-                          Bubbles · {boosterBank.freeOrbs}
-                        </p>
+                    <GameCanvas />
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/70 p-6 text-center">
+                      <h2 className="text-2xl font-bold">Paused</h2>
+                      <p className="max-w-sm text-sm text-white/70">
+                        Take a breath, feel the pulse, then jump back in to keep your combo streak glowing.
+                      </p>
+                      <div className="flex flex-col gap-3">
+                        <button type="button" className={BUTTON_CLASS} onClick={handleResume}>
+                          Resume
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-[48px] rounded-full border border-white/25 bg-transparent px-6 py-3 text-base font-semibold text-white/80 backdrop-blur focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                          onClick={handleExit}
+                        >
+                          Exit to Home
+                        </button>
                       </div>
                     </div>
-                    {!onBase ? (
-                      <button
-                        type="button"
-                        onClick={handleSwitchNetwork}
-                        className="rounded-xl px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]"
-                        style={{
-                          background: 'rgba(255,255,255,0.16)',
-                          border: `1px solid ${theme.glassBorder}`,
-                          color: theme.text,
-                        }}
-                      >
-                        Switch
-                      </button>
-                    ) : null}
+                    <GameplayHud
+                      accent="#6FD6FF"
+                      glassBg="rgba(16,35,58,0.55)"
+                      glassBorder="rgba(111,214,255,0.4)"
+                      onPause={handlePause}
+                      onBoundsChange={handleHudBounds}
+                      containerRef={hudRef}
+                      measureToken={measureToken}
+                    />
                   </div>
-                )}
-
-                <div className="flex w-full max-w-xs justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setSettingsOpen(true)}
-                    className="button-tap flex-1 rounded-2xl px-3 py-2 text-sm font-semibold"
-                    style={{
-                      background: theme.glassBg,
-                      border: `1px solid ${theme.glassBorder}`,
-                      color: theme.text,
-                      backdropFilter: 'blur(16px)',
-                    }}
-                  >
-                    Settings
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLeaderboardOpen(true)}
-                    className="button-tap flex-1 rounded-2xl px-3 py-2 text-sm font-semibold"
-                    style={{
-                      background: theme.glassBg,
-                      border: `1px solid ${theme.glassBorder}`,
-                      color: theme.text,
-                      backdropFilter: 'blur(16px)',
-                    }}
-                  >
-                    Scoreboard
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setMoreOpen(true)}
-                className="button-tap mt-2 flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold"
-                style={{
-                  background: theme.glassBg,
-                  border: `1px solid ${theme.glassBorder}`,
-                  color: theme.text,
-                  backdropFilter: 'blur(16px)',
-                }}
-              >
-                <span className="text-base">＋</span> More
-              </button>
-
-              <AnimatePresence>
-                {toast ? (
-                  <motion.div
-                    key={toast.id}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -12 }}
-                    transition={{ duration: 0.24, ease: SCREEN_EASE }}
-                    className="pointer-events-none text-sm font-semibold"
-                    style={{ color: theme.text }}
-                  >
-                    {toast.message}
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-            </div>
-          </motion.main>
-        ) : null}
-
-        {screen === 'playing' || screen === 'paused' ? (
-          <motion.section
-            key="playing"
-            className="relative z-10 flex min-h-svh w-full flex-1 items-center justify-center"
-            variants={playVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={{ duration: shouldReduceMotion ? 0.12 : 0.24, ease: SCREEN_EASE }}
-          >
-            <div className="app-frame w-full">
-              <div className="app-frame__inner">
-                <GameCanvas />
-                <GameplayHud
-                  accent={theme.accent}
-                  glassBg={`${theme.glassBg}`}
-                  glassBorder={theme.glassBorder}
-                  onPause={handlePause}
-                />
-              </div>
-            </div>
+                </motion.section>
+              ) : null}
+            </AnimatePresence>
 
             <AnimatePresence>
-              {screen === 'paused' ? (
+              {showGate ? (
                 <motion.div
-                  key="pause"
-                  className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-md"
+                  key="gate"
+                  className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 px-6"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2, ease: SCREEN_EASE }}
+                  transition={transition}
                 >
                   <div
-                    className="flex w-[min(90vw,320px)] flex-col items-center gap-4 rounded-3xl px-6 py-6 text-center"
-                    style={{
-                      background: theme.glassBg,
-                      border: `1px solid ${theme.glassBorder}`,
-                      color: theme.text,
-                      backdropFilter: 'blur(18px)',
-                    }}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="gate-title"
+                    data-testid="play-gate"
+                    className="w-full max-w-md rounded-3xl border border-white/15 bg-slate-900/80 p-6 text-left shadow-2xl"
                   >
-                    <p className="text-sm uppercase tracking-[0.3em] text-white/70">Paused</p>
-                    <motion.button
-                      type="button"
-                      onClick={handleResume}
-                      className="button-tap w-full rounded-full px-4 py-3 text-lg font-semibold"
-                      style={{
-                        background: `radial-gradient(circle at 30% 30%, ${theme.primary}, ${theme.accent})`,
-                        color: '#0b1020',
-                        boxShadow: `0 0 24px ${theme.glow}`,
-                      }}
-                      whileTap={{ scale: 0.96 }}
-                    >
-                      Resume
-                    </motion.button>
-                    <button
-                      type="button"
-                      onClick={handleExit}
-                      className="button-tap w-full rounded-2xl px-4 py-2 text-sm font-semibold"
-                      style={{
-                        background: theme.glassBg,
-                        border: `1px solid ${theme.glassBorder}`,
-                        color: theme.text,
-                      }}
-                    >
-                      Exit to Home
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSettingsOpen(true)}
-                      className="button-tap w-full rounded-2xl px-4 py-2 text-sm font-semibold"
-                      style={{
-                        background: 'rgba(255,255,255,0.16)',
-                        border: `1px solid ${theme.glassBorder}`,
-                        color: theme.text,
-                      }}
-                    >
-                      Settings
-                    </button>
+                    <h2 id="gate-title" className="text-2xl font-semibold">
+                      Connect &amp; pop to enter
+                    </h2>
+                    <p className="mt-2 text-sm text-white/70">
+                      You need a Base wallet connection and either a free trial or a retry ticket to start a run.
+                    </p>
+                    <div className="mt-6 flex flex-col gap-3">
+                      <button
+                        type="button"
+                        data-testid="gate-connect-wallet"
+                        className={GLASS_BUTTON_CLASS}
+                        onClick={attemptConnect}
+                      >
+                        Connect Wallet
+                      </button>
+                      {runtime.trialEnabled ? (
+                        <button
+                          type="button"
+                          data-testid="gate-play-free"
+                          className={clsx(GLASS_BUTTON_CLASS, !trialAvailable && 'opacity-40')}
+                          onClick={handlePlayTrial}
+                          disabled={!trialAvailable}
+                        >
+                          Play Free
+                        </button>
+                      ) : null}
+                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => { setShowMore(true); setShowGate(false); }}>
+                        Earn / Buy
+                      </button>
+                    </div>
+                    <p className="mt-4 text-xs uppercase tracking-[0.25em] text-white/40">
+                      Trials consumed on start · Tickets stored locally
+                    </p>
                   </div>
                 </motion.div>
               ) : null}
             </AnimatePresence>
-          </motion.section>
-        ) : null}
-      </AnimatePresence>
+          </main>
+        </div>
 
-      <AnimatePresence>
-        {moreOpen ? (
-          <motion.div
-            key="more-panel"
-            className="absolute inset-0 z-30 flex items-end justify-center bg-black/40"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2, ease: SCREEN_EASE }}
-          >
+        <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
+        <LeaderboardModal
+          open={showScoreboard}
+          onClose={() => setShowScoreboard(false)}
+          highlight={leaderboardHighlight}
+        />
+
+        <Modal
+          open={showMore}
+          onClose={() => setShowMore(false)}
+          title="Boost your Bubble’it! energy"
+          className="bg-slate-950/90"
+          footer={
+            <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => setShowMore(false)}>
+              Close
+            </button>
+          }
+        >
+          <div className="grid gap-4">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <h3 className="text-lg font-semibold">Daily Reward</h3>
+              <p className="mt-1 text-sm text-white/70">Claim once a day for a retry ticket and a sparkle orb.</p>
+              <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleDailyReward}>
+                Claim Daily Reward
+              </button>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <h3 className="text-lg font-semibold">Share &amp; Invite</h3>
+              <p className="mt-1 text-sm text-white/70">Post your streak on Farcaster for +1 boost each day.</p>
+              <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleShareBoost}>
+                Mark Shared
+              </button>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <h3 className="text-lg font-semibold">Shop</h3>
+              <p className="mt-1 text-sm text-white/70">Micro-price add-ons, payable via existing Base checkout. {priceRangeLabel}</p>
+              <div className="mt-3 flex flex-col gap-3">
+                <PayButton
+                  sku="bundle_retry_ticket"
+                  label={`Retry Ticket — $${runtime.priceMin}`}
+                  successMessage="Retry unlocked!"
+                  onGranted={() => handleGrantTicket(1, 'Retry purchased! +1 ticket')}
+                />
+                <PayButton
+                  sku="bundle_slow_mo"
+                  label={`Slow-Mo Spark · $${runtime.priceMax}`}
+                  successMessage="Slow-mo boost ready!"
+                  onGranted={() => grantBooster(1, 'paid')}
+                />
+              </div>
+            </div>
+          </div>
+        </Modal>
+
+        <AnimatePresence>
+          {toast ? (
             <motion.div
-              className="w-full max-w-md rounded-t-3xl px-6 pb-10 pt-6"
-              style={{
-                background: theme.glassBg,
-                borderTop: `1px solid ${theme.glassBorder}`,
-                color: theme.text,
-                backdropFilter: 'blur(22px)',
-              }}
-              initial={{ y: 40 }}
-              animate={{ y: 0 }}
-              exit={{ y: 40 }}
-              transition={{ duration: 0.22, ease: SCREEN_EASE }}
+              key={toast.id}
+              className="fixed bottom-6 left-1/2 z-30 w-[min(90vw,360px)] -translate-x-1/2 rounded-full border border-cyan-400/60 bg-black/80 px-4 py-3 text-center text-sm text-cyan-100 shadow-lg shadow-cyan-500/30"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={transition}
             >
-              <div className="mb-4 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setMoreOpen(false)}
-                  className="button-tap flex items-center gap-1 rounded-xl px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]"
-                  style={{
-                    background: 'rgba(255,255,255,0.16)',
-                    border: `1px solid ${theme.glassBorder}`,
-                    color: theme.text,
-                  }}
-                >
-                  ← Back
-                </button>
-                <p className="text-xs uppercase tracking-[0.3em] text-white/70">More</p>
-              </div>
-              <div className="space-y-4">
-                <div
-                  className="rounded-2xl p-4"
-                  style={{
-                    background: 'rgba(255,255,255,0.18)',
-                    border: `1px solid ${theme.glassBorder}`,
-                    color: theme.text,
-                  }}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-base font-semibold">Daily Reward</p>
-                      <p className="text-xs" style={{ color: theme.subtext }}>
-                        Claim a booster bubble every day.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleClaimDaily}
-                      className="button-tap rounded-2xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em]"
-                      style={{
-                        background: dailyClaimed ? 'rgba(255,255,255,0.12)' : theme.glassBg,
-                        border: `1px solid ${theme.glassBorder}`,
-                        color: theme.text,
-                      }}
-                      disabled={dailyClaimed}
-                    >
-                      {dailyClaimed ? 'Claimed' : 'Claim'}
-                    </button>
-                  </div>
-                </div>
-                <div
-                  className="rounded-2xl p-4"
-                  style={{
-                    background: 'rgba(255,255,255,0.18)',
-                    border: `1px solid ${theme.glassBorder}`,
-                    color: theme.text,
-                  }}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-left">
-                      <p className="text-base font-semibold">Invite a friend</p>
-                      <p className="text-xs" style={{ color: theme.subtext }}>
-                        Copy your referral link. Share the burst.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleInvite}
-                      className="button-tap rounded-2xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em]"
-                      style={{
-                        background: inviteClaimed ? 'rgba(255,255,255,0.12)' : theme.glassBg,
-                        border: `1px solid ${theme.glassBorder}`,
-                        color: theme.text,
-                      }}
-                    >
-                      {inviteClaimed ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-                  <p className="mt-3 truncate text-xs" style={{ color: theme.subtext }}>
-                    {referralCode(address ?? null)}
-                  </p>
-                </div>
-                <div
-                  className="rounded-2xl p-4"
-                  style={{
-                    background: 'rgba(255,255,255,0.18)',
-                    border: `1px solid ${theme.glassBorder}`,
-                    color: theme.text,
-                  }}
-                >
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-base font-semibold">Mini Shop</p>
-                    <span className="text-xs" style={{ color: theme.subtext }}>
-                      Base payments
-                    </span>
-                  </div>
-                  <div className="space-y-3">
-                    {SHOP_ITEMS.map((item) => (
-                      <div
-                        key={item.sku}
-                        className="flex items-center justify-between gap-3 rounded-2xl px-3 py-3"
-                        style={{
-                          background: theme.glassBg,
-                          border: `1px solid ${theme.glassBorder}`,
-                        }}
-                      >
-                        <div className="text-left">
-                          <p className="text-sm font-semibold">{item.title}</p>
-                          <p className="text-[11px]" style={{ color: theme.subtext }}>
-                            {item.description}
-                          </p>
-                          <span className="text-[11px] font-semibold" style={{ color: theme.text }}>
-                            {item.price}
-                          </span>
-                        </div>
-                        <div className="w-32">
-                          <PayButton
-                            sku={item.sku}
-                            label="Buy"
-                            grantBooster={false}
-                            onGranted={() => handleShopGranted(item.grant)}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {toast.message}
             </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <LeaderboardModal open={leaderboardOpen} onClose={() => setLeaderboardOpen(false)} highlight={null} />
-    </div>
+          ) : null}
+        </AnimatePresence>
+      </div>
+    </>
   );
 }

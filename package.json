@@ -10,7 +10,8 @@
     "postbuild": "node scripts/postbuild.js",
     "verify:manifest": "node scripts/verify-manifest.mjs",
     "lint": "next lint",
-    "test:e2e": "playwright test --reporter=list"
+    "test:e2e": "playwright test",
+    "postinstall": "node scripts/print-build-env.mjs"
   },
   "dependencies": {
     "@base-org/account": "^2.4.0",
@@ -43,6 +44,7 @@
     "eslint-plugin-security": "^2.1.0"
   },
   "engines": {
-    "node": "20.x"
-  }
+    "node": ">=18 <=22"
+  },
+  "packageManager": "pnpm@10.0.0"
 }

@@ -374,6 +374,40 @@ function createBubble(
   };
 }
 
+type SafeInterior = { top: number; right: number; bottom: number; left: number };
+
+function computeSafeInterior(
+  width: number,
+  height: number,
+  safeArea: { top: number; right: number; bottom: number; left: number }
+): SafeInterior {
+  const baseTop = height * 0.12;
+  const baseSide = width * 0.08;
+  const safeTop = Math.min(height, Math.max(baseTop, safeArea.top * height));
+  const safeLeft = Math.min(width - baseSide, Math.max(baseSide, safeArea.left * width));
+  const safeRight = Math.max(safeLeft + 40, width - Math.max(baseSide, safeArea.right * width));
+  const safeBottom = Math.max(safeTop + 40, height - Math.max(0, safeArea.bottom * height));
+  return { top: safeTop, right: safeRight, bottom: safeBottom, left: safeLeft };
+}
+
+function bubbleWithinInterior(bubble: Bubble, interior: SafeInterior) {
+  const { x, y, r } = bubble;
+  if (x + r > interior.right || x - r < interior.left) {
+    return false;
+  }
+  if (y + r > interior.bottom || y - r < interior.top) {
+    return false;
+  }
+  return true;
+}
+
+function clampBubbleToInterior(bubble: Bubble, interior: SafeInterior): Bubble {
+  const radius = bubble.r;
+  const clampedX = Math.min(Math.max(bubble.x, interior.left + radius), interior.right - radius);
+  const clampedY = Math.min(Math.max(bubble.y, interior.top + radius), interior.bottom - radius);
+  return { ...bubble, x: clampedX, y: clampedY };
+}
+
 function createSpikeMine(
   rng: () => number,
   width: number,
@@ -469,6 +503,12 @@ export type TapResult = {
   poppedIds?: string[];
 };
 
+declare global {
+  interface Window {
+    rubbleLastSpawnSnapshot?: Array<{ x: number; y: number; r: number }>;
+  }
+}
+
 type GameStore = {
   phase: GamePhase;
   boardKind: BoardKind;
@@ -523,6 +563,7 @@ type GameStore = {
   burstPointer: { x: number; y: number } | null;
   golden: GoldenOrbState;
   nextGoldenSpawnAt: number;
+  hudSafeArea: { top: number; right: number; bottom: number; left: number };
   startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
@@ -545,6 +586,7 @@ type GameStore = {
   unlockFeature: (key: keyof UnlockState) => void;
   markFirstRun: (patch: Partial<FirstRunProgress>) => void;
   setStageSize: (width: number, height: number) => void;
+  setHudSafeArea: (area: { top: number; right: number; bottom: number; left: number }) => void;
   claimMission: (id: string) => void;
   progressColor: (color: BubbleColor) => void;
   progressCombo: (combo: number) => void;
@@ -922,6 +964,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   burstPointer: null,
   golden: defaultGoldenState(),
   nextGoldenSpawnAt: GOLDEN_RESPAWN_MIN_MS,
+  hudSafeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   startRun: (mode = 'trial') => {
     const state = get();
     const board = state.boardKind;
@@ -1298,8 +1341,39 @@ export const useGameStore = create<GameStore>((set, get) => {
     const recent = [...state.recentSpawns];
     const next: Bubble[] = [];
     const newHazards: Hazard[] = [];
+    const interior = computeSafeInterior(width, height, state.hudSafeArea);
     for (let index = 0; index < count; index += 1) {
-      const bubble = createBubble(rng, width, height, now, palette, paletteSize, speedFactor, recent, easingFactor);
+      let chosen: Bubble | null = null;
+      let lastCandidate: Bubble | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const candidate = createBubble(
+          rng,
+          width,
+          height,
+          now,
+          palette,
+          paletteSize,
+          speedFactor,
+          recent,
+          easingFactor
+        );
+        lastCandidate = candidate;
+        if (bubbleWithinInterior(candidate, interior)) {
+          chosen = candidate;
+          break;
+        }
+      }
+      const bubble = chosen ?? clampBubbleToInterior(lastCandidate ?? createBubble(
+        rng,
+        width,
+        height,
+        now,
+        palette,
+        paletteSize,
+        speedFactor,
+        recent,
+        easingFactor
+      ), interior);
       next.push(bubble);
       recent.push({ x: bubble.x, y: bubble.y, at: now });
       if (recent.length > SPAWN_MEMORY) {
@@ -1320,12 +1394,16 @@ export const useGameStore = create<GameStore>((set, get) => {
       recentSpawns: recent,
       hazards: trimmedHazards,
     });
+    if (typeof window !== 'undefined') {
+      window.rubbleLastSpawnSnapshot = next.map((bubble) => ({ x: bubble.x, y: bubble.y, r: bubble.r }));
+    }
   },
   spawnStormOrbs: () => {
     const state = get();
     if (state.phase !== 'storm') return;
     const { rng, width, height, now, bubbleSpeedFactor, maxBubbles, maxStormOrbs, palette } = state;
     const payload: Bubble[] = [];
+    const interior = computeSafeInterior(width, height, state.hudSafeArea);
     const energyCount = 3 + Math.floor(rng() * 3);
     const drainCount = 2 + Math.floor(rng() * 2);
     for (let i = 0; i < energyCount; i += 1) {
@@ -1360,15 +1438,21 @@ export const useGameStore = create<GameStore>((set, get) => {
         )
       );
     }
-    const newSpawns = payload.map((bubble) => ({ x: bubble.x, y: bubble.y, at: now }));
+    const safePayload = payload.map((bubble) =>
+      bubbleWithinInterior(bubble, interior) ? bubble : clampBubbleToInterior(bubble, interior)
+    );
+    const newSpawns = safePayload.map((bubble) => ({ x: bubble.x, y: bubble.y, at: now }));
     const recent = [...state.recentSpawns, ...newSpawns];
     while (recent.length > SPAWN_MEMORY) {
       recent.shift();
     }
     set({
-      bubbles: [...state.bubbles, ...payload].slice(0, maxBubbles + maxStormOrbs),
+      bubbles: [...state.bubbles, ...safePayload].slice(0, maxBubbles + maxStormOrbs),
       recentSpawns: recent,
     });
+    if (typeof window !== 'undefined') {
+      window.rubbleLastSpawnSnapshot = safePayload.map((bubble) => ({ x: bubble.x, y: bubble.y, r: bubble.r }));
+    }
   },
   beginBurstCharge: (x, y) => {
     const state = get();
@@ -1756,6 +1840,17 @@ export const useGameStore = create<GameStore>((set, get) => {
   },
   setStageSize: (width, height) => {
     set({ width, height });
+  },
+  setHudSafeArea: (area) => {
+    const clamp = (value: number) => Math.min(Math.max(value, 0), 0.95);
+    set({
+      hudSafeArea: {
+        top: clamp(area.top),
+        right: clamp(area.right),
+        bottom: clamp(area.bottom),
+        left: clamp(area.left),
+      },
+    });
   },
   claimMission: (id) => {
     const state = get();

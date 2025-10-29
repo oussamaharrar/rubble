@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { ENV } from '@/lib/env';
+import { getEnv } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +13,7 @@ function resolveOrigin(request: Request) {
   return `${proto}://${host}`;
 }
 
-function resolveWebhookUrl(origin: string) {
-  const value = ENV.NEXT_PUBLIC_WEBHOOK_URL;
+function resolveWebhookUrl(origin: string, value: string) {
   if (value.startsWith('http://') || value.startsWith('https://')) {
     try {
       const parsed = new URL(value);
@@ -34,8 +33,9 @@ function resolveWebhookUrl(origin: string) {
 }
 
 export async function GET(request: Request) {
+  const env = getEnv();
   const origin = resolveOrigin(request);
-  const webhookUrl = resolveWebhookUrl(origin);
+  const webhookUrl = resolveWebhookUrl(origin, env.NEXT_PUBLIC_WEBHOOK_URL);
 
   const embedUrl = `${origin}/game-icons/embed.png`;
 
@@ -71,19 +71,19 @@ export async function GET(request: Request) {
   };
 
   if (
-    ENV.FARCASTER_ACCOUNT_HEADER &&
-    ENV.FARCASTER_ACCOUNT_PAYLOAD &&
-    ENV.FARCASTER_ACCOUNT_SIGNATURE
+    env.FARCASTER_ACCOUNT_HEADER &&
+    env.FARCASTER_ACCOUNT_PAYLOAD &&
+    env.FARCASTER_ACCOUNT_SIGNATURE
   ) {
     body.accountAssociation = {
-      header: ENV.FARCASTER_ACCOUNT_HEADER,
-      payload: ENV.FARCASTER_ACCOUNT_PAYLOAD,
-      signature: ENV.FARCASTER_ACCOUNT_SIGNATURE,
+      header: env.FARCASTER_ACCOUNT_HEADER,
+      payload: env.FARCASTER_ACCOUNT_PAYLOAD,
+      signature: env.FARCASTER_ACCOUNT_SIGNATURE,
     } as const;
   }
 
-  if (ENV.BASE_BUILDER_OWNER_ADDRESS) {
-    body.baseBuilder = { ownerAddress: ENV.BASE_BUILDER_OWNER_ADDRESS } as const;
+  if (env.BASE_BUILDER_OWNER_ADDRESS) {
+    body.baseBuilder = { ownerAddress: env.BASE_BUILDER_OWNER_ADDRESS } as const;
   }
 
   return NextResponse.json(body, {
