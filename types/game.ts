@@ -4,6 +4,8 @@ export type EntryMode = 'trial' | 'paid';
 
 export type BoardKind = 'normal' | 'daily';
 
+export type BubbleKind = 'normal' | 'bad' | 'rare' | 'treasure';
+
 export type Bubble = {
   id: string;
   x: number;
@@ -15,6 +17,7 @@ export type Bubble = {
   storm?: boolean;
   poison?: boolean;
   createdAt: number;
+  kind?: BubbleKind;
 };
 
 export type GamePhase = 'home' | 'gate' | 'intro' | 'playing' | 'storm' | 'paused' | 'summary';

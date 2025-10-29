@@ -3,9 +3,12 @@
 import { create } from 'zustand';
 import { persistMissions, readPersistedMissions, generateDailyMissions, bonusStorageKey } from '@/lib/missions';
 import { deriveDailyTuning, getDailyKeyUTC, isDailyEligible, seedFromDailyKey, type DailyTuning } from '@/lib/daily';
+import { logEvent } from '@/lib/telemetry';
+import { useBoostStore } from '@/lib/boost-store';
 import type {
   BoardKind,
   Bubble,
+  BubbleKind,
   BoosterBank,
   BubbleColor,
   BurstState,
@@ -35,6 +38,10 @@ const BURST_OVERCHARGE_MULTIPLIER = 1.3;
 const BURST_SCORE_MULTIPLIER = 0.7;
 const GOLDEN_RESPAWN_MIN_MS = 20_000;
 const GOLDEN_RESPAWN_RANGE_MS = 10_000;
+
+const RARE_CHANCE = 0.05;
+const TREASURE_CHANCE = 0.01;
+const BAD_CHANCE = 0.08;
 
 const BOOSTER_KEY = 'rubble:booster-bank';
 const SETTINGS_KEY = 'rubble_settings_v2';
@@ -327,6 +334,20 @@ function spawnFromEdge(
   return { x, y, vx, vy };
 }
 
+function determineBubbleKind(rng: () => number): BubbleKind {
+  const roll = rng();
+  if (roll < TREASURE_CHANCE) {
+    return 'treasure';
+  }
+  if (roll < TREASURE_CHANCE + RARE_CHANCE) {
+    return 'rare';
+  }
+  if (roll < TREASURE_CHANCE + RARE_CHANCE + BAD_CHANCE) {
+    return 'bad';
+  }
+  return 'normal';
+}
+
 function createBubble(
   rng: () => number,
   width: number,
@@ -355,6 +376,7 @@ function createBubble(
     }
     spawn = spawnFromEdge(edge, radius, rng, width, height, speedFactor, easingFactor);
   }
+  const kind = options?.storm ? 'normal' : determineBubbleKind(rng);
   const color = options?.storm
     ? options?.energy
       ? 'blue'
@@ -371,6 +393,7 @@ function createBubble(
     storm: options?.storm ?? false,
     poison: options?.poison ?? false,
     createdAt: now,
+    kind,
   };
 }
 
@@ -501,11 +524,16 @@ export type TapResult = {
   goldenToxic?: boolean;
   burst?: boolean;
   poppedIds?: string[];
+  rare?: boolean;
+  treasure?: boolean;
+  bad?: boolean;
+  earnedBoost?: boolean;
 };
 
 declare global {
   interface Window {
     rubbleLastSpawnSnapshot?: Array<{ x: number; y: number; r: number }>;
+    __rubbleGameStore?: typeof useGameStore;
   }
 }
 
@@ -611,6 +639,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     }
 
     const bubble = state.bubbles[index];
+    const bubbleKind: BubbleKind = bubble.kind ?? 'normal';
     const now = state.now;
     let targetState = state.target;
     let nextTargetAt = state.nextTargetAt;
@@ -636,6 +665,11 @@ export const useGameStore = create<GameStore>((set, get) => {
     let timeGainWindowStart = state.timeGainWindowStart;
     let timeGainAccumulated = state.timeGainAccumulated;
     let cloudPenalty = false;
+    const rare = bubbleKind === 'rare';
+    const treasure = bubbleKind === 'treasure';
+    const bad = bubbleKind === 'bad';
+    let earnedBoost = false;
+    let scoreDelta = 0;
 
     if (now - timeGainWindowStart >= 1_000) {
       timeGainWindowStart = now;
@@ -663,12 +697,21 @@ export const useGameStore = create<GameStore>((set, get) => {
       stats.timeLeft = Math.max(0, stats.timeLeft - DRAIN_PENALTY_TIME);
       registerTimeLoss(DRAIN_PENALTY_TIME, now);
       stats.score = Math.max(0, stats.score - DRAIN_PENALTY_SCORE);
+      scoreDelta -= DRAIN_PENALTY_SCORE;
       stats.chainLen = 0;
       stats.lastColor = undefined;
       stats.streak = Math.max(stats.streak, state.currentStreak);
       currentStreak = 0;
       comboWindowUntil = 0;
       drain = true;
+    } else if (bad) {
+      stats.score = Math.max(0, stats.score - 12);
+      scoreDelta -= 12;
+      stats.chainLen = 0;
+      stats.lastColor = undefined;
+      stats.streak = Math.max(stats.streak, state.currentStreak);
+      currentStreak = 0;
+      comboWindowUntil = 0;
     } else {
       currentStreak = state.currentStreak + 1;
       stats.streak = Math.max(stats.streak, currentStreak);
@@ -696,16 +739,20 @@ export const useGameStore = create<GameStore>((set, get) => {
           targetState = { active: false, expiresAt: 0 };
         }
         stats.score += awarded;
+        scoreDelta += awarded;
         energy = true;
       } else {
         const multiplier = Math.min(1 + 0.25 * Math.max(chainLen - 2, 0), 4);
         const baseAward = Math.round(BASE_POINTS * multiplier);
         let awarded = matchesTarget ? baseAward * 3 : baseAward;
         const hazardFactor = cloudPenalty ? 0.5 : 1;
-        awarded = Math.round(awarded * scoreMultiplier * hazardFactor);
+        const rareMultiplier = rare ? 3 : 1;
+        const treasureMultiplier = treasure ? 2 : 1;
+        awarded = Math.round(awarded * scoreMultiplier * hazardFactor * rareMultiplier * treasureMultiplier);
         if (awarded > 0) {
           stats.score += awarded;
         }
+        scoreDelta += awarded;
         const availableGain = Math.max(0, 1 - timeGainAccumulated);
         const appliedGain = Math.min(BASE_TIME_REWARD * timeMultiplier, availableGain);
         stats.timeLeft += appliedGain;
@@ -763,8 +810,25 @@ export const useGameStore = create<GameStore>((set, get) => {
       lastPerfectAt: perfect ? now : state.lastPerfectAt,
     });
 
+    const eventType = bubble.storm
+      ? bubble.poison
+        ? 'storm_drain'
+        : 'storm_energy'
+      : bubbleKind;
+    logEvent('bubble_hit', { type: eventType, score: scoreDelta, combo: stats.chainLen });
+
     if (energy) {
       get().grantBooster(1, 'energy');
+    }
+
+    if (treasure) {
+      useBoostStore.getState().grant('treasure');
+      earnedBoost = true;
+      logEvent('treasure_found', { combo: stats.chainLen, score: stats.score });
+    }
+
+    if (rare) {
+      logEvent('rare_found', { combo: stats.chainLen, score: stats.score });
     }
 
     if (markTap) {
@@ -784,6 +848,10 @@ export const useGameStore = create<GameStore>((set, get) => {
       radius: bubble.r,
       color: bubble.color,
       burst: source === 'burst',
+      rare,
+      treasure,
+      bad,
+      earnedBoost,
     };
   };
 
@@ -1966,3 +2034,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   hitGoldenOrb,
 };
 });
+
+if (typeof window !== 'undefined') {
+  window.__rubbleGameStore = useGameStore;
+}
