@@ -52,6 +52,13 @@ type RawEnv = {
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;
   NEXT_PUBLIC_PRICE_MAX?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
+  NEXT_PUBLIC_SITE_TAGLINE?: string;
+  NEXT_PUBLIC_SITE_OG_TITLE?: string;
+  NEXT_PUBLIC_SITE_OG_DESCRIPTION?: string;
+  SITE_NOINDEX?: string;
+  TRIAL_SIGN_KEY?: string;
+  DIAG?: string;
 };
 
 const DEFAULT_RAW: RawEnv = {
@@ -75,6 +82,13 @@ const DEFAULT_RAW: RawEnv = {
   NEXT_PUBLIC_TRIAL_ENABLED: undefined,
   NEXT_PUBLIC_PRICE_MIN: undefined,
   NEXT_PUBLIC_PRICE_MAX: undefined,
+  NEXT_PUBLIC_SITE_URL: undefined,
+  NEXT_PUBLIC_SITE_TAGLINE: undefined,
+  NEXT_PUBLIC_SITE_OG_TITLE: undefined,
+  NEXT_PUBLIC_SITE_OG_DESCRIPTION: undefined,
+  SITE_NOINDEX: undefined,
+  TRIAL_SIGN_KEY: undefined,
+  DIAG: undefined,
 };
 
 const EnvSchema = z
@@ -99,6 +113,13 @@ const EnvSchema = z
     NEXT_PUBLIC_TRIAL_ENABLED: z.string().optional(),
     NEXT_PUBLIC_PRICE_MIN: z.string().optional(),
     NEXT_PUBLIC_PRICE_MAX: z.string().optional(),
+    NEXT_PUBLIC_SITE_URL: z.string().optional(),
+    NEXT_PUBLIC_SITE_TAGLINE: z.string().optional(),
+    NEXT_PUBLIC_SITE_OG_TITLE: z.string().optional(),
+    NEXT_PUBLIC_SITE_OG_DESCRIPTION: z.string().optional(),
+    SITE_NOINDEX: z.string().optional(),
+    TRIAL_SIGN_KEY: z.string().optional(),
+    DIAG: z.string().optional(),
   })
   .superRefine((value, ctx) => {
     const accountFields = [
@@ -167,6 +188,13 @@ function readRawEnv(): RawEnv {
     NEXT_PUBLIC_TRIAL_ENABLED: process.env.NEXT_PUBLIC_TRIAL_ENABLED ?? undefined,
     NEXT_PUBLIC_PRICE_MIN: process.env.NEXT_PUBLIC_PRICE_MIN ?? undefined,
     NEXT_PUBLIC_PRICE_MAX: process.env.NEXT_PUBLIC_PRICE_MAX ?? undefined,
+    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL ?? undefined,
+    NEXT_PUBLIC_SITE_TAGLINE: process.env.NEXT_PUBLIC_SITE_TAGLINE ?? undefined,
+    NEXT_PUBLIC_SITE_OG_TITLE: process.env.NEXT_PUBLIC_SITE_OG_TITLE ?? undefined,
+    NEXT_PUBLIC_SITE_OG_DESCRIPTION: process.env.NEXT_PUBLIC_SITE_OG_DESCRIPTION ?? undefined,
+    SITE_NOINDEX: process.env.SITE_NOINDEX ?? undefined,
+    TRIAL_SIGN_KEY: process.env.TRIAL_SIGN_KEY ?? undefined,
+    DIAG: process.env.DIAG ?? undefined,
   };
 }
 
@@ -229,6 +257,13 @@ function loadEnv(): ParsedEnv {
     NEXT_PUBLIC_TRIAL_ENABLED: parsed.NEXT_PUBLIC_TRIAL_ENABLED,
     NEXT_PUBLIC_PRICE_MIN: parsed.NEXT_PUBLIC_PRICE_MIN,
     NEXT_PUBLIC_PRICE_MAX: parsed.NEXT_PUBLIC_PRICE_MAX,
+    NEXT_PUBLIC_SITE_URL: parsed.NEXT_PUBLIC_SITE_URL ?? parsed.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_TAGLINE: parsed.NEXT_PUBLIC_SITE_TAGLINE,
+    NEXT_PUBLIC_SITE_OG_TITLE: parsed.NEXT_PUBLIC_SITE_OG_TITLE,
+    NEXT_PUBLIC_SITE_OG_DESCRIPTION: parsed.NEXT_PUBLIC_SITE_OG_DESCRIPTION,
+    SITE_NOINDEX: parsed.SITE_NOINDEX,
+    TRIAL_SIGN_KEY: parsed.TRIAL_SIGN_KEY,
+    DIAG: parsed.DIAG,
   };
 
   const publicEnv: PublicEnv = {
@@ -240,6 +275,10 @@ function loadEnv(): ParsedEnv {
     NEXT_PUBLIC_TRIAL_ENABLED: parsed.NEXT_PUBLIC_TRIAL_ENABLED,
     NEXT_PUBLIC_PRICE_MIN: parsed.NEXT_PUBLIC_PRICE_MIN,
     NEXT_PUBLIC_PRICE_MAX: parsed.NEXT_PUBLIC_PRICE_MAX,
+    NEXT_PUBLIC_SITE_URL: parsed.NEXT_PUBLIC_SITE_URL ?? parsed.NEXT_PUBLIC_URL,
+    NEXT_PUBLIC_SITE_TAGLINE: parsed.NEXT_PUBLIC_SITE_TAGLINE,
+    NEXT_PUBLIC_SITE_OG_TITLE: parsed.NEXT_PUBLIC_SITE_OG_TITLE,
+    NEXT_PUBLIC_SITE_OG_DESCRIPTION: parsed.NEXT_PUBLIC_SITE_OG_DESCRIPTION,
     PAYMENTS_MODE_B_ENABLED: modeBEnabled ? '1' : '0',
   };
 
@@ -278,6 +317,13 @@ export type Env = {
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;
   NEXT_PUBLIC_PRICE_MAX?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
+  NEXT_PUBLIC_SITE_TAGLINE?: string;
+  NEXT_PUBLIC_SITE_OG_TITLE?: string;
+  NEXT_PUBLIC_SITE_OG_DESCRIPTION?: string;
+  SITE_NOINDEX?: string;
+  TRIAL_SIGN_KEY?: string;
+  DIAG?: string;
 };
 
 export type PublicEnv = {
@@ -289,5 +335,9 @@ export type PublicEnv = {
   NEXT_PUBLIC_TRIAL_ENABLED?: string;
   NEXT_PUBLIC_PRICE_MIN?: string;
   NEXT_PUBLIC_PRICE_MAX?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
+  NEXT_PUBLIC_SITE_TAGLINE?: string;
+  NEXT_PUBLIC_SITE_OG_TITLE?: string;
+  NEXT_PUBLIC_SITE_OG_DESCRIPTION?: string;
   PAYMENTS_MODE_B_ENABLED: '0' | '1';
 };
