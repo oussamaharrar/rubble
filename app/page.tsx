@@ -1,31 +1,44 @@
 import type { Metadata } from 'next';
 import EntryExperience from '@/components/EntryExperience';
+import { getEnv } from '@/lib/env';
 
+const env = getEnv();
+const siteOrigin = new URL(env.NEXT_PUBLIC_SITE_URL ?? env.NEXT_PUBLIC_URL).origin;
+const heroImageUrl = `${siteOrigin}/api/og/hero`;
 const description =
-  'Tap through Base storms, chain combos, and post your score to the Rubble Rush daily challenge.';
+  'Fast arcade popping with boosts, rewards, and daily challenges on Base.';
 
 export const metadata: Metadata = {
-  title: 'Rubble Rush — Daily Storm Challenge',
+  title: 'Bubble’it! — Pop & Win',
   description,
   openGraph: {
-    title: 'Rubble Rush — Daily Storm Challenge',
+    title: 'Bubble’it! — Pop & Win',
     description,
     url: '/',
     type: 'website',
-    siteName: 'Rubble',
-    images: ['/game-icons/og.png'],
+    siteName: 'Bubble’it!',
+    images: [
+      {
+        url: heroImageUrl,
+        width: 1200,
+        height: 630,
+        alt: 'Bubble’it! hero artwork',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Rubble Rush — Daily Storm Challenge',
+    title: 'Bubble’it! — Pop & Win',
     description,
-    images: ['/game-icons/og.png'],
+    images: [heroImageUrl],
   },
   other: {
-    'fc:miniapp:name': 'Rubble Rush',
+    'fc:miniapp:name': 'Bubble’it!',
     'fc:miniapp:image': '/game-icons/embed.png',
     'fc:miniapp:url': '/',
-    'fc:miniapp:button:text': 'Play',
+    'fc:miniapp:button:text': 'Bubble’it!',
+    'base:tagline': 'Pop. Win. Repeat.',
+    'base:hero:image': heroImageUrl,
   },
 };
 

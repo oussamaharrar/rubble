@@ -36,20 +36,25 @@ export async function GET(request: Request) {
   const env = getEnv();
   const origin = resolveOrigin(request);
   const webhookUrl = resolveWebhookUrl(origin, env.NEXT_PUBLIC_WEBHOOK_URL);
-
+  const siteUrl = env.NEXT_PUBLIC_SITE_URL ?? env.NEXT_PUBLIC_URL;
+  const normalizedSiteUrl = siteUrl.endsWith('/') ? siteUrl.slice(0, -1) : siteUrl;
+  const heroImageUrl = `${normalizedSiteUrl}/api/og/hero`;
   const embedUrl = `${origin}/game-icons/embed.png`;
+  const description =
+    'Fast arcade popping with boosts, rewards, and daily challenges on Base.';
+  const tagline = 'Pop. Win. Repeat.';
 
   const miniapp = {
     version: '1',
-    name: 'Rubble (Bubble Hunt)',
-    subtitle: 'Tap • Combo • Boost on Base',
-    description:
-      'Tap bubbles, rack combos, and trigger Base boosts to freeze time on-chain.',
+    name: 'Bubble’it!',
+    subtitle: tagline,
+    description,
     homeUrl: origin,
     iconUrl: `${origin}/game-icons/icon.png`,
     splashImageUrl: `${origin}/game-icons/splash.png`,
     splashBackgroundColor: '#04060B',
-    ogImageUrl: `${origin}/game-icons/og.png`,
+    ogImageUrl: heroImageUrl,
+    heroImageUrl,
     webhookUrl,
     primaryCategory: 'games',
     tags: ['game', 'arcade', 'base', 'booster'],
@@ -84,6 +89,10 @@ export async function GET(request: Request) {
 
   if (env.BASE_BUILDER_OWNER_ADDRESS) {
     body.baseBuilder = { ownerAddress: env.BASE_BUILDER_OWNER_ADDRESS } as const;
+  }
+
+  if (env.PUBLIC_OWNER_ADDRESS) {
+    body.owner = { address: env.PUBLIC_OWNER_ADDRESS } as const;
   }
 
   return NextResponse.json(body, {

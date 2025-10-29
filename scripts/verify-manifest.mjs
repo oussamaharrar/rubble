@@ -10,7 +10,12 @@ function getPreviewBaseUrl() {
   if (preview) {
     return preview;
   }
-  return process.argv[2] ?? process.env.VERCEL_PREVIEW_URL ?? process.env.NEXT_PUBLIC_URL;
+  return (
+    process.argv[2] ??
+    process.env.VERCEL_PREVIEW_URL ??
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    process.env.NEXT_PUBLIC_URL
+  );
 }
 
 function normaliseBase(url) {
@@ -157,8 +162,15 @@ try {
   const expectedSplash = `${manifestOrigin}/game-icons/splash.png`;
   assert(miniapp?.splashImageUrl === expectedSplash, 'miniapp.splashImageUrl mismatch');
 
-  const expectedOg = `${manifestOrigin}/game-icons/og.png`;
+  const expectedOg = `${manifestOrigin}/api/og/hero`;
   assert(miniapp?.ogImageUrl === expectedOg, 'miniapp.ogImageUrl mismatch');
+  assert(miniapp?.heroImageUrl === expectedOg, 'miniapp.heroImageUrl mismatch');
+  assert(miniapp?.subtitle === 'Pop. Win. Repeat.', 'miniapp.subtitle mismatch');
+  assert(
+    miniapp?.description ===
+      'Fast arcade popping with boosts, rewards, and daily challenges on Base.',
+    'miniapp.description mismatch'
+  );
 
   const webhookUrlRaw = String(miniapp?.webhookUrl ?? '');
   let webhookUrl;
