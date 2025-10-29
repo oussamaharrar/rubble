@@ -16,6 +16,14 @@ export async function initWalletStub(page: Page) {
       request: async ({ method }: { method: string; params?: unknown[] }) => {
         switch (method) {
           case 'eth_accounts':
+            if (typeof window !== 'undefined') {
+              const remember = window.localStorage.getItem('rubble:remember') === '1';
+              if (remember && !connected) {
+                connected = true;
+              } else if (!remember && connected) {
+                connected = false;
+              }
+            }
             return connected ? [address] : [];
           case 'eth_requestAccounts':
             connected = true;
