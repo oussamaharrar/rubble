@@ -10,11 +10,14 @@ import LeaderboardModal from '@/components/LeaderboardModal';
 import Modal from '@/components/Modal';
 import PayButton from '@/components/PayButton';
 import { VhFixProvider } from '@/components/VhFixProvider';
+import HeaderIdentityChip from '@/components/HeaderIdentityChip';
 import { useGameStore } from '@/lib/store';
 import { useWalletStore } from '@/lib/wallet-store';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { getRuntimeConfig } from '@/app/config/runtime';
+import { shortenAddress } from '@/lib/address';
+import { useToast } from '@/lib/use-toast';
 import type { EntryMode } from '@/types/game';
 
 type ScreenState = 'home' | 'playing' | 'paused';
@@ -38,10 +41,37 @@ const BUTTON_CLASS =
 const GLASS_BUTTON_CLASS =
   'min-h-[48px] min-w-[48px] rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white backdrop-blur focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200 hover:bg-white/16 transition';
 
-function useWalletSync() {
+const REMEMBER_KEY = 'rubble:remember';
+const REMEMBER_ADDRESS_KEY = 'rubble:address';
+
+function persistRememberedWallet(address: string | null): 0 | 1 {
+  if (typeof window === 'undefined') return 0;
+  if (address) {
+    window.localStorage.setItem(REMEMBER_KEY, '1');
+    window.localStorage.setItem(REMEMBER_ADDRESS_KEY, address);
+    return 1;
+  }
+  window.localStorage.setItem(REMEMBER_KEY, '0');
+  window.localStorage.removeItem(REMEMBER_ADDRESS_KEY);
+  return 0;
+}
+
+function readRememberedFlag(): 0 | 1 {
+  if (typeof window === 'undefined') return 0;
+  return window.localStorage.getItem(REMEMBER_KEY) === '1' ? 1 : 0;
+}
+
+function readRememberedAddress(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(REMEMBER_ADDRESS_KEY);
+}
+
+function useWalletSession(onRememberChange?: (flag: 0 | 1, address: string | null) => void) {
   const setWallet = useWalletStore((state) => state.setWallet);
   const resetWallet = useWalletStore((state) => state.reset);
   const setChainId = useWalletStore((state) => state.setChainId);
+  const [ready, setReady] = useState(false);
+  const [hasProvider, setHasProvider] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -51,29 +81,53 @@ function useWalletSync() {
       request?: <T = unknown>(args: { method: string; params?: unknown[] }) => Promise<T>;
     };
     if (!provider?.request) {
+      setHasProvider(false);
+      persistRememberedWallet(null);
+      onRememberChange?.(0, null);
       resetWallet();
+      setReady(true);
       return;
     }
+    setHasProvider(true);
 
     let cancelled = false;
+
+    const finishReady = () => {
+      if (!cancelled) {
+        setReady(true);
+      }
+    };
 
     const syncAccounts = async () => {
       try {
         const accounts = (await provider.request<string[]>({ method: 'eth_accounts' })) ?? [];
         const [primary] = accounts;
-        const chain = await provider.request<string>({ method: 'eth_chainId' }).catch(() => null);
-        if (cancelled) return;
-        if (primary) {
-          setWallet(primary, chain ? chain.toLowerCase() : null);
-        } else {
+        if (!primary) {
+          const flag = persistRememberedWallet(null);
+          onRememberChange?.(flag, null);
           resetWallet();
+          return;
         }
+        const chain = await provider.request<string>({ method: 'eth_chainId' }).catch(() => null);
+        setWallet(primary, chain ? chain.toLowerCase() : null);
+        const flag = persistRememberedWallet(primary);
+        onRememberChange?.(flag, primary);
       } catch (error) {
         console.debug('[rubble] wallet sync failed', error);
       }
     };
 
-    void syncAccounts();
+    if (readRememberedFlag() === 1) {
+      void (async () => {
+        try {
+          await syncAccounts();
+        } finally {
+          finishReady();
+        }
+      })();
+    } else {
+      finishReady();
+    }
 
     const handleAccountsChanged = (accounts: unknown) => {
       if (!Array.isArray(accounts)) return;
@@ -81,9 +135,19 @@ function useWalletSync() {
       if (primary) {
         provider
           .request<string>({ method: 'eth_chainId' })
-          .then((next) => setWallet(primary, typeof next === 'string' ? next.toLowerCase() : null))
-          .catch(() => setWallet(primary, null));
+          .then((next) => {
+            setWallet(primary, typeof next === 'string' ? next.toLowerCase() : null);
+            const flag = persistRememberedWallet(primary);
+            onRememberChange?.(flag, primary);
+          })
+          .catch(() => {
+            setWallet(primary, null);
+            const flag = persistRememberedWallet(primary);
+            onRememberChange?.(flag, primary);
+          });
       } else {
+        const flag = persistRememberedWallet(null);
+        onRememberChange?.(flag, null);
         resetWallet();
       }
     };
@@ -101,7 +165,9 @@ function useWalletSync() {
       provider.removeListener?.('accountsChanged', handleAccountsChanged);
       provider.removeListener?.('chainChanged', handleChainChanged);
     };
-  }, [resetWallet, setChainId, setWallet]);
+  }, [onRememberChange, resetWallet, setChainId, setWallet]);
+
+  return { ready, hasProvider } as const;
 }
 
 function createIdenticonGradient(address: string | null) {
@@ -139,16 +205,23 @@ function todayKey(prefix: string) {
 }
 
 export default function EntryExperience({ shareScore, shareBoard }: EntryExperienceProps) {
-  useWalletSync();
+  const [rememberFlag, setRememberFlag] = useState<0 | 1>(() => readRememberedFlag());
+  const [rememberedAddress, setRememberedAddress] = useState<string | null>(() => readRememberedAddress());
+  const { ready: walletReady, hasProvider } = useWalletSession((flag, address) => {
+    setRememberFlag(flag);
+    setRememberedAddress(address);
+  });
 
   const runtime = useMemo(() => getRuntimeConfig(), []);
   const prefersReducedMotion = useReducedMotion();
+  const { toast, showToast } = useToast();
+  const [hydrated, setHydrated] = useState(false);
   const [screen, setScreen] = useState<ScreenState>('home');
-  const [showGate, setShowGate] = useState(false);
+  const [gateOpen, setGateOpen] = useState(false);
+  const [noRunsOpen, setNoRunsOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const [tickets, setTickets] = useState<number>(() => readStoredTickets());
   const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
   const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
@@ -159,12 +232,12 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
-  const toastTimer = useRef<NodeJS.Timeout | null>(null);
   const runStateRef = useRef<{ started: boolean; ended: boolean }>({ started: false, ended: false });
 
   const walletAddress = useWalletStore((state) => state.address);
   const walletConnected = Boolean(walletAddress);
   const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
+  const resetWalletStore = useWalletStore((state) => state.reset);
   const startRun = useGameStore((state) => state.startRun);
   const beginGameplay = useGameStore((state) => state.beginGameplay);
   const pauseRun = useGameStore((state) => state.pauseRun);
@@ -174,11 +247,16 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   const grantBooster = useGameStore((state) => state.grantBooster);
   const setHudSafeArea = useGameStore((state) => state.setHudSafeArea);
 
-  const identityGradient = useMemo(() => createIdenticonGradient(walletAddress), [walletAddress]);
-  const truncatedAddress = useMemo(
-    () => (walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : ''),
-    [walletAddress]
+  const identityGradient = useMemo(
+    () => createIdenticonGradient(walletAddress ?? rememberedAddress),
+    [rememberedAddress, walletAddress]
   );
+  const shortAddress = useMemo(
+    () => shortenAddress(walletAddress ?? rememberedAddress ?? ''),
+    [rememberedAddress, walletAddress]
+  );
+  const showIdentityChip = walletConnected || (rememberFlag === 1 && Boolean(rememberedAddress));
+  const checkingWallet = !showIdentityChip && (!hydrated || (rememberFlag === 1 && !walletReady));
   const leaderboardHighlight = useMemo(() => {
     if (typeof shareScore === 'number' && Number.isFinite(shareScore)) {
       return { board: shareBoard ?? 'normal', score: shareScore, combo: 0, streak: 0 } as const;
@@ -188,21 +266,27 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
 
   const pendingModeRef = useRef<EntryMode | null>(null);
 
-  const handleToast = useCallback((message: string) => {
-    if (toastTimer.current) {
-      clearTimeout(toastTimer.current);
-    }
-    setToast({ id: Date.now(), message });
-    toastTimer.current = setTimeout(() => setToast(null), 3200);
-  }, []);
+  const updateRemember = useCallback(
+    (address: string | null) => {
+      const flag = persistRememberedWallet(address);
+      setRememberFlag(flag);
+      setRememberedAddress(address);
+    },
+    []
+  );
 
   useEffect(() => {
-    return () => {
-      if (toastTimer.current) {
-        clearTimeout(toastTimer.current);
-      }
-    };
+    setHydrated(true);
+    setRememberFlag(readRememberedFlag());
+    setRememberedAddress(readRememberedAddress());
   }, []);
+
+  const handleToast = useCallback(
+    (message: string) => {
+      showToast(message);
+    },
+    [showToast]
+  );
 
   useEffect(() => {
     if (!stageRef.current || typeof window === 'undefined') {
@@ -263,17 +347,23 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
     setTrialAvailable(status !== 'used');
   }, [runtime.trialEnabled, walletAddress]);
 
-  const eligibleToPlay = walletConnected && (trialAvailable || tickets > 0);
+  const hasTicketsOrBoosts = tickets > 0 || boosterOrbs > 0;
+  const eligibleToPlay = walletConnected && (trialAvailable || hasTicketsOrBoosts);
 
   useEffect(() => {
-    console.log(`GATE: walletConnected=${walletConnected} trial=${trialAvailable} eligible=${eligibleToPlay}`);
-  }, [walletConnected, trialAvailable, eligibleToPlay]);
+    console.log(
+      `GATE: connected=${walletConnected} remember=${rememberFlag} trial=${trialAvailable} eligible=${eligibleToPlay}`
+    );
+  }, [eligibleToPlay, rememberFlag, trialAvailable, walletConnected]);
 
   useEffect(() => {
-    if (showGate && eligibleToPlay) {
-      setShowGate(false);
+    if (gateOpen && eligibleToPlay) {
+      setGateOpen(false);
     }
-  }, [eligibleToPlay, showGate]);
+    if (noRunsOpen && eligibleToPlay) {
+      setNoRunsOpen(false);
+    }
+  }, [eligibleToPlay, gateOpen, noRunsOpen]);
 
   useEffect(() => {
     if (phase === 'paused') {
@@ -332,7 +422,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       return;
     }
     window.localStorage.setItem(key, 'claimed');
-    handleGrantTicket(1, 'Daily reward claimed! +1 retry');
+    handleGrantTicket(1, 'Boost granted!');
     grantBooster(1, 'energy');
   }, [grantBooster, handleGrantTicket, handleToast]);
 
@@ -344,23 +434,26 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       return;
     }
     window.localStorage.setItem(key, 'claimed');
-    handleGrantTicket(1, 'Thanks for spreading bubbles! +1 retry');
-  }, [handleGrantTicket, handleToast]);
+    grantBooster(1, 'energy');
+    handleToast('Boost granted!');
+  }, [grantBooster, handleToast]);
 
   const attemptConnect = useCallback(async () => {
+    if (walletConnected) return;
     if (typeof window === 'undefined') return;
-    if (!window.ethereum) {
+    if (!hasProvider || !window.ethereum) {
       dispatchWalletModalOpen();
       return;
     }
     try {
       const address = await ensureBaseNetwork();
       useWalletStore.getState().setWallet(address, BASE_CHAIN_ID_HEX);
+      updateRemember(address);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
       handleToast(message);
     }
-  }, [handleToast]);
+  }, [handleToast, hasProvider, updateRemember, walletConnected]);
 
   const startGameplay = useCallback(
     (mode: EntryMode) => {
@@ -368,30 +461,38 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       startRun(mode);
       beginGameplay();
       runStateRef.current = { started: true, ended: false };
-      console.log(`RUN: started=true ended=false nextEligible=${walletConnected && (trialAvailable || tickets > 0)}`);
+      const remainingTickets = mode === 'trial' ? tickets : Math.max(0, tickets - 1);
+      const nextTrialAvailable = mode === 'trial' ? false : trialAvailable;
+      const nextEligible = walletConnected && (nextTrialAvailable || remainingTickets > 0 || boosterOrbs > 0);
+      console.log(`RUN: started=true ended=false nextEligible=${nextEligible}`);
       if (mode === 'trial') {
         handleConsumeTrial();
       } else {
         handleConsumeTicket();
       }
       setScreen('playing');
-      setShowGate(false);
+      setGateOpen(false);
+      setNoRunsOpen(false);
     },
-    [beginGameplay, handleConsumeTicket, handleConsumeTrial, startRun, tickets, trialAvailable, walletConnected]
+    [beginGameplay, boosterOrbs, handleConsumeTicket, handleConsumeTrial, startRun, tickets, trialAvailable, walletConnected]
   );
 
   const handlePlayPress = useCallback(() => {
+    if (!walletConnected) {
+      setGateOpen(true);
+      return;
+    }
     if (!eligibleToPlay) {
-      setShowGate(true);
+      setNoRunsOpen(true);
       return;
     }
     const mode: EntryMode = trialAvailable ? 'trial' : 'paid';
     startGameplay(mode);
-  }, [eligibleToPlay, startGameplay, trialAvailable]);
+  }, [eligibleToPlay, startGameplay, trialAvailable, walletConnected]);
 
   const handlePlayTrial = useCallback(() => {
     if (!walletConnected) {
-      void attemptConnect();
+      setGateOpen(true);
       return;
     }
     if (!trialAvailable) {
@@ -399,7 +500,49 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
       return;
     }
     startGameplay('trial');
-  }, [attemptConnect, handleToast, startGameplay, trialAvailable, walletConnected]);
+  }, [handleToast, startGameplay, trialAvailable, walletConnected]);
+
+  const handleOpenMore = useCallback(() => {
+    if (screen !== 'home') return;
+    setShowMore(true);
+  }, [screen]);
+
+  const handleManage = useCallback(() => {
+    setGateOpen(false);
+    setNoRunsOpen(false);
+    handleOpenMore();
+  }, [handleOpenMore]);
+
+  const handleDisconnect = useCallback(() => {
+    updateRemember(null);
+    resetWalletStore();
+    setGateOpen(false);
+    setNoRunsOpen(false);
+  }, [resetWalletStore, updateRemember]);
+
+  const handleCopyAddress = useCallback(async () => {
+    const address = walletAddress ?? rememberedAddress;
+    if (!address) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(address);
+      } else if (typeof document !== 'undefined') {
+        const helper = document.createElement('textarea');
+        helper.value = address;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        document.body.removeChild(helper);
+      }
+      handleToast('Address copied!');
+      console.log(`HEADER: short="${shortAddress}" bubbles=${boosterOrbs} toastCopy=shown`);
+    } catch {
+      handleToast('Unable to copy address. Copy manually.');
+    }
+  }, [boosterOrbs, handleToast, rememberedAddress, shortAddress, walletAddress]);
 
   const handlePause = useCallback(() => {
     pauseRun();
@@ -414,17 +557,30 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
   const handleExit = useCallback(() => {
     if (runStateRef.current.started && !runStateRef.current.ended) {
       runStateRef.current.ended = true;
-      const nextEligible = walletConnected && (trialAvailable || tickets > 0);
+      const nextEligible = walletConnected && (trialAvailable || tickets > 0 || boosterOrbs > 0);
       console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
     }
     runStateRef.current = { started: false, ended: false };
     resetToStart();
     setScreen('home');
-  }, [resetToStart, tickets, trialAvailable, walletConnected]);
+  }, [boosterOrbs, resetToStart, tickets, trialAvailable, walletConnected]);
 
   useEffect(() => {
     if (screen === 'playing') {
       console.log('HUD: visible=true');
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    if (!walletConnected || !shortAddress) return;
+    console.log(`HEADER: short="${shortAddress}" bubbles=${boosterOrbs} toastCopy=idle`);
+  }, [boosterOrbs, shortAddress, walletConnected]);
+
+  useEffect(() => {
+    if (screen !== 'home') {
+      setGateOpen(false);
+      setNoRunsOpen(false);
+      setShowMore(false);
     }
   }, [screen]);
 
@@ -492,39 +648,44 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
           transition={{ duration: prefersReducedMotion ? 0 : 12, repeat: prefersReducedMotion ? 0 : Infinity, ease: 'linear' }}
         />
         <div className="relative z-10 flex min-h-screen flex-col">
-          <header className="flex items-center justify-between px-6 pt-6">
-            <div className="flex flex-col">
-              <span className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">Arcade by Rubble</span>
-              <h1 className="text-4xl font-black sm:text-5xl">Bubble’it!</h1>
-            </div>
-            <div className="flex items-center gap-3">
-              {!walletConnected ? (
-                <button
-                  type="button"
-                  data-testid="connect-wallet-home"
-                  className={GLASS_BUTTON_CLASS}
-                  onClick={attemptConnect}
-                >
-                  Connect Wallet
-                </button>
-              ) : (
-                <div
-                  className="flex min-h-[44px] items-center gap-3 rounded-full border border-white/20 bg-white/10 px-4 py-2"
-                  style={{ backgroundImage: identityGradient }}
-                >
-                  <span className="rounded-full bg-black/30 px-3 py-1 text-xs uppercase tracking-[0.22em] text-white/80">
-                    {truncatedAddress}
-                  </span>
-                  <span
-                    data-testid="wallet-balance"
-                    className="rounded-full bg-black/35 px-3 py-1 text-xs uppercase tracking-[0.3em] text-cyan-100"
+          {screen !== 'playing' ? (
+            <header className="flex items-center justify-between px-6 pt-6">
+              <div className="flex flex-col">
+                <span className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">Arcade by Rubble</span>
+                <h1 className="text-4xl font-black sm:text-5xl">Bubble’it!</h1>
+              </div>
+              <div className="flex items-center gap-3">
+                {showIdentityChip ? (
+                  <HeaderIdentityChip
+                    address={walletAddress ?? rememberedAddress ?? ''}
+                    shortAddress={shortAddress}
+                    bubbles={boosterOrbs}
+                    onCopy={handleCopyAddress}
+                    onManage={handleManage}
+                    onDisconnect={handleDisconnect}
+                    background={identityGradient}
+                  />
+                ) : checkingWallet ? (
+                  <div
+                    className="min-h-[44px] rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] text-white/70 backdrop-blur"
+                    aria-live="polite"
                   >
-                    Bubbles {boosterOrbs}
-                  </span>
-                </div>
-              )}
-            </div>
-          </header>
+                    Checking wallet…
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="connect-wallet-home"
+                    className={clsx(GLASS_BUTTON_CLASS, (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-50')}
+                    onClick={attemptConnect}
+                    disabled={!hasProvider || !walletReady}
+                  >
+                    {walletReady ? 'Connect Wallet' : 'Checking…'}
+                  </button>
+                )}
+              </div>
+            </header>
+          ) : null}
 
           <main className="relative flex flex-1 flex-col items-center justify-center px-6 pb-16">
             <AnimatePresence mode="wait">
@@ -582,7 +743,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                     <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => setShowScoreboard(true)}>
                       Scoreboard
                     </button>
-                    <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => setShowMore(true)}>
+                    <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleOpenMore}>
                       More
                     </button>
                   </div>
@@ -667,7 +828,7 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
             </AnimatePresence>
 
             <AnimatePresence>
-              {showGate ? (
+              {gateOpen && screen === 'home' ? (
                 <motion.div
                   key="gate"
                   className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 px-6"
@@ -693,10 +854,14 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                       <button
                         type="button"
                         data-testid="gate-connect-wallet"
-                        className={GLASS_BUTTON_CLASS}
+                        className={clsx(
+                          GLASS_BUTTON_CLASS,
+                          (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-40'
+                        )}
                         onClick={attemptConnect}
+                        disabled={!hasProvider || !walletReady}
                       >
-                        Connect Wallet
+                        {walletReady ? 'Connect Wallet' : 'Checking…'}
                       </button>
                       {runtime.trialEnabled ? (
                         <button
@@ -709,13 +874,72 @@ export default function EntryExperience({ shareScore, shareBoard }: EntryExperie
                           Play Free
                         </button>
                       ) : null}
-                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => { setShowMore(true); setShowGate(false); }}>
+                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleManage}>
                         Earn / Buy
                       </button>
                     </div>
                     <p className="mt-4 text-xs uppercase tracking-[0.25em] text-white/40">
                       Trials consumed on start · Tickets stored locally
                     </p>
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+            <AnimatePresence>
+              {noRunsOpen && screen === 'home' ? (
+                <motion.div
+                  key="no-runs"
+                  className="absolute inset-0 z-20 flex items-center justify-center bg-black/75 px-6"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={transition}
+                >
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="no-runs-title"
+                    data-testid="no-runs-dialog"
+                    className="w-full max-w-md rounded-3xl border border-white/18 bg-slate-900/85 p-6 text-left shadow-2xl backdrop-blur"
+                  >
+                    <h2 id="no-runs-title" className="text-2xl font-semibold text-white">
+                      No runs left today
+                    </h2>
+                    <p className="mt-2 text-sm text-white/75">
+                      Grab another boost, retry ticket, or invite a friend to earn one more shot before midnight.
+                    </p>
+                    <div className="mt-6 grid gap-3">
+                      <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleManage}>
+                        Buy
+                      </button>
+                      <button
+                        type="button"
+                        className={GLASS_BUTTON_CLASS}
+                        onClick={() => {
+                          handleOpenMore();
+                          setNoRunsOpen(false);
+                        }}
+                      >
+                        Go to Rewards
+                      </button>
+                      <button
+                        type="button"
+                        className={GLASS_BUTTON_CLASS}
+                        onClick={() => {
+                          handleShareBoost();
+                          setNoRunsOpen(false);
+                        }}
+                      >
+                        Invite a Friend
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-5 block w-full rounded-full border border-white/20 bg-transparent px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/70 backdrop-blur hover:bg-white/10"
+                      onClick={() => setNoRunsOpen(false)}
+                    >
+                      Close
+                    </button>
                   </div>
                 </motion.div>
               ) : null}
