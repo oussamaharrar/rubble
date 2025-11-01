@@ -59,6 +59,7 @@ export type RunStats = {
   energyOrbsCollected: number;
   paidEntryOrbs: number;
   entryMode: EntryMode | null;
+  rareHits: number;
 };
 
 export type TargetState = {

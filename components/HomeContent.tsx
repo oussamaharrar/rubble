@@ -17,6 +17,8 @@ import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
+import { useWalletStore } from '@/lib/wallet-store';
+import { fetchPersonalBest, requestRunStartToken, submitLeaderboardScore } from '@/lib/leaderboard-client';
 
 const LIFETIME_KEY = 'rubble:lifetime-stats';
 
@@ -82,6 +84,7 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const lastRunOfficialDaily = useGameStore((state) => state.lastRunOfficialDaily);
   const dailyKey = useGameStore((state) => state.dailyKey);
   const startedAt = useGameStore((state) => state.startedAt);
+  const walletAddress = useWalletStore((state) => state.address);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerView, setDrawerView] = useState<DrawerView>('missions');
@@ -91,8 +94,17 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   const [backdropPhase, setBackdropPhase] = useState<GamePhase>('home');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [leaderboardBest, setLeaderboardBest] = useState<number | null>(null);
+  const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
+  const [leaderboardSeason, setLeaderboardSeason] = useState<string | null>(null);
+  const [leaderboardDisabled, setLeaderboardDisabled] = useState(false);
+  const [personalBestImproved, setPersonalBestImproved] = useState(false);
   const tutorialAutoRef = useRef(shouldShowTutorial());
   const autoStartRef = useRef(false);
+  const previousBestRef = useRef<number | null>(null);
+  const runTokenRef = useRef<string | null>(null);
+  const runTokenMarkerRef = useRef<number | null>(null);
+  const runSubmitMarkerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (phase !== 'gate') {
@@ -111,11 +123,81 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
   }, [phase]);
 
   useEffect(() => {
+    if (!walletAddress || leaderboardDisabled) {
+      return;
+    }
+    if (phase !== 'intro' && phase !== 'playing') {
+      return;
+    }
+    const marker = startedAt || Date.now();
+    if (runTokenMarkerRef.current === marker) {
+      return;
+    }
+    runTokenMarkerRef.current = marker;
+    (async () => {
+      const token = await requestRunStartToken(walletAddress);
+      if (!token) {
+        return;
+      }
+      if (token.disabled) {
+        setLeaderboardDisabled(true);
+        runTokenRef.current = null;
+        return;
+      }
+      runTokenRef.current = token.token;
+      if (token.season) {
+        setLeaderboardSeason(token.season);
+      }
+    })();
+  }, [phase, walletAddress, leaderboardDisabled, startedAt]);
+
+  useEffect(() => {
     if ((phase === 'home' || phase === 'intro') && tutorialAutoRef.current) {
       setTutorialOpen(true);
       tutorialAutoRef.current = false;
     }
   }, [phase, tutorialAutoRef]);
+
+  useEffect(() => {
+    if (!walletAddress) {
+      setLeaderboardBest(null);
+      setLeaderboardRank(null);
+      setLeaderboardSeason(null);
+      setLeaderboardDisabled(false);
+      previousBestRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    setLeaderboardDisabled(false);
+    (async () => {
+      const result = await fetchPersonalBest(walletAddress);
+      if (cancelled) {
+        return;
+      }
+      if (result.disabled) {
+        setLeaderboardDisabled(true);
+        setLeaderboardBest(null);
+        setLeaderboardRank(null);
+        setLeaderboardSeason(null);
+        return;
+      }
+      if (result.ok) {
+        setLeaderboardBest(result.bestScore);
+        setLeaderboardRank(result.rank ?? null);
+        if (typeof result.bestScore === 'number') {
+          previousBestRef.current = result.bestScore;
+        } else {
+          previousBestRef.current = null;
+        }
+        if (result.season) {
+          setLeaderboardSeason(result.season);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -181,8 +263,70 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
         }
         setLastSavedRun(marker);
       }
+
+      if (walletAddress && !leaderboardDisabled && stats.score > 0) {
+        const marker = startedAt || Date.now();
+        if (runSubmitMarkerRef.current !== marker) {
+          runSubmitMarkerRef.current = marker;
+          const previousBest = previousBestRef.current ?? leaderboardBest ?? 0;
+          setPersonalBestImproved(false);
+          (async () => {
+            const result = await submitLeaderboardScore(
+              walletAddress,
+              stats.score,
+              runTokenRef.current ?? undefined,
+              `${marker}`
+            );
+            if (result.disabled) {
+              setLeaderboardDisabled(true);
+              setLeaderboardBest(null);
+              setLeaderboardRank(null);
+              setLeaderboardSeason(null);
+              runTokenRef.current = null;
+              return;
+            }
+            if (result.ok && typeof result.bestScore === 'number') {
+              setLeaderboardBest(result.bestScore);
+              setLeaderboardRank(result.rank ?? null);
+              previousBestRef.current = result.bestScore;
+              const improved = stats.score > previousBest && result.bestScore === stats.score;
+              setPersonalBestImproved(improved);
+              if (result.season) {
+                setLeaderboardSeason(result.season);
+              }
+            }
+            runTokenRef.current = null;
+          })();
+        }
+      } else {
+        setPersonalBestImproved(false);
+      }
+    } else {
+      if (phase === 'home') {
+        runSubmitMarkerRef.current = null;
+        runTokenMarkerRef.current = null;
+        runTokenRef.current = null;
+      }
+      if (phase !== 'summary') {
+        setPersonalBestImproved(false);
+      }
     }
-  }, [phase, stats.score, stats.bestCombo, stats.streak, stats.entryMode, now, boardKind, dailyKey, lastRunOfficialDaily, startedAt, lastSavedRun]);
+  }, [
+    phase,
+    stats.score,
+    stats.bestCombo,
+    stats.streak,
+    stats.entryMode,
+    now,
+    boardKind,
+    dailyKey,
+    lastRunOfficialDaily,
+    startedAt,
+    lastSavedRun,
+    walletAddress,
+    leaderboardDisabled,
+    leaderboardBest,
+  ]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -388,6 +532,10 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
                 onReturnHome={handleReturnHome}
                 onOpenDrawer={openDrawer}
                 shareHref={shareHref}
+                bestScore={leaderboardBest}
+                rank={leaderboardRank}
+                season={leaderboardSeason}
+                personalBestImproved={personalBestImproved}
               />
             </motion.div>
           ) : null}
