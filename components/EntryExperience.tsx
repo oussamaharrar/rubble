@@ -276,13 +276,24 @@ export default function EntryExperience({
   const [showEndOverlay, setShowEndOverlay] = useState(false);
   const [celebrateBest, setCelebrateBest] = useState(false);
   const [leaderboardRank, setLeaderboardRank] = useState<string>('—');
+  const [leaderboardSeason, setLeaderboardSeason] = useState<string | null>(null);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
   const runStateRef = useRef<{ started: boolean; ended: boolean; mode: EntryMode | null; startedAt: number }>(
     { started: false, ended: false, mode: null, startedAt: 0 }
   );
-  const runTokenRef = useRef<{ token?: string; runId: string; bestBefore: number; submitted: boolean } | null>(null);
+  const runTokenRef = useRef<
+    | {
+        token?: string;
+        runId: string;
+        clientRunId: string;
+        bestBefore: number;
+        submitted: boolean;
+        tokenRequested: boolean;
+      }
+    | null
+  >(null);
   const trialKeyRef = useRef<string | null>(null);
   const lastTrialLoggedRef = useRef<string | null>(null);
   const lastWalletAddressRef = useRef<string | null>(null);
@@ -314,6 +325,7 @@ export default function EntryExperience({
     if (!walletAddress) {
       setLeaderboardStatus('idle');
       setBestScoreOnChain(null);
+      setLeaderboardSeason(null);
       return;
     }
     let cancelled = false;
@@ -323,16 +335,20 @@ export default function EntryExperience({
         if (cancelled) return;
         if (result.ok) {
           setBestScoreOnChain(result.bestScore);
+          setLeaderboardSeason(result.season);
           setLeaderboardStatus('ready');
         } else if (result.reason === 'disabled') {
           setBestScoreOnChain(null);
+          setLeaderboardSeason(null);
           setLeaderboardStatus('disabled');
         } else {
+          setLeaderboardSeason(null);
           setLeaderboardStatus('error');
         }
       })
       .catch(() => {
         if (!cancelled) {
+          setLeaderboardSeason(null);
           setLeaderboardStatus('error');
         }
       });
@@ -352,15 +368,32 @@ export default function EntryExperience({
     if (!runStateRef.current.started || runStateRef.current.ended) {
       return;
     }
-    if (!tokenState || tokenState.token) {
+    if (!tokenState || tokenState.tokenRequested) {
       return;
     }
-    const runId = tokenState.runId;
-    issueRunTokenRequest(walletAddress).then((response) => {
-      if (response.ok && runTokenRef.current && runTokenRef.current.runId === runId) {
-        runTokenRef.current.token = response.token;
-      }
-    });
+    tokenState.tokenRequested = true;
+    const clientRunId = tokenState.clientRunId;
+    issueRunTokenRequest(walletAddress)
+      .then((response) => {
+        const current = runTokenRef.current;
+        if (!current || current.clientRunId !== clientRunId) {
+          return;
+        }
+        if (response.ok) {
+          current.runId = response.runId;
+          if (response.token) {
+            current.token = response.token;
+          }
+        } else {
+          current.tokenRequested = false;
+        }
+      })
+      .catch(() => {
+        const current = runTokenRef.current;
+        if (current && current.clientRunId === clientRunId) {
+          current.tokenRequested = false;
+        }
+      });
   }, [leaderboardStatus, walletAddress]);
 
   const hasDailyRewardBoost = useMemo(
@@ -664,12 +697,14 @@ export default function EntryExperience({
           startedAt > 0
             ? (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt
             : 0;
-        logEvent('run_ended', {
+        logEvent('run_completed', {
           mode: runStateRef.current.mode,
           score: currentStats.score,
           durationMs: Math.max(0, Math.round(durationMs)),
           bestCombo: currentStats.bestCombo,
           streak: currentStats.streak,
+          hits: currentStats.hits,
+          rareHits: currentStats.rareHits,
         });
         const nextEligible =
           walletConnected && (trialAvailable || hasTicketsOrBoosts || hasDailyRewardBoost || hasInviteBoost);
@@ -706,7 +741,16 @@ export default function EntryExperience({
     tokenState.submitted = true;
     setSubmittingScore(true);
     setSubmitError(null);
-    submitScoreRequest({ player: walletAddress, score: stats.score, token: tokenState.token, runId: tokenState.runId })
+    submitScoreRequest({
+      player: walletAddress,
+      score: stats.score,
+      token: tokenState.token,
+      runId: tokenState.runId,
+      comboMax: stats.bestCombo,
+      hits: stats.hits,
+      rareHits: stats.rareHits,
+      season: leaderboardSeason ?? undefined,
+    })
       .then((response) => {
         if (!response.ok) {
           setSubmitError('Unable to sync score to Base. Try again soon.');
@@ -722,7 +766,16 @@ export default function EntryExperience({
       .finally(() => {
         setSubmittingScore(false);
       });
-  }, [leaderboardStatus, phase, stats.score, walletAddress]);
+  }, [
+    leaderboardStatus,
+    phase,
+    stats.bestCombo,
+    stats.hits,
+    stats.rareHits,
+    stats.score,
+    walletAddress,
+    leaderboardSeason,
+  ]);
 
   useEffect(() => {
     if (phase !== 'summary' && showEndOverlay) {
@@ -861,7 +914,13 @@ export default function EntryExperience({
       startRun(mode);
       beginGameplay();
       const runId = createRunId();
-      runTokenRef.current = { runId, bestBefore: bestScoreOnChain ?? 0, submitted: false };
+      runTokenRef.current = {
+        runId,
+        clientRunId: runId,
+        bestBefore: bestScoreOnChain ?? 0,
+        submitted: false,
+        tokenRequested: false,
+      };
       setCelebrateBest(false);
       setSubmitError(null);
       setLeaderboardRank('—');
@@ -871,12 +930,29 @@ export default function EntryExperience({
         mode,
         startedAt: typeof performance !== 'undefined' ? performance.now() : Date.now(),
       };
-      if (leaderboardStatus === 'ready' && walletAddress) {
-        issueRunTokenRequest(walletAddress).then((response) => {
-          if (response.ok && runTokenRef.current && runTokenRef.current.runId === runId) {
-            runTokenRef.current.token = response.token;
-          }
-        });
+      if (leaderboardStatus === 'ready' && walletAddress && runTokenRef.current) {
+        runTokenRef.current.tokenRequested = true;
+        issueRunTokenRequest(walletAddress)
+          .then((response) => {
+            const current = runTokenRef.current;
+            if (!current || current.clientRunId !== runId) {
+              return;
+            }
+            if (response.ok) {
+              current.runId = response.runId;
+              if (response.token) {
+                current.token = response.token;
+              }
+            } else {
+              current.tokenRequested = false;
+            }
+          })
+          .catch(() => {
+            const current = runTokenRef.current;
+            if (current && current.clientRunId === runId) {
+              current.tokenRequested = false;
+            }
+          });
       }
       logEvent('run_started', {
         mode,
