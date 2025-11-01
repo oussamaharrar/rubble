@@ -5,11 +5,6 @@ import { logEvent } from '@/lib/server/log-event';
 
 const DAY_SECONDS = 24 * 60 * 60;
 
-function todayKey() {
-  const now = new Date();
-  return `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
-}
-
 function resolveReward() {
   const typeEnv = process.env.REFERRAL_REWARD_TYPE === 'bubbles' ? 'bubbles' : 'boost';
   const rawAmount = process.env.REFERRAL_REWARD_AMOUNT;
@@ -36,7 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, reason: 'invalid_addresses' }, { status: 400 });
   }
 
-  const key = `referral:${todayKey()}:${inviter}:${invitee}`;
+  const key = `referral:${inviter}:${invitee}`;
   const stored = await kvSetIfAbsent(key, '1', DAY_SECONDS);
   if (!stored) {
     logEvent('referral_duplicate', { inviter, invitee });

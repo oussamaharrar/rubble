@@ -1,13 +1,18 @@
 export type RunTokenResponse =
-  | { ok: true; token: string; payload: { address: string; nonce: string; issuedAt: number } }
+  | {
+      ok: true;
+      runId: string;
+      token?: string;
+      payload?: { address: string; nonce: string; issuedAt: number };
+    }
   | { ok: false; reason: string; status?: number };
 
 export type SubmitScoreResponse =
-  | { ok: true; bestScore: number }
+  | { ok: true; bestScore: number; season: string | null }
   | { ok: false; reason: string; status?: number };
 
 export type BestScoreResponse =
-  | { ok: true; bestScore: number }
+  | { ok: true; bestScore: number; season: string | null }
   | { ok: false; reason: string; status?: number };
 
 function safeJson(response: Response) {
@@ -30,8 +35,13 @@ export async function issueRunTokenRequest(address: string): Promise<RunTokenRes
       return { ok: false, reason: 'http_error', status: response.status };
     }
     const data = await safeJson(response);
-    if (data.ok && typeof data.token === 'string') {
-      return { ok: true, token: data.token, payload: (data.payload as { address: string; nonce: string; issuedAt: number }) ?? { address, nonce: '', issuedAt: Date.now() } };
+    if (data.ok && typeof data.runId === 'string') {
+      return {
+        ok: true,
+        runId: data.runId,
+        token: typeof data.token === 'string' ? data.token : undefined,
+        payload: (data.payload as { address: string; nonce: string; issuedAt: number }) ?? undefined,
+      };
     }
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {
@@ -40,7 +50,16 @@ export async function issueRunTokenRequest(address: string): Promise<RunTokenRes
   }
 }
 
-export async function submitScoreRequest(input: { player: string; score: number; token?: string; runId?: string }): Promise<SubmitScoreResponse> {
+export async function submitScoreRequest(input: {
+  player: string;
+  score: number;
+  comboMax: number;
+  hits: number;
+  rareHits: number;
+  season?: string | null;
+  token?: string;
+  runId?: string;
+}): Promise<SubmitScoreResponse> {
   try {
     const response = await fetch('/api/leaderboard/submit', {
       method: 'POST',
@@ -56,7 +75,7 @@ export async function submitScoreRequest(input: { player: string; score: number;
     }
     const data = await safeJson(response);
     if (data.ok && typeof data.bestScore === 'number') {
-      return { ok: true, bestScore: data.bestScore };
+      return { ok: true, bestScore: data.bestScore, season: (typeof data.season === 'string' ? data.season : null) ?? null };
     }
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {
@@ -76,7 +95,7 @@ export async function fetchBestScore(address: string): Promise<BestScoreResponse
     }
     const data = await safeJson(response);
     if (data.ok && typeof data.bestScore === 'number') {
-      return { ok: true, bestScore: data.bestScore };
+      return { ok: true, bestScore: data.bestScore, season: (typeof data.season === 'string' ? data.season : null) ?? null };
     }
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {

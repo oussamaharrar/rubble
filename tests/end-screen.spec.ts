@@ -27,7 +27,7 @@ test.describe('end-of-run overlay', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 300 }),
+        body: JSON.stringify({ ok: true, bestScore: 300, season: 'S1' }),
       });
     });
 
@@ -39,6 +39,7 @@ test.describe('end-of-run overlay', () => {
           ok: true,
           token: 'token',
           payload: { address: MOCK_ADDRESS, nonce: 'def', issuedAt: Date.now() },
+          runId: 'run-xyz',
         }),
       });
     });
@@ -47,7 +48,7 @@ test.describe('end-of-run overlay', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 1200 }),
+        body: JSON.stringify({ ok: true, bestScore: 1200, season: 'S1' }),
       });
     });
 
@@ -60,7 +61,7 @@ test.describe('end-of-run overlay', () => {
       const store = (window as any).__rubbleStore;
       const state = store.getState();
       store.setState({
-        stats: { ...state.stats, score: 1200, bestCombo: 14, rareHits: 3 },
+        stats: { ...state.stats, score: 1200, bestCombo: 14, rareHits: 3, totalHits: 220 },
         treasureFound: true,
       });
       store.getState().endRun();
