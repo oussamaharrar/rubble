@@ -37,6 +37,7 @@ type RawEnv = {
   NEXT_PUBLIC_BASE_RPC_URL: string;
   NEXT_PUBLIC_MIN_PRICE_WEI: string;
   BASE_RPC_URL: string;
+  RPC_URL_BASE?: string;
   PAY_TO_ADDRESS: string;
   MIN_PRICE_WEI: string;
   FARCASTER_ACCOUNT_HEADER?: string;
@@ -59,6 +60,15 @@ type RawEnv = {
   SITE_NOINDEX?: string;
   TRIAL_SIGN_KEY?: string;
   DIAG?: string;
+  LEADER_CONTRACT_ADDRESS?: string;
+  LEADER_RELAYER_PRIVATE_KEY?: string;
+  LEADER_RELAYER_ADDRESS?: string;
+  LEADER_HMAC_KEY?: string;
+  LEADER_SEASON?: string;
+  KV_REST_API_URL?: string;
+  KV_REST_API_TOKEN?: string;
+  REFERRAL_REWARD_TYPE?: 'boost' | 'bubbles';
+  REFERRAL_REWARD_AMOUNT?: string;
 };
 
 const DEFAULT_RAW: RawEnv = {
@@ -67,6 +77,7 @@ const DEFAULT_RAW: RawEnv = {
   NEXT_PUBLIC_BASE_RPC_URL: 'https://api.developer.coinbase.com/rpc/v1/base',
   NEXT_PUBLIC_MIN_PRICE_WEI: '1',
   BASE_RPC_URL: 'https://api.developer.coinbase.com/rpc/v1/base',
+  RPC_URL_BASE: undefined,
   PAY_TO_ADDRESS: '0x3F3E5e0C853C48641022a3A1D7a8D3E64B5441e0',
   MIN_PRICE_WEI: '1',
   FARCASTER_ACCOUNT_HEADER: undefined,
@@ -89,6 +100,15 @@ const DEFAULT_RAW: RawEnv = {
   SITE_NOINDEX: undefined,
   TRIAL_SIGN_KEY: undefined,
   DIAG: undefined,
+  LEADER_CONTRACT_ADDRESS: undefined,
+  LEADER_RELAYER_PRIVATE_KEY: undefined,
+  LEADER_RELAYER_ADDRESS: undefined,
+  LEADER_HMAC_KEY: undefined,
+  LEADER_SEASON: undefined,
+  KV_REST_API_URL: undefined,
+  KV_REST_API_TOKEN: undefined,
+  REFERRAL_REWARD_TYPE: undefined,
+  REFERRAL_REWARD_AMOUNT: undefined,
 };
 
 const EnvSchema = z
@@ -98,6 +118,7 @@ const EnvSchema = z
     NEXT_PUBLIC_BASE_RPC_URL: url,
     NEXT_PUBLIC_MIN_PRICE_WEI: integerString,
     BASE_RPC_URL: url,
+    RPC_URL_BASE: url.optional(),
     PAY_TO_ADDRESS: evmAddress,
     MIN_PRICE_WEI: integerString,
     FARCASTER_ACCOUNT_HEADER: optionalString,
@@ -120,6 +141,15 @@ const EnvSchema = z
     SITE_NOINDEX: z.string().optional(),
     TRIAL_SIGN_KEY: z.string().optional(),
     DIAG: z.string().optional(),
+    LEADER_CONTRACT_ADDRESS: evmAddress.optional(),
+    LEADER_RELAYER_PRIVATE_KEY: optionalString,
+    LEADER_RELAYER_ADDRESS: evmAddress.optional(),
+    LEADER_HMAC_KEY: optionalString,
+    LEADER_SEASON: z.string().optional(),
+    KV_REST_API_URL: url.optional(),
+    KV_REST_API_TOKEN: optionalString,
+    REFERRAL_REWARD_TYPE: z.enum(['boost', 'bubbles']).optional(),
+    REFERRAL_REWARD_AMOUNT: integerString.optional(),
   })
   .superRefine((value, ctx) => {
     const accountFields = [
@@ -170,6 +200,7 @@ function readRawEnv(): RawEnv {
       process.env.BASE_RPC_URL ??
       process.env.NEXT_PUBLIC_BASE_RPC_URL ??
       DEFAULT_RAW.BASE_RPC_URL,
+    RPC_URL_BASE: process.env.RPC_URL_BASE ?? undefined,
     PAY_TO_ADDRESS: process.env.PAY_TO_ADDRESS ?? DEFAULT_RAW.PAY_TO_ADDRESS,
     MIN_PRICE_WEI:
       process.env.MIN_PRICE_WEI ??
@@ -195,6 +226,16 @@ function readRawEnv(): RawEnv {
     SITE_NOINDEX: process.env.SITE_NOINDEX ?? undefined,
     TRIAL_SIGN_KEY: process.env.TRIAL_SIGN_KEY ?? undefined,
     DIAG: process.env.DIAG ?? undefined,
+    LEADER_CONTRACT_ADDRESS: process.env.LEADER_CONTRACT_ADDRESS ?? undefined,
+    LEADER_RELAYER_PRIVATE_KEY: process.env.LEADER_RELAYER_PRIVATE_KEY ?? undefined,
+    LEADER_RELAYER_ADDRESS: process.env.LEADER_RELAYER_ADDRESS ?? undefined,
+    LEADER_HMAC_KEY: process.env.LEADER_HMAC_KEY ?? undefined,
+    LEADER_SEASON: process.env.LEADER_SEASON ?? undefined,
+    KV_REST_API_URL: process.env.KV_REST_API_URL ?? undefined,
+    KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN ?? undefined,
+    REFERRAL_REWARD_TYPE:
+      (process.env.REFERRAL_REWARD_TYPE as 'boost' | 'bubbles' | undefined) ?? undefined,
+    REFERRAL_REWARD_AMOUNT: process.env.REFERRAL_REWARD_AMOUNT ?? undefined,
   };
 }
 
@@ -233,6 +274,12 @@ function loadEnv(): ParsedEnv {
     parsed.PAYMENTS_WEBHOOK_SECRET
   );
 
+  const RPC_URL_BASE = parsed.RPC_URL_BASE ?? parsed.BASE_RPC_URL;
+  const season = parsed.LEADER_SEASON && parsed.LEADER_SEASON.trim().length > 0 ? parsed.LEADER_SEASON.trim() : 'S1';
+  const rewardAmountRaw = parsed.REFERRAL_REWARD_AMOUNT ? Number.parseInt(parsed.REFERRAL_REWARD_AMOUNT, 10) : 1;
+  const rewardAmount = Number.isFinite(rewardAmountRaw) && rewardAmountRaw > 0 ? rewardAmountRaw : 1;
+  const rewardType = parsed.REFERRAL_REWARD_TYPE ?? 'boost';
+
   const env: Env = {
     BASE_RPC_URL: parsed.BASE_RPC_URL,
     PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
@@ -264,6 +311,16 @@ function loadEnv(): ParsedEnv {
     SITE_NOINDEX: parsed.SITE_NOINDEX,
     TRIAL_SIGN_KEY: parsed.TRIAL_SIGN_KEY,
     DIAG: parsed.DIAG,
+    RPC_URL_BASE,
+    LEADER_CONTRACT_ADDRESS: parsed.LEADER_CONTRACT_ADDRESS,
+    LEADER_RELAYER_PRIVATE_KEY: parsed.LEADER_RELAYER_PRIVATE_KEY,
+    LEADER_RELAYER_ADDRESS: parsed.LEADER_RELAYER_ADDRESS,
+    LEADER_HMAC_KEY: parsed.LEADER_HMAC_KEY,
+    LEADER_SEASON: season,
+    KV_REST_API_URL: parsed.KV_REST_API_URL?.replace(/\/$/, ''),
+    KV_REST_API_TOKEN: parsed.KV_REST_API_TOKEN,
+    REFERRAL_REWARD_TYPE: rewardType,
+    REFERRAL_REWARD_AMOUNT: rewardAmount,
   };
 
   const publicEnv: PublicEnv = {
@@ -324,6 +381,16 @@ export type Env = {
   SITE_NOINDEX?: string;
   TRIAL_SIGN_KEY?: string;
   DIAG?: string;
+  RPC_URL_BASE: string;
+  LEADER_CONTRACT_ADDRESS?: string;
+  LEADER_RELAYER_PRIVATE_KEY?: string;
+  LEADER_RELAYER_ADDRESS?: string;
+  LEADER_HMAC_KEY?: string;
+  LEADER_SEASON: string;
+  KV_REST_API_URL?: string;
+  KV_REST_API_TOKEN?: string;
+  REFERRAL_REWARD_TYPE: 'boost' | 'bubbles';
+  REFERRAL_REWARD_AMOUNT: number;
 };
 
 export type PublicEnv = {

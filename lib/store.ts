@@ -593,6 +593,7 @@ type GameStore = {
   hudSafeArea: { top: number; right: number; bottom: number; left: number };
   rewardBoostUsed: BoostSource | null;
   treasureFound: boolean;
+  rareHits: number;
   startRun: (mode?: EntryMode) => void;
   endRun: () => void;
   resetToStart: () => void;
@@ -671,6 +672,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     let cloudPenalty = false;
     let scoreDelta = 0;
     const nextTreasureFound = state.treasureFound || bubbleKind === 'treasure';
+    const nextRareHits = bubbleKind === 'rare' ? state.rareHits + 1 : state.rareHits;
 
     if (now - timeGainWindowStart >= 1_000) {
       timeGainWindowStart = now;
@@ -819,6 +821,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       perfectUntil,
       lastPerfectAt: perfect ? now : state.lastPerfectAt,
       treasureFound: nextTreasureFound,
+      rareHits: nextRareHits,
     });
 
     if (energy) {
@@ -1037,6 +1040,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   hudSafeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   rewardBoostUsed: null,
   treasureFound: false,
+  rareHits: 0,
   startRun: (mode = 'trial') => {
     const rewardBoostStore = useRewardBoostStore.getState();
     if (mode !== 'trial') {
@@ -1140,6 +1144,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       nextGoldenSpawnAt: initialGoldenAt,
       rewardBoostUsed: consumedBoost ? consumedBoost.source : null,
       treasureFound: false,
+      rareHits: 0,
     });
     get().spawnBubbles(Math.floor(maxBubbles / 2));
   },
@@ -1253,6 +1258,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       nextGoldenSpawnAt: initialGoldenAt,
       rewardBoostUsed: null,
       treasureFound: false,
+      rareHits: 0,
     });
   },
   pauseRun: () => {

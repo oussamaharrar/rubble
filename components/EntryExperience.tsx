@@ -1,10 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isAddress } from 'viem';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import GameCanvas from '@/app/game/GameCanvas';
 import GameplayHud from '@/components/GameplayHud';
+import EndOfRunOverlay from '@/components/EndOfRunOverlay';
+import type { AchievementItem } from '@/components/EndOfRunOverlay';
 import SettingsModal from '@/components/SettingsModal';
 import LeaderboardModal from '@/components/LeaderboardModal';
 import Modal from '@/components/Modal';
@@ -19,7 +22,9 @@ import { getRuntimeConfig } from '@/app/config/runtime';
 import { shortenAddress } from '@/lib/address';
 import { useToast } from '@/lib/use-toast';
 import { logEvent } from '@/lib/telemetry';
-import type { EntryMode } from '@/types/game';
+import { requestRunToken, submitLeaderboardScore, fetchMyBestScore } from '@/lib/leaderboard-client';
+import { claimReferralReward } from '@/lib/referral-client';
+import type { EntryMode, BoardKind } from '@/types/game';
 import { getSiteConfig } from '@/lib/site-config';
 import { useDailyRewardStore } from '@/lib/stores/daily-reward';
 import { useRewardBoostStore } from '@/lib/stores/reward-boost';
@@ -30,6 +35,7 @@ type EntryExperienceProps = {
   shareScore?: number;
   shareBoard?: 'daily' | 'normal';
   tagline?: string;
+  referrerAddress?: string;
 };
 
 const SCREEN_DURATION = 0.24;
@@ -219,7 +225,12 @@ function trialStorageKey(address: string) {
   return `${TRIAL_KEY_PREFIX}:${compactDayStamp()}:${normalized}`;
 }
 
-export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop. Win. Repeat.' }: EntryExperienceProps) {
+export default function EntryExperience({
+  shareScore,
+  shareBoard,
+  tagline = 'Pop. Win. Repeat.',
+  referrerAddress,
+}: EntryExperienceProps) {
   const [rememberFlag, setRememberFlag] = useState<0 | 1>(() => readRememberedFlag());
   const [rememberedAddress, setRememberedAddress] = useState<string | null>(() => readRememberedAddress());
   const { ready: walletReady, hasProvider } = useWalletSession((flag, address) => {
@@ -249,22 +260,43 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(todayKey('rubble:shared')) === 'done';
   });
+  const [bestScore, setBestScore] = useState<number | null>(null);
+  const [bestScoreSeason, setBestScoreSeason] = useState<string | null>(null);
+  const [endOverlayOpen, setEndOverlayOpen] = useState(false);
+  const [summaryData, setSummaryData] = useState<{
+    score: number;
+    bestCombo: number;
+    streak: number;
+    energyOrbs: number;
+    entryMode: EntryMode | null;
+    board: BoardKind;
+    treasureFound: boolean;
+    rareHits: number;
+    bestScore?: number | null;
+  } | null>(null);
+  const [personalBestImproved, setPersonalBestImproved] = useState(false);
+  const [submittingScore, setSubmittingScore] = useState(false);
+  const [leaderboardEnabled, setLeaderboardEnabled] = useState(true);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
   const runStateRef = useRef<{ started: boolean; ended: boolean; mode: EntryMode | null; startedAt: number }>(
     { started: false, ended: false, mode: null, startedAt: 0 }
   );
+  const runTokenRef = useRef<{ token?: string; runId: string } | null>(null);
   const trialKeyRef = useRef<string | null>(null);
   const lastTrialLoggedRef = useRef<string | null>(null);
   const lastWalletAddressRef = useRef<string | null>(null);
   const shopSourceRef = useRef<'home' | 'header' | 'gate' | 'no_runs'>('home');
   const lastGateReasonRef = useRef<string | null>(null);
   const lastNoRunsLoggedRef = useRef(false);
+  const referralAttemptRef = useRef<string | null>(null);
+  const bestScoreRef = useRef<number | null>(null);
 
   const walletAddress = useWalletStore((state) => state.address);
   const walletConnected = Boolean(walletAddress);
   const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
+  const grantBooster = useGameStore((state) => state.grantBooster);
   const rewardBoosts = useRewardBoostStore((state) => state.boosts);
   const refreshBoosts = useRewardBoostStore((state) => state.refresh);
   const grantRewardBoost = useRewardBoostStore((state) => state.grant);
@@ -279,6 +311,83 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   useEffect(() => {
     refreshDailyReward();
   }, [refreshDailyReward]);
+
+  useEffect(() => {
+    bestScoreRef.current = bestScore;
+  }, [bestScore]);
+
+  const applyLocalBest = useCallback(
+    (score: number) => {
+      const previous = bestScoreRef.current ?? 0;
+      const best = Math.max(previous, score);
+      setBestScore(best);
+      setPersonalBestImproved(score > previous);
+      setSummaryData((current) => (current ? { ...current, bestScore: best } : current));
+    },
+    [setBestScore, setPersonalBestImproved, setSummaryData]
+  );
+
+  useEffect(() => {
+    if (!walletAddress || !leaderboardEnabled) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const result = await fetchMyBestScore(walletAddress.toLowerCase());
+      if (cancelled) return;
+      if (result.ok && typeof result.bestScore === 'number') {
+        setBestScore(result.bestScore);
+        setBestScoreSeason(result.season ?? null);
+      } else if (result.error === 'http_404' || result.error === 'http_401') {
+        setLeaderboardEnabled(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [leaderboardEnabled, walletAddress]);
+
+  useEffect(() => {
+    if (!referrerAddress || !walletAddress) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const inviter = referrerAddress.toLowerCase();
+    const invitee = walletAddress.toLowerCase();
+    if (!isAddress(inviter) || inviter === invitee) {
+      return;
+    }
+    const key = todayKey(`rubble:referral:${inviter}:${invitee}`);
+    if (window.localStorage.getItem(key)) {
+      return;
+    }
+    if (referralAttemptRef.current === key) {
+      return;
+    }
+    referralAttemptRef.current = key;
+    void (async () => {
+      const response = await claimReferralReward(inviter, invitee);
+      if (response.duplicate) {
+        window.localStorage.setItem(key, 'duplicate');
+        logEvent('referral_duplicate', { inviter, invitee });
+        showToast('Referral already claimed today.');
+        return;
+      }
+      if (!response.ok || !response.reward) {
+        return;
+      }
+      if (response.reward.type === 'boost') {
+        grantRewardBoost('invite');
+        showToast('Referral boost unlocked! 🎁');
+      } else if (response.reward.type === 'bubbles') {
+        grantBooster(response.reward.amount, 'other');
+        showToast('Referral reward: bonus bubbles added!');
+      }
+      window.localStorage.setItem(key, 'claimed');
+    })();
+  }, [grantBooster, grantRewardBoost, referrerAddress, showToast, walletAddress]);
 
   const hasDailyRewardBoost = useMemo(
     () => rewardBoosts.some((boost) => boost.source === 'daily'),
@@ -306,7 +415,6 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   const resumeRun = useGameStore((state) => state.resumeRun);
   const resetToStart = useGameStore((state) => state.resetToStart);
   const phase = useGameStore((state) => state.phase);
-  const grantBooster = useGameStore((state) => state.grantBooster);
   const setHudSafeArea = useGameStore((state) => state.setHudSafeArea);
 
   const identityGradient = useMemo(
@@ -490,13 +598,33 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   useEffect(() => {
     if (phase === 'paused') {
       setScreen('paused');
-    } else if (phase === 'playing' || phase === 'storm' || phase === 'intro') {
+      return;
+    }
+    if (phase === 'playing' || phase === 'storm' || phase === 'intro') {
       setScreen('playing');
-    } else if (phase === 'summary') {
+      return;
+    }
+    if (phase === 'summary') {
+      const state = useGameStore.getState();
+      const stats = state.stats;
+      const snapshot = {
+        score: stats.score,
+        bestCombo: stats.bestCombo,
+        streak: stats.streak,
+        energyOrbs: stats.energyOrbsCollected,
+        entryMode: stats.entryMode,
+        board: state.boardKind as BoardKind,
+        treasureFound: state.treasureFound,
+        rareHits: state.rareHits,
+        bestScore: bestScoreRef.current,
+      };
+      setSummaryData(snapshot);
+      setPersonalBestImproved(false);
+      setEndOverlayOpen(true);
       setScreen('home');
+
       if (!runStateRef.current.ended && runStateRef.current.started) {
         runStateRef.current.ended = true;
-        const { stats: currentStats } = useGameStore.getState();
         const startedAt = runStateRef.current.startedAt;
         const durationMs =
           startedAt > 0
@@ -504,33 +632,96 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
             : 0;
         logEvent('run_ended', {
           mode: runStateRef.current.mode,
-          score: currentStats.score,
+          score: stats.score,
           durationMs: Math.max(0, Math.round(durationMs)),
-          bestCombo: currentStats.bestCombo,
-          streak: currentStats.streak,
+          bestCombo: stats.bestCombo,
+          streak: stats.streak,
         });
         const nextEligible =
           walletConnected && (trialAvailable || hasTicketsOrBoosts || hasDailyRewardBoost || hasInviteBoost);
         console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
       }
+
+      const finalScore = stats.score;
+      const canSubmitLeaderboard = Boolean(walletAddress && leaderboardEnabled);
+      setSubmittingScore(canSubmitLeaderboard);
+      if (walletAddress && leaderboardEnabled) {
+        const tokenPayload = runTokenRef.current;
+        const runId = tokenPayload?.runId;
+        const token = tokenPayload?.token ?? null;
+        void submitLeaderboardScore({
+          player: walletAddress.toLowerCase(),
+          score: finalScore,
+          token,
+          runId,
+        })
+          .then((result) => {
+            if (result.ok && typeof result.bestScore === 'number') {
+              const previous = bestScoreRef.current ?? 0;
+              const improved = result.bestScore > previous;
+              setBestScore(result.bestScore);
+              setBestScoreSeason(result.season ?? null);
+              setPersonalBestImproved(improved);
+              setSummaryData((current) =>
+                current ? { ...current, bestScore: result.bestScore } : current
+              );
+            } else if (result.error === 'http_404' || result.error === 'http_401') {
+              setLeaderboardEnabled(false);
+              applyLocalBest(finalScore);
+            } else if (result.bestScore !== undefined) {
+              const previous = bestScoreRef.current ?? 0;
+              const improved = result.bestScore > previous;
+              setBestScore(result.bestScore);
+              setBestScoreSeason(result.season ?? null);
+              setPersonalBestImproved(improved);
+              setSummaryData((current) =>
+                current ? { ...current, bestScore: result.bestScore ?? current.bestScore } : current
+              );
+            } else {
+              applyLocalBest(finalScore);
+            }
+          })
+          .catch(() => {
+            setLeaderboardEnabled(false);
+            applyLocalBest(finalScore);
+          })
+          .finally(() => {
+            setSubmittingScore(false);
+          });
+      } else {
+        applyLocalBest(finalScore);
+      }
+      runTokenRef.current = null;
       setTimeout(() => {
         resetToStart();
         runStateRef.current = { started: false, ended: false, mode: null, startedAt: 0 };
-        setScreen('home');
       }, 120);
-    } else {
-      setScreen('home');
+      return;
     }
+
+    setScreen('home');
   }, [
     phase,
-    resetToStart,
-    trialAvailable,
-    tickets,
-    walletConnected,
     hasDailyRewardBoost,
     hasInviteBoost,
     hasTicketsOrBoosts,
+    leaderboardEnabled,
+    resetToStart,
+    trialAvailable,
+    applyLocalBest,
+    walletAddress,
+    walletConnected,
   ]);
+
+  useEffect(() => {
+    if (!endOverlayOpen) {
+      return;
+    }
+    if (typeof bestScore !== 'number') {
+      return;
+    }
+    setSummaryData((current) => (current ? { ...current, bestScore } : current));
+  }, [bestScore, endOverlayOpen]);
 
   const handleConsumeTrial = useCallback(() => {
     if (typeof window !== 'undefined' && walletAddress) {
@@ -646,6 +837,30 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     setNoRunsOpen(true);
   }, []);
 
+  const prepareRunToken = useCallback(
+    (address: string | null) => {
+      if (!address) {
+        runTokenRef.current = null;
+        return;
+      }
+      const runId = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+      runTokenRef.current = { runId };
+      if (!leaderboardEnabled) {
+        return;
+      }
+      void requestRunToken(address.toLowerCase())
+        .then((response) => {
+          if (response.ok && typeof response.token === 'string') {
+            runTokenRef.current = { runId, token: response.token };
+          }
+        })
+        .catch(() => {
+          runTokenRef.current = { runId };
+        });
+    },
+    [leaderboardEnabled]
+  );
+
   const startGameplay = useCallback(
     (mode: EntryMode) => {
       pendingModeRef.current = mode;
@@ -674,6 +889,7 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
       } else {
         handleConsumeTicket();
       }
+      prepareRunToken(walletAddress ?? null);
       setScreen('playing');
       setGateOpen(false);
       setNoRunsOpen(false);
@@ -684,10 +900,12 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
       handleConsumeTicket,
       handleConsumeTrial,
       hasRewardBoost,
+      prepareRunToken,
       startRun,
       tickets,
       trialAvailable,
       walletConnected,
+      walletAddress,
     ]
   );
 
@@ -716,6 +934,38 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     }
     startGameplay('trial');
   }, [handleToast, showGate, startGameplay, trialAvailable, walletConnected]);
+
+  const closeEndOverlay = useCallback(() => {
+    setEndOverlayOpen(false);
+    setSummaryData(null);
+    setPersonalBestImproved(false);
+  }, []);
+
+  const handleOverlayPlayAgain = useCallback(() => {
+    closeEndOverlay();
+    handlePlayPress();
+  }, [closeEndOverlay, handlePlayPress]);
+
+  const handleOverlayLeaderboard = useCallback(() => {
+    closeEndOverlay();
+    setShowScoreboard(true);
+  }, [closeEndOverlay]);
+
+  const handleOverlayClose = useCallback(() => {
+    closeEndOverlay();
+  }, [closeEndOverlay]);
+
+  const handleShareRun = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const scoreValue = summaryData?.score ?? bestScore ?? 0;
+    const board = summaryData?.board ?? 'normal';
+    const shareTarget = new URL(site.siteUrl);
+    shareTarget.searchParams.set('score', `${scoreValue}`);
+    shareTarget.searchParams.set('board', board);
+    const message = `I just scored ${scoreValue.toLocaleString()} in Bubble’it! 🫧 Can you beat me? ${shareTarget.toString()}`;
+    const shareUrl = `https://warpcast.com/~/compose?text=${encodeURIComponent(message)}`;
+    window.open(shareUrl, '_blank', 'noopener,noreferrer,width=640,height=720');
+  }, [bestScore, site.siteUrl, summaryData]);
 
   const openShop = useCallback(
     (source: 'home' | 'header' | 'gate' | 'no_runs') => {
@@ -889,6 +1139,45 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   const priceRangeLabel = useMemo(() => {
     return `$${runtime.priceMin} – $${runtime.priceMax}`;
   }, [runtime.priceMax, runtime.priceMin]);
+
+  const overlayOpen = endOverlayOpen && summaryData !== null;
+  const overlayScore = summaryData?.score ?? 0;
+  const overlayBestScore = useMemo(() => {
+    if (summaryData && typeof summaryData.bestScore === 'number') {
+      return summaryData.bestScore;
+    }
+    if (typeof bestScore === 'number') {
+      return bestScore;
+    }
+    return null;
+  }, [bestScore, summaryData]);
+
+  const achievements = useMemo<AchievementItem[]>(() => {
+    const data = summaryData;
+    const comboUnlocked = (data?.bestCombo ?? 0) >= 10;
+    const rareUnlocked = (data?.rareHits ?? 0) > 0;
+    const treasureUnlocked = Boolean(data?.treasureFound);
+    return [
+      {
+        id: 'combo10',
+        label: 'Combo 10+',
+        description: 'Chain a 10x combo in one run.',
+        unlocked: comboUnlocked,
+      },
+      {
+        id: 'rare',
+        label: 'Rare Bubble Hunter',
+        description: 'Pop at least one rare bubble.',
+        unlocked: rareUnlocked,
+      },
+      {
+        id: 'treasure',
+        label: 'Treasure Diver',
+        description: 'Find a treasure bubble.',
+        unlocked: treasureUnlocked,
+      },
+    ];
+  }, [summaryData]);
 
   return (
     <>
@@ -1324,6 +1613,21 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
             </div>
           </div>
         </Modal>
+
+        <EndOfRunOverlay
+          open={overlayOpen}
+          onClose={handleOverlayClose}
+          onPlayAgain={handleOverlayPlayAgain}
+          onLeaderboard={handleOverlayLeaderboard}
+          onShare={handleShareRun}
+          score={overlayScore}
+          bestScore={overlayBestScore}
+          rankLabel="—"
+          achievements={achievements}
+          personalBestImproved={personalBestImproved}
+          season={bestScoreSeason}
+          submitting={submittingScore}
+        />
 
         <AnimatePresence>
           {toast ? (
