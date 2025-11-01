@@ -1,5 +1,10 @@
 export type RunTokenResponse =
-  | { ok: true; token: string; payload: { address: string; nonce: string; issuedAt: number } }
+  | {
+      ok: true;
+      runId: string;
+      token?: string;
+      payload?: { address: string; nonce: string; issuedAt: number };
+    }
   | { ok: false; reason: string; status?: number };
 
 export type SubmitScoreResponse =
@@ -7,7 +12,7 @@ export type SubmitScoreResponse =
   | { ok: false; reason: string; status?: number };
 
 export type BestScoreResponse =
-  | { ok: true; bestScore: number }
+  | { ok: true; bestScore: number; season: string | null }
   | { ok: false; reason: string; status?: number };
 
 function safeJson(response: Response) {
@@ -30,8 +35,16 @@ export async function issueRunTokenRequest(address: string): Promise<RunTokenRes
       return { ok: false, reason: 'http_error', status: response.status };
     }
     const data = await safeJson(response);
-    if (data.ok && typeof data.token === 'string') {
-      return { ok: true, token: data.token, payload: (data.payload as { address: string; nonce: string; issuedAt: number }) ?? { address, nonce: '', issuedAt: Date.now() } };
+    if (data.ok) {
+      const payload = (data.payload as { address: string; nonce: string; issuedAt: number } | undefined) ?? undefined;
+      const runIdValue = typeof data.runId === 'string' ? data.runId : payload?.nonce;
+      if (!runIdValue) {
+        return { ok: false, reason: 'missing_run_id' };
+      }
+      if (typeof data.token === 'string') {
+        return { ok: true, token: data.token, payload: payload ?? { address, nonce: runIdValue, issuedAt: Date.now() }, runId: runIdValue };
+      }
+      return { ok: true, runId: runIdValue };
     }
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {
@@ -40,7 +53,16 @@ export async function issueRunTokenRequest(address: string): Promise<RunTokenRes
   }
 }
 
-export async function submitScoreRequest(input: { player: string; score: number; token?: string; runId?: string }): Promise<SubmitScoreResponse> {
+export async function submitScoreRequest(input: {
+  player: string;
+  score: number;
+  token?: string;
+  runId?: string;
+  comboMax?: number;
+  hits?: number;
+  rareHits?: number;
+  season?: string;
+}): Promise<SubmitScoreResponse> {
   try {
     const response = await fetch('/api/leaderboard/submit', {
       method: 'POST',
@@ -76,7 +98,8 @@ export async function fetchBestScore(address: string): Promise<BestScoreResponse
     }
     const data = await safeJson(response);
     if (data.ok && typeof data.bestScore === 'number') {
-      return { ok: true, bestScore: data.bestScore };
+      const season = typeof data.season === 'string' ? data.season : null;
+      return { ok: true, bestScore: data.bestScore, season };
     }
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {

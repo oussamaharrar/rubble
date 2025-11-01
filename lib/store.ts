@@ -236,6 +236,7 @@ function defaultStats(): RunStats {
     paidEntryOrbs: 0,
     entryMode: null,
     rareHits: 0,
+    hits: 0,
   };
 }
 
@@ -721,6 +722,8 @@ export const useGameStore = create<GameStore>((set, get) => {
       } else {
         chainLen = Math.max(stats.chainLen, 1);
       }
+
+      stats.hits = (stats.hits ?? 0) + 1;
 
       if (bubbleKind === 'bad') {
         const penalty = Math.max(5, Math.round(BASE_POINTS * 1.5));

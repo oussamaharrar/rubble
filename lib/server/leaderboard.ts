@@ -11,6 +11,8 @@ const CONTRACT_ADDRESS = process.env.LEADER_CONTRACT_ADDRESS;
 const PRIVATE_KEY = process.env.LEADER_RELAYER_PRIVATE_KEY;
 const RPC_URL = process.env.RPC_URL_BASE ?? process.env.BASE_RPC_URL;
 const RELAYER_ADDRESS = process.env.LEADER_RELAYER_ADDRESS;
+const DIAG_ENABLED = process.env.DIAG === 'true';
+const CHAIN_ID = baseSepolia.id;
 
 const abi = (artifact as { abi: unknown }).abi as typeof artifact.abi;
 
@@ -22,7 +24,6 @@ type LeaderboardClients = {
 };
 
 let clients: LeaderboardClients | null = null;
-
 let summaryLogged = false;
 
 function mask(address: string) {
@@ -33,6 +34,36 @@ function mask(address: string) {
 function normalizeHex(value: string): `0x${string}` {
   return value.startsWith('0x') ? (value as `0x${string}`) : (`0x${value}` as `0x${string}`);
 }
+
+function logSummary(relayerCandidate?: string | null) {
+  if (summaryLogged || !DIAG_ENABLED) {
+    return;
+  }
+  const normalized = relayerCandidate ? normalizeAddress(relayerCandidate) : null;
+  const relayerDisplay = normalized ? mask(normalized) : '—';
+  const contractDisplay = CONTRACT_ADDRESS ? normalizeHex(CONTRACT_ADDRESS) : '—';
+  console.info(`[leaderboard] CHAIN=${CHAIN_ID}`);
+  console.info(`[leaderboard] RELAYER=${relayerDisplay}`);
+  console.info(`[leaderboard] CONTRACT=${contractDisplay}`);
+  console.info(`[leaderboard] RPC set=${RPC_URL ? 'true' : 'false'}`);
+  summaryLogged = true;
+}
+
+const bootRelayer = (() => {
+  if (RELAYER_ADDRESS) {
+    return RELAYER_ADDRESS;
+  }
+  if (PRIVATE_KEY) {
+    try {
+      return privateKeyToAccount(normalizeHex(PRIVATE_KEY)).address;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+})();
+
+logSummary(bootRelayer);
 
 function ensureClients() {
   if (!CONTRACT_ADDRESS || !PRIVATE_KEY || !RPC_URL) {
@@ -51,11 +82,7 @@ function ensureClients() {
     });
     clients = { wallet, reader, account, address: normalizeHex(CONTRACT_ADDRESS) as Address };
     if (!summaryLogged) {
-      const relayer = normalizeAddress(RELAYER_ADDRESS ?? account.address) ?? account.address;
-      console.info('[leaderboard] CHAIN=84532');
-      console.info(`[leaderboard] RELAYER=${mask(relayer)}`);
-      console.info(`[leaderboard] CONTRACT=${clients.address}`);
-      summaryLogged = true;
+      logSummary(account.address);
     }
   }
   return clients;
@@ -65,7 +92,7 @@ export function isLeaderboardConfigured() {
   return Boolean(CONTRACT_ADDRESS && PRIVATE_KEY && RPC_URL);
 }
 
-export async function readBestScore(address: string): Promise<number | null> {
+export async function readBest(address: string): Promise<number | null> {
   const normalized = normalizeAddress(address);
   if (!normalized) {
     return null;
@@ -89,7 +116,25 @@ export async function readBestScore(address: string): Promise<number | null> {
   }
 }
 
-export async function submitScoreOnChain(player: string, score: number) {
+export async function readSeason(): Promise<string | null> {
+  const ctx = ensureClients();
+  if (!ctx) {
+    return null;
+  }
+  try {
+    const value = await ctx.reader.readContract({
+      abi,
+      address: ctx.address,
+      functionName: 'season',
+    });
+    return typeof value === 'string' ? value : `${value}`;
+  } catch (error) {
+    console.warn('[leaderboard] failed to read season', error);
+    return null;
+  }
+}
+
+export async function submitOnchain(player: string, score: number) {
   const normalized = normalizeAddress(player);
   if (!normalized) {
     throw new Error('Invalid player address');
