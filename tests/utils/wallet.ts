@@ -1,6 +1,8 @@
 import type { Page } from '@playwright/test';
 
-const ADDRESS = '0x1234567890abcdef1234567890abcdef12345678';
+export const MOCK_ADDRESS = '0x1234567890abcdef1234567890abcdef12345678';
+
+const ADDRESS = MOCK_ADDRESS;
 
 export async function initWalletStub(page: Page) {
   await page.addInitScript(({ address }) => {

@@ -20,6 +20,9 @@ import { shortenAddress } from '@/lib/address';
 import { useToast } from '@/lib/use-toast';
 import { logEvent } from '@/lib/telemetry';
 import type { EntryMode } from '@/types/game';
+import { getSiteConfig } from '@/lib/site-config';
+import { useDailyRewardStore } from '@/lib/stores/daily-reward';
+import { useRewardBoostStore } from '@/lib/stores/reward-boost';
 
 type ScreenState = 'home' | 'playing' | 'paused';
 
@@ -225,6 +228,7 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   });
 
   const runtime = useMemo(() => getRuntimeConfig(), []);
+  const site = useMemo(() => getSiteConfig(), []);
   const prefersReducedMotion = useReducedMotion();
   const { toast, showToast } = useToast();
   const [hydrated, setHydrated] = useState(false);
@@ -241,6 +245,10 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   const [measureToken, setMeasureToken] = useState(0);
   const [mascotBounces, setMascotBounces] = useState(0);
   const [safeLogged, setSafeLogged] = useState(false);
+  const [shareClaimedToday, setShareClaimedToday] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(todayKey('rubble:shared')) === 'done';
+  });
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
@@ -257,6 +265,40 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   const walletAddress = useWalletStore((state) => state.address);
   const walletConnected = Boolean(walletAddress);
   const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
+  const rewardBoosts = useRewardBoostStore((state) => state.boosts);
+  const refreshBoosts = useRewardBoostStore((state) => state.refresh);
+  const grantRewardBoost = useRewardBoostStore((state) => state.grant);
+  const dailyAvailable = useDailyRewardStore((state) => state.available);
+  const claimDailyReward = useDailyRewardStore((state) => state.claimReward);
+  const refreshDailyReward = useDailyRewardStore((state) => state.refresh);
+
+  useEffect(() => {
+    refreshBoosts();
+  }, [refreshBoosts]);
+
+  useEffect(() => {
+    refreshDailyReward();
+  }, [refreshDailyReward]);
+
+  const hasDailyRewardBoost = useMemo(
+    () => rewardBoosts.some((boost) => boost.source === 'daily'),
+    [rewardBoosts]
+  );
+  const hasInviteBoost = useMemo(
+    () => rewardBoosts.some((boost) => boost.source === 'invite'),
+    [rewardBoosts]
+  );
+  const hasTreasureBoost = useMemo(
+    () => rewardBoosts.some((boost) => boost.source === 'treasure'),
+    [rewardBoosts]
+  );
+  const hasRewardBoost = hasDailyRewardBoost || hasInviteBoost || hasTreasureBoost;
+  const hasTodayBonus = hasDailyRewardBoost || hasInviteBoost;
+  const todayBoostLabel = hasDailyRewardBoost
+    ? "Today’s Boost: +1"
+    : hasInviteBoost
+    ? 'Invite Boost: +1'
+    : '';
   const resetWalletStore = useWalletStore((state) => state.reset);
   const startRun = useGameStore((state) => state.startRun);
   const beginGameplay = useGameStore((state) => state.beginGameplay);
@@ -300,6 +342,16 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     setRememberFlag(readRememberedFlag());
     setRememberedAddress(readRememberedAddress());
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || typeof window === 'undefined') return;
+    setShareClaimedToday(window.localStorage.getItem(todayKey('rubble:shared')) === 'done');
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setShareClaimedToday(window.localStorage.getItem(todayKey('rubble:shared')) === 'done');
+  }, [dailyAvailable]);
 
   const handleToast = useCallback(
     (message: string) => {
@@ -404,8 +456,9 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     }
   }, [runtime.trialEnabled, walletAddress]);
 
-  const hasTicketsOrBoosts = tickets > 0 || boosterOrbs > 0;
-  const eligibleToPlay = walletConnected && (trialAvailable || hasTicketsOrBoosts);
+  const hasTicketsOrBoosts = tickets > 0 || boosterOrbs > 0 || hasTreasureBoost;
+  const eligibleToPlay =
+    walletConnected && (trialAvailable || hasTicketsOrBoosts || hasDailyRewardBoost || hasInviteBoost);
 
   useEffect(() => {
     console.log(
@@ -456,7 +509,8 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
           bestCombo: currentStats.bestCombo,
           streak: currentStats.streak,
         });
-        const nextEligible = walletConnected && (trialAvailable || tickets > 0);
+        const nextEligible =
+          walletConnected && (trialAvailable || hasTicketsOrBoosts || hasDailyRewardBoost || hasInviteBoost);
         console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
       }
       setTimeout(() => {
@@ -467,7 +521,16 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     } else {
       setScreen('home');
     }
-  }, [phase, resetToStart, trialAvailable, tickets, walletConnected]);
+  }, [
+    phase,
+    resetToStart,
+    trialAvailable,
+    tickets,
+    walletConnected,
+    hasDailyRewardBoost,
+    hasInviteBoost,
+    hasTicketsOrBoosts,
+  ]);
 
   const handleConsumeTrial = useCallback(() => {
     if (typeof window !== 'undefined' && walletAddress) {
@@ -500,30 +563,52 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   );
 
   const handleDailyReward = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    const key = todayKey('rubble:daily-reward');
-    if (window.localStorage.getItem(key) === 'claimed') {
+    const reward = claimDailyReward();
+    if (!reward) {
       handleToast('Daily reward already claimed. Come back tomorrow!');
       return;
     }
-    window.localStorage.setItem(key, 'claimed');
-    logEvent('daily_claimed', { source: 'home' });
-    handleGrantTicket(1, 'Boost granted!');
-    grantBooster(1, 'energy');
-  }, [grantBooster, handleGrantTicket, handleToast]);
+    if (reward === 'boost') {
+      handleToast('You claimed today’s boost! 🎉');
+      logEvent('boost_granted', { reason: 'daily' });
+    } else if (reward === 'bubbles') {
+      handleToast('Bonus bubbles added to your bank!');
+    } else {
+      handleToast('Cosmetic reward queued—stay tuned!');
+    }
+  }, [claimDailyReward, handleToast]);
 
   const handleShareBoost = useCallback(() => {
     if (typeof window === 'undefined') return;
-    const key = todayKey('rubble:share-reward');
-    if (window.localStorage.getItem(key) === 'claimed') {
-      handleToast('Share bonus already claimed today.');
+    const key = todayKey('rubble:shared');
+    if (window.localStorage.getItem(key) === 'done') {
+      handleToast('Share reward already collected today.');
+      setShareClaimedToday(true);
       return;
     }
-    window.localStorage.setItem(key, 'claimed');
-    grantBooster(1, 'energy');
-    handleToast('Boost granted!');
-    logEvent('invite_shared', { channel: 'farcaster' });
-  }, [grantBooster, handleToast]);
+    const message = `I'm popping bubbles on Bubble’it! 🎈 Join me → ${site.siteUrl}`;
+    const shareUrl = `https://warpcast.com/~/compose?text=${encodeURIComponent(message)}`;
+    const shareWindow = window.open(shareUrl, '_blank', 'noopener,noreferrer,width=640,height=720');
+    if (!shareWindow) {
+      handleToast('Unable to open Farcaster. Check pop-up settings and try again.');
+      return;
+    }
+    logEvent('invite_shared', { channel: 'farcaster', status: 'opened' });
+    const poll = window.setInterval(() => {
+      if (shareWindow.closed) {
+        window.clearInterval(poll);
+        window.localStorage.setItem(key, 'done');
+        setShareClaimedToday(true);
+        grantRewardBoost('invite');
+        handleToast('Thanks for sharing! +1 Boost added 🎁');
+        logEvent('invite_shared', { channel: 'farcaster', status: 'completed' });
+        logEvent('boost_granted', { reason: 'share' });
+      }
+    }, 700);
+    window.setTimeout(() => {
+      window.clearInterval(poll);
+    }, 15000);
+  }, [grantRewardBoost, handleToast, site.siteUrl]);
 
   const attemptConnect = useCallback(async () => {
     if (walletConnected) return;
@@ -581,7 +666,8 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
       });
       const remainingTickets = mode === 'trial' ? tickets : Math.max(0, tickets - 1);
       const nextTrialAvailable = mode === 'trial' ? false : trialAvailable;
-      const nextEligible = walletConnected && (nextTrialAvailable || remainingTickets > 0 || boosterOrbs > 0);
+      const nextEligible =
+        walletConnected && (nextTrialAvailable || remainingTickets > 0 || boosterOrbs > 0 || hasRewardBoost);
       console.log(`RUN: started=true ended=false nextEligible=${nextEligible}`);
       if (mode === 'trial') {
         handleConsumeTrial();
@@ -592,7 +678,17 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
       setGateOpen(false);
       setNoRunsOpen(false);
     },
-    [beginGameplay, boosterOrbs, handleConsumeTicket, handleConsumeTrial, startRun, tickets, trialAvailable, walletConnected]
+    [
+      beginGameplay,
+      boosterOrbs,
+      handleConsumeTicket,
+      handleConsumeTrial,
+      hasRewardBoost,
+      startRun,
+      tickets,
+      trialAvailable,
+      walletConnected,
+    ]
   );
 
   const handlePlayPress = useCallback(() => {
@@ -707,13 +803,14 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
         streak: currentStats.streak,
         aborted: true,
       });
-      const nextEligible = walletConnected && (trialAvailable || tickets > 0 || boosterOrbs > 0);
+      const nextEligible =
+        walletConnected && (trialAvailable || tickets > 0 || boosterOrbs > 0 || hasRewardBoost);
       console.log(`RUN: started=true ended=true nextEligible=${nextEligible}`);
     }
     runStateRef.current = { started: false, ended: false, mode: null, startedAt: 0 };
     resetToStart();
     setScreen('home');
-  }, [boosterOrbs, resetToStart, tickets, trialAvailable, walletConnected]);
+  }, [boosterOrbs, hasRewardBoost, resetToStart, tickets, trialAvailable, walletConnected]);
 
   useEffect(() => {
     if (screen === 'playing') {
@@ -812,6 +909,37 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
                 <span className="text-sm font-medium text-white/60">{tagline}</span>
               </div>
               <div className="flex items-center gap-3">
+                <motion.button
+                  type="button"
+                  className={clsx(
+                    'relative flex h-12 w-12 items-center justify-center rounded-full border border-white/20 bg-white/10 text-2xl text-white shadow-lg shadow-cyan-500/20 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200',
+                    dailyAvailable ? 'hover:bg-white/20' : 'cursor-not-allowed opacity-40',
+                    hasDailyRewardBoost && !dailyAvailable && 'border-emerald-400/40 bg-emerald-500/15 shadow-emerald-500/30'
+                  )}
+                  onClick={handleDailyReward}
+                  disabled={!dailyAvailable}
+                  animate={
+                    dailyAvailable && !prefersReducedMotion
+                      ? { scale: [1, 1.08, 1], rotate: [0, -6, 3, 0] }
+                      : undefined
+                  }
+                  transition={{
+                    duration: 1.8,
+                    repeat: dailyAvailable && !prefersReducedMotion ? Infinity : 0,
+                    ease: 'easeInOut',
+                  }}
+                  aria-label={dailyAvailable ? 'Claim daily reward' : 'Daily reward claimed'}
+                >
+                  🎁
+                  {dailyAvailable ? (
+                    <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-300" />
+                  ) : null}
+                  {!dailyAvailable && hasDailyRewardBoost ? (
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400 text-[10px] font-bold text-emerald-950">
+                      ✓
+                    </span>
+                  ) : null}
+                </motion.button>
                 {showIdentityChip ? (
                   <HeaderIdentityChip
                     address={walletAddress ?? rememberedAddress ?? ''}
@@ -842,6 +970,24 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
                 )}
               </div>
             </header>
+          ) : null}
+
+          {screen === 'home' ? (
+            <AnimatePresence>
+              {hasTodayBonus ? (
+                <motion.div
+                  key="daily-boost-chip"
+                  className="mx-auto mt-4 flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-4 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-emerald-100 shadow-lg shadow-emerald-500/10"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <span className="text-base leading-none">✨</span>
+                  <span>{todayBoostLabel}</span>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           ) : null}
 
           <main className="relative flex flex-1 flex-col items-center justify-center px-6 pb-16">
@@ -899,6 +1045,14 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
                     </button>
                     <button type="button" className={GLASS_BUTTON_CLASS} onClick={() => setShowScoreboard(true)}>
                       Scoreboard
+                    </button>
+                    <button
+                      type="button"
+                      className={clsx(GLASS_BUTTON_CLASS, shareClaimedToday && 'cursor-not-allowed opacity-50')}
+                      onClick={handleShareBoost}
+                      disabled={shareClaimedToday}
+                    >
+                      Invite
                     </button>
                     <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleOpenMore}>
                       More
@@ -1086,6 +1240,7 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
                           handleShareBoost();
                           setNoRunsOpen(false);
                         }}
+                        disabled={shareClaimedToday}
                       >
                         Invite a Friend
                       </button>
@@ -1125,16 +1280,28 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
           <div className="grid gap-4">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <h3 className="text-lg font-semibold">Daily Reward</h3>
-              <p className="mt-1 text-sm text-white/70">Claim once a day for a retry ticket and a sparkle orb.</p>
-              <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleDailyReward}>
-                Claim Daily Reward
+              <p className="mt-1 text-sm text-white/70">
+                Claim once per day for surprise boosts, bonus bubbles, or cosmetic drops.
+              </p>
+              <button
+                type="button"
+                className={clsx(GLASS_BUTTON_CLASS, !dailyAvailable && 'cursor-not-allowed opacity-50')}
+                onClick={handleDailyReward}
+                disabled={!dailyAvailable}
+              >
+                {dailyAvailable ? 'Claim Daily Reward' : 'Come back tomorrow'}
               </button>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <h3 className="text-lg font-semibold">Share &amp; Invite</h3>
-              <p className="mt-1 text-sm text-white/70">Post your streak on Farcaster for +1 boost each day.</p>
-              <button type="button" className={GLASS_BUTTON_CLASS} onClick={handleShareBoost}>
-                Mark Shared
+              <p className="mt-1 text-sm text-white/70">Post your streak on Farcaster for a +1 boost each day.</p>
+              <button
+                type="button"
+                className={clsx(GLASS_BUTTON_CLASS, shareClaimedToday && 'cursor-not-allowed opacity-50')}
+                onClick={handleShareBoost}
+                disabled={shareClaimedToday}
+              >
+                Share on Farcaster
               </button>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
