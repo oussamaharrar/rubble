@@ -3,7 +3,7 @@ import { createPublicClient, createWalletClient, http } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import type { PrivateKeyAccount } from 'viem/accounts';
 import { privateKeyToAccount } from 'viem/accounts';
-import artifact from '../../contracts/Leaderboard.abi.json';
+import artifact from '@/contracts/Leaderboard.abi.json';
 import { normalizeAddress } from '@/lib/address';
 import { logEvent } from './log-event';
 
@@ -18,12 +18,12 @@ type LeaderboardClients = {
   wallet: WalletClient<HttpTransport, typeof baseSepolia, PrivateKeyAccount>;
   reader: PublicClient<HttpTransport, typeof baseSepolia>;
   account: PrivateKeyAccount;
-  address: Address;
+  contract: Address;
 };
 
 let clients: LeaderboardClients | null = null;
-
 let summaryLogged = false;
+let cachedSeason: { value: string; fetchedAt: number } | null = null;
 
 function mask(address: string) {
   if (address.length <= 10) return address;
@@ -32,6 +32,25 @@ function mask(address: string) {
 
 function normalizeHex(value: string): `0x${string}` {
   return value.startsWith('0x') ? (value as `0x${string}`) : (`0x${value}` as `0x${string}`);
+}
+
+function diagEnabled() {
+  const flag = process.env.DIAG ?? process.env.NEXT_PUBLIC_DIAG;
+  if (!flag) return false;
+  const value = flag.toLowerCase();
+  return value === 'true' || value === '1';
+}
+
+function logSummary(ctx: LeaderboardClients) {
+  if (summaryLogged || !diagEnabled()) {
+    return;
+  }
+  const relayerSource = normalizeAddress(RELAYER_ADDRESS ?? ctx.account.address) ?? ctx.account.address;
+  console.info('CHAIN=84532');
+  console.info(`RELAYER=${mask(relayerSource)}`);
+  console.info(`CONTRACT=${ctx.contract}`);
+  console.info(`RPC set=${String(Boolean(RPC_URL))}`);
+  summaryLogged = true;
 }
 
 function ensureClients() {
@@ -49,14 +68,13 @@ function ensureClients() {
       chain: baseSepolia,
       transport: http(RPC_URL),
     });
-    clients = { wallet, reader, account, address: normalizeHex(CONTRACT_ADDRESS) as Address };
-    if (!summaryLogged) {
-      const relayer = normalizeAddress(RELAYER_ADDRESS ?? account.address) ?? account.address;
-      console.info('[leaderboard] CHAIN=84532');
-      console.info(`[leaderboard] RELAYER=${mask(relayer)}`);
-      console.info(`[leaderboard] CONTRACT=${clients.address}`);
-      summaryLogged = true;
-    }
+    clients = {
+      wallet,
+      reader,
+      account,
+      contract: normalizeHex(CONTRACT_ADDRESS) as Address,
+    };
+    logSummary(clients);
   }
   return clients;
 }
@@ -65,8 +83,8 @@ export function isLeaderboardConfigured() {
   return Boolean(CONTRACT_ADDRESS && PRIVATE_KEY && RPC_URL);
 }
 
-export async function readBestScore(address: string): Promise<number | null> {
-  const normalized = normalizeAddress(address);
+export async function readBest(playerAddress: string): Promise<number | null> {
+  const normalized = normalizeAddress(playerAddress);
   if (!normalized) {
     return null;
   }
@@ -75,13 +93,13 @@ export async function readBestScore(address: string): Promise<number | null> {
     return null;
   }
   try {
-    const value = await ctx.reader.readContract({
+    const result = await ctx.reader.readContract({
       abi,
-      address: ctx.address,
+      address: ctx.contract,
       functionName: 'bestScore',
       args: [normalized as `0x${string}`],
     });
-    const numeric = Number(value);
+    const numeric = Number(result);
     return Number.isFinite(numeric) ? numeric : 0;
   } catch (error) {
     console.warn('[leaderboard] failed to read bestScore', error);
@@ -89,8 +107,33 @@ export async function readBestScore(address: string): Promise<number | null> {
   }
 }
 
-export async function submitScoreOnChain(player: string, score: number) {
-  const normalized = normalizeAddress(player);
+export async function readSeason(): Promise<string | null> {
+  const ctx = ensureClients();
+  if (!ctx) {
+    return null;
+  }
+  if (cachedSeason && Date.now() - cachedSeason.fetchedAt < 5 * 60 * 1000) {
+    return cachedSeason.value;
+  }
+  try {
+    const value = await ctx.reader.readContract({
+      abi,
+      address: ctx.contract,
+      functionName: 'season',
+    });
+    if (typeof value === 'string') {
+      cachedSeason = { value, fetchedAt: Date.now() };
+      return value;
+    }
+    return null;
+  } catch (error) {
+    console.warn('[leaderboard] failed to read season', error);
+    return null;
+  }
+}
+
+export async function submitOnchain(playerAddress: string, score: number) {
+  const normalized = normalizeAddress(playerAddress);
   if (!normalized) {
     throw new Error('Invalid player address');
   }
@@ -99,28 +142,22 @@ export async function submitScoreOnChain(player: string, score: number) {
     throw new Error('Leaderboard not configured');
   }
   const clamped = Math.min(10_000_000, Math.max(0, Math.floor(score)));
-  const hash = await ctx.wallet.writeContract({
+  const txHash = await ctx.wallet.writeContract({
     abi,
-    address: ctx.address,
+    address: ctx.contract,
     functionName: 'submit',
     args: [normalized as `0x${string}`, BigInt(clamped)],
   });
-  const receipt = await ctx.reader.waitForTransactionReceipt({ hash });
+  const receipt = await ctx.reader.waitForTransactionReceipt({ hash: txHash });
   const latest = await ctx.reader.readContract({
     abi,
-    address: ctx.address,
+    address: ctx.contract,
     functionName: 'bestScore',
     args: [normalized as `0x${string}`],
   });
   const bestScore = Number(latest);
-  logEvent('leaderboard_tx', {
-    txHash: hash,
-    status: receipt.status,
-    bestScore,
-  });
-  return { hash, bestScore };
+  logEvent('leaderboard_tx', { txHash, status: receipt.status, bestScore });
+  return { hash: txHash, bestScore: Number.isFinite(bestScore) ? bestScore : clamped };
 }
 
 export const leaderboardAbi = abi;
-export const leaderboardAddress = CONTRACT_ADDRESS;
-export const leaderboardRpcUrl = RPC_URL;

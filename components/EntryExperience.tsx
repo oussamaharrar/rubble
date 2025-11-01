@@ -271,18 +271,29 @@ export default function EntryExperience({
   });
   const [leaderboardStatus, setLeaderboardStatus] = useState<'idle' | 'loading' | 'disabled' | 'ready' | 'error'>('idle');
   const [bestScoreOnChain, setBestScoreOnChain] = useState<number | null>(null);
+  const [leaderboardSeason, setLeaderboardSeason] = useState<string | null>(null);
   const [submittingScore, setSubmittingScore] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showEndOverlay, setShowEndOverlay] = useState(false);
   const [celebrateBest, setCelebrateBest] = useState(false);
   const [leaderboardRank, setLeaderboardRank] = useState<string>('—');
+  const [bestScoreRefreshing, setBestScoreRefreshing] = useState(false);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
   const runStateRef = useRef<{ started: boolean; ended: boolean; mode: EntryMode | null; startedAt: number }>(
     { started: false, ended: false, mode: null, startedAt: 0 }
   );
-  const runTokenRef = useRef<{ token?: string; runId: string; bestBefore: number; submitted: boolean } | null>(null);
+  const runTokenRef = useRef<
+    {
+      token?: string;
+      runId: string;
+      requestId: string;
+      bestBefore: number;
+      submitted: boolean;
+      requested: boolean;
+    } | null
+  >(null);
   const trialKeyRef = useRef<string | null>(null);
   const lastTrialLoggedRef = useRef<string | null>(null);
   const lastWalletAddressRef = useRef<string | null>(null);
@@ -314,6 +325,8 @@ export default function EntryExperience({
     if (!walletAddress) {
       setLeaderboardStatus('idle');
       setBestScoreOnChain(null);
+      setLeaderboardSeason(null);
+      setBestScoreRefreshing(false);
       return;
     }
     let cancelled = false;
@@ -323,16 +336,20 @@ export default function EntryExperience({
         if (cancelled) return;
         if (result.ok) {
           setBestScoreOnChain(result.bestScore);
+          setLeaderboardSeason(result.season ?? null);
           setLeaderboardStatus('ready');
         } else if (result.reason === 'disabled') {
           setBestScoreOnChain(null);
+          setLeaderboardSeason(null);
           setLeaderboardStatus('disabled');
         } else {
+          setLeaderboardSeason(null);
           setLeaderboardStatus('error');
         }
       })
       .catch(() => {
         if (!cancelled) {
+          setLeaderboardSeason(null);
           setLeaderboardStatus('error');
         }
       });
@@ -352,13 +369,17 @@ export default function EntryExperience({
     if (!runStateRef.current.started || runStateRef.current.ended) {
       return;
     }
-    if (!tokenState || tokenState.token) {
+    if (!tokenState || tokenState.requested) {
       return;
     }
-    const runId = tokenState.runId;
+    const requestId = tokenState.requestId;
+    tokenState.requested = true;
     issueRunTokenRequest(walletAddress).then((response) => {
-      if (response.ok && runTokenRef.current && runTokenRef.current.runId === runId) {
-        runTokenRef.current.token = response.token;
+      if (response.ok && runTokenRef.current && runTokenRef.current.requestId === requestId) {
+        if (response.token) {
+          runTokenRef.current.token = response.token;
+        }
+        runTokenRef.current.runId = response.runId;
       }
     });
   }, [leaderboardStatus, walletAddress]);
@@ -412,7 +433,7 @@ export default function EntryExperience({
   }, [shareBoard, shareScore]);
 
   const normalizedReferrer = useMemo(() => (referrerAddress ? normalizeAddress(referrerAddress) ?? null : null), [referrerAddress]);
-  const bestScoreLoading = leaderboardStatus === 'loading';
+  const bestScoreLoading = leaderboardStatus === 'loading' || bestScoreRefreshing;
 
   const achievementsState = useMemo(
     () => ({
@@ -644,6 +665,12 @@ export default function EntryExperience({
   }, [gateOpen]);
 
   useEffect(() => {
+    if (!showEndOverlay) {
+      setBestScoreRefreshing(false);
+    }
+  }, [showEndOverlay]);
+
+  useEffect(() => {
     if (!noRunsOpen) {
       lastNoRunsLoggedRef.current = false;
     }
@@ -706,7 +733,16 @@ export default function EntryExperience({
     tokenState.submitted = true;
     setSubmittingScore(true);
     setSubmitError(null);
-    submitScoreRequest({ player: walletAddress, score: stats.score, token: tokenState.token, runId: tokenState.runId })
+    submitScoreRequest({
+      player: walletAddress,
+      score: stats.score,
+      comboMax: stats.bestCombo,
+      hits: stats.streak,
+      rareHits: stats.rareHits,
+      season: leaderboardSeason,
+      token: tokenState.token,
+      runId: tokenState.runId,
+    })
       .then((response) => {
         if (!response.ok) {
           setSubmitError('Unable to sync score to Base. Try again soon.');
@@ -722,13 +758,40 @@ export default function EntryExperience({
       .finally(() => {
         setSubmittingScore(false);
       });
-  }, [leaderboardStatus, phase, stats.score, walletAddress]);
+  }, [leaderboardStatus, leaderboardSeason, phase, stats.bestCombo, stats.rareHits, stats.score, stats.streak, walletAddress]);
 
   useEffect(() => {
     if (phase !== 'summary' && showEndOverlay) {
       setShowEndOverlay(false);
     }
   }, [phase, showEndOverlay]);
+
+  useEffect(() => {
+    if (!showEndOverlay || leaderboardStatus !== 'ready' || !walletAddress) {
+      return;
+    }
+    let cancelled = false;
+    setBestScoreRefreshing(true);
+    fetchBestScore(walletAddress)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setBestScoreOnChain(result.bestScore);
+          setLeaderboardSeason(result.season ?? null);
+        }
+      })
+      .catch(() => {
+        /* ignore refresh errors */
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBestScoreRefreshing(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leaderboardStatus, showEndOverlay, walletAddress]);
 
   const handleConsumeTrial = useCallback(() => {
     if (typeof window !== 'undefined' && walletAddress) {
@@ -860,21 +923,32 @@ export default function EntryExperience({
       pendingModeRef.current = mode;
       startRun(mode);
       beginGameplay();
-      const runId = createRunId();
-      runTokenRef.current = { runId, bestBefore: bestScoreOnChain ?? 0, submitted: false };
-      setCelebrateBest(false);
-      setSubmitError(null);
-      setLeaderboardRank('—');
+    const runId = createRunId();
+    runTokenRef.current = {
+      runId,
+      requestId: runId,
+      bestBefore: bestScoreOnChain ?? 0,
+      submitted: false,
+      requested: false,
+    };
+    setCelebrateBest(false);
+    setSubmitError(null);
+    setLeaderboardRank('—');
       runStateRef.current = {
         started: true,
         ended: false,
         mode,
         startedAt: typeof performance !== 'undefined' ? performance.now() : Date.now(),
       };
-      if (leaderboardStatus === 'ready' && walletAddress) {
+      if (leaderboardStatus === 'ready' && walletAddress && runTokenRef.current) {
+        const requestId = runTokenRef.current.requestId;
+        runTokenRef.current.requested = true;
         issueRunTokenRequest(walletAddress).then((response) => {
-          if (response.ok && runTokenRef.current && runTokenRef.current.runId === runId) {
-            runTokenRef.current.token = response.token;
+          if (response.ok && runTokenRef.current && runTokenRef.current.requestId === requestId) {
+            if (response.token) {
+              runTokenRef.current.token = response.token;
+            }
+            runTokenRef.current.runId = response.runId;
           }
         });
       }

@@ -18,11 +18,13 @@ test.describe('onchain leaderboard integration', () => {
   test('submitting a score updates best score display', async ({ page }) => {
     let submitCount = 0;
 
+    let onchainBest = 500;
+
     await page.route('**/api/leaderboard/me**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 500 }),
+        body: JSON.stringify({ ok: true, bestScore: onchainBest, season: 'S1' }),
       });
     });
 
@@ -32,6 +34,7 @@ test.describe('onchain leaderboard integration', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           ok: true,
+          runId: 'server-run-1',
           token: 'mock-token',
           payload: { address: MOCK_ADDRESS, nonce: 'abc', issuedAt: Date.now() },
         }),
@@ -40,6 +43,7 @@ test.describe('onchain leaderboard integration', () => {
 
     await page.route('**/api/leaderboard/submit', async (route) => {
       submitCount += 1;
+      onchainBest = 800;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

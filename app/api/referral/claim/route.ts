@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, reason: 'invalid_addresses' }, { status: 400 });
   }
 
-  const key = `referral:${todayKey()}:${inviter}:${invitee}`;
+  const key = `ref:${todayKey()}:${inviter}:${invitee}`;
   const stored = await kvSetIfAbsent(key, '1', DAY_SECONDS);
   if (!stored) {
     logEvent('referral_duplicate', { inviter, invitee });
