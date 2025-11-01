@@ -235,6 +235,7 @@ function defaultStats(): RunStats {
     energyOrbsCollected: 0,
     paidEntryOrbs: 0,
     entryMode: null,
+    rareHits: 0,
   };
 }
 
@@ -760,6 +761,7 @@ export const useGameStore = create<GameStore>((set, get) => {
           logEvent('treasure_found', { score: awarded, combo: stats.chainLen });
           logEvent('boost_granted', { reason: 'treasure' });
         } else if (bubbleKind === 'rare') {
+          stats.rareHits = (stats.rareHits ?? 0) + 1;
           logEvent('rare_found', { combo: stats.chainLen, score: awarded });
         }
         scoreDelta = awarded;

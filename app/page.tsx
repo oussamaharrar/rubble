@@ -42,6 +42,15 @@ export default async function Page({ searchParams }: PageProps) {
   const rawBoard = resolvedParams.board;
   const boardParam = Array.isArray(rawBoard) ? rawBoard[0] : rawBoard;
   const shareBoard = boardParam === 'daily' ? 'daily' : 'normal';
+  const rawRef = resolvedParams.ref;
+  const refParam = Array.isArray(rawRef) ? rawRef[0] : rawRef;
 
-  return <EntryExperience shareScore={shareScore} shareBoard={shareBoard} tagline={site.tagline} />;
+  return (
+    <EntryExperience
+      shareScore={shareScore}
+      shareBoard={shareBoard}
+      tagline={site.tagline}
+      referrerAddress={typeof refParam === 'string' ? refParam : undefined}
+    />
+  );
 }
