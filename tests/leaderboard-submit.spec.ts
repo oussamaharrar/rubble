@@ -22,7 +22,7 @@ test.describe('onchain leaderboard integration', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 500 }),
+        body: JSON.stringify({ ok: true, bestScore: 500, season: 'S1' }),
       });
     });
 
@@ -34,6 +34,7 @@ test.describe('onchain leaderboard integration', () => {
           ok: true,
           token: 'mock-token',
           payload: { address: MOCK_ADDRESS, nonce: 'abc', issuedAt: Date.now() },
+          runId: 'server-run-id',
         }),
       });
     });
@@ -43,7 +44,7 @@ test.describe('onchain leaderboard integration', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 800 }),
+        body: JSON.stringify({ ok: true, bestScore: 800, season: 'S1' }),
       });
     });
 
@@ -58,7 +59,7 @@ test.describe('onchain leaderboard integration', () => {
       const store = (window as any).__rubbleStore;
       const state = store.getState();
       store.setState({
-        stats: { ...state.stats, score: 780, bestCombo: 12, rareHits: 2 },
+        stats: { ...state.stats, score: 780, bestCombo: 12, rareHits: 2, totalHits: 140 },
       });
       store.getState().endRun();
     });

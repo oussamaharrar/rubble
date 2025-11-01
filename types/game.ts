@@ -60,6 +60,7 @@ export type RunStats = {
   paidEntryOrbs: number;
   entryMode: EntryMode | null;
   rareHits: number;
+  totalHits: number;
 };
 
 export type TargetState = {

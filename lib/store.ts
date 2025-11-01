@@ -236,6 +236,7 @@ function defaultStats(): RunStats {
     paidEntryOrbs: 0,
     entryMode: null,
     rareHits: 0,
+    totalHits: 0,
   };
 }
 
@@ -709,6 +710,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     } else {
       currentStreak = state.currentStreak + 1;
       stats.streak = Math.max(stats.streak, currentStreak);
+      stats.totalHits = (stats.totalHits ?? 0) + 1;
 
       let chainLen = stats.chainLen;
       if (allowComboContribution) {
