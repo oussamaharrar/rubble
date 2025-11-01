@@ -59,6 +59,15 @@ type RawEnv = {
   SITE_NOINDEX?: string;
   TRIAL_SIGN_KEY?: string;
   DIAG?: string;
+  RPC_URL_BASE?: string;
+  LEADER_CONTRACT_ADDRESS?: string;
+  LEADER_RELAYER_PRIVATE_KEY?: string;
+  LEADER_HMAC_KEY?: string;
+  LEADER_SEASON?: string;
+  REFERRAL_REWARD_TYPE?: string;
+  REFERRAL_REWARD_AMOUNT?: string;
+  KV_REST_API_URL?: string;
+  KV_REST_API_TOKEN?: string;
 };
 
 const DEFAULT_RAW: RawEnv = {
@@ -89,6 +98,15 @@ const DEFAULT_RAW: RawEnv = {
   SITE_NOINDEX: undefined,
   TRIAL_SIGN_KEY: undefined,
   DIAG: undefined,
+  RPC_URL_BASE: undefined,
+  LEADER_CONTRACT_ADDRESS: undefined,
+  LEADER_RELAYER_PRIVATE_KEY: undefined,
+  LEADER_HMAC_KEY: undefined,
+  LEADER_SEASON: undefined,
+  REFERRAL_REWARD_TYPE: undefined,
+  REFERRAL_REWARD_AMOUNT: undefined,
+  KV_REST_API_URL: undefined,
+  KV_REST_API_TOKEN: undefined,
 };
 
 const EnvSchema = z
@@ -120,6 +138,15 @@ const EnvSchema = z
     SITE_NOINDEX: z.string().optional(),
     TRIAL_SIGN_KEY: z.string().optional(),
     DIAG: z.string().optional(),
+    RPC_URL_BASE: url.optional(),
+    LEADER_CONTRACT_ADDRESS: evmAddress.optional(),
+    LEADER_RELAYER_PRIVATE_KEY: z.string().optional(),
+    LEADER_HMAC_KEY: z.string().optional(),
+    LEADER_SEASON: z.string().optional(),
+    REFERRAL_REWARD_TYPE: z.enum(['boost', 'bubbles']).optional(),
+    REFERRAL_REWARD_AMOUNT: integerString.optional(),
+    KV_REST_API_URL: url.optional(),
+    KV_REST_API_TOKEN: z.string().optional(),
   })
   .superRefine((value, ctx) => {
     const accountFields = [
@@ -233,6 +260,17 @@ function loadEnv(): ParsedEnv {
     parsed.PAYMENTS_WEBHOOK_SECRET
   );
 
+  const referralRewardAmount = parsed.REFERRAL_REWARD_AMOUNT
+    ? Number.parseInt(parsed.REFERRAL_REWARD_AMOUNT, 10)
+    : undefined;
+  const normalizedReferralAmount =
+    typeof referralRewardAmount === 'number' && Number.isFinite(referralRewardAmount)
+      ? referralRewardAmount
+      : undefined;
+  const normalizedPrivateKey = parsed.LEADER_RELAYER_PRIVATE_KEY?.trim() || undefined;
+  const normalizedHmacKey = parsed.LEADER_HMAC_KEY?.trim() || undefined;
+  const normalizedSeason = parsed.LEADER_SEASON?.trim() || undefined;
+
   const env: Env = {
     BASE_RPC_URL: parsed.BASE_RPC_URL,
     PAY_TO_ADDRESS: parsed.PAY_TO_ADDRESS,
@@ -264,6 +302,15 @@ function loadEnv(): ParsedEnv {
     SITE_NOINDEX: parsed.SITE_NOINDEX,
     TRIAL_SIGN_KEY: parsed.TRIAL_SIGN_KEY,
     DIAG: parsed.DIAG,
+    RPC_URL_BASE: parsed.RPC_URL_BASE,
+    LEADER_CONTRACT_ADDRESS: parsed.LEADER_CONTRACT_ADDRESS,
+    LEADER_RELAYER_PRIVATE_KEY: normalizedPrivateKey,
+    LEADER_HMAC_KEY: normalizedHmacKey,
+    LEADER_SEASON: normalizedSeason,
+    REFERRAL_REWARD_TYPE: parsed.REFERRAL_REWARD_TYPE,
+    REFERRAL_REWARD_AMOUNT: normalizedReferralAmount,
+    KV_REST_API_URL: parsed.KV_REST_API_URL,
+    KV_REST_API_TOKEN: parsed.KV_REST_API_TOKEN,
   };
 
   const publicEnv: PublicEnv = {
@@ -324,6 +371,15 @@ export type Env = {
   SITE_NOINDEX?: string;
   TRIAL_SIGN_KEY?: string;
   DIAG?: string;
+  RPC_URL_BASE?: string;
+  LEADER_CONTRACT_ADDRESS?: string;
+  LEADER_RELAYER_PRIVATE_KEY?: string;
+  LEADER_HMAC_KEY?: string;
+  LEADER_SEASON?: string;
+  REFERRAL_REWARD_TYPE?: 'boost' | 'bubbles';
+  REFERRAL_REWARD_AMOUNT?: number;
+  KV_REST_API_URL?: string;
+  KV_REST_API_TOKEN?: string;
 };
 
 export type PublicEnv = {

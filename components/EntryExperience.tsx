@@ -30,6 +30,7 @@ type EntryExperienceProps = {
   shareScore?: number;
   shareBoard?: 'daily' | 'normal';
   tagline?: string;
+  inviterAddress?: string;
 };
 
 const SCREEN_DURATION = 0.24;
@@ -49,6 +50,7 @@ const GLASS_BUTTON_CLASS =
 const REMEMBER_KEY = 'rubble:remember';
 const REMEMBER_ADDRESS_KEY = 'rubble:address';
 const TRIAL_KEY_PREFIX = 'rubble:trial';
+const REFERRAL_KEY_PREFIX = 'rubble:referral';
 
 function persistRememberedWallet(address: string | null): 0 | 1 {
   if (typeof window === 'undefined') return 0;
@@ -219,7 +221,16 @@ function trialStorageKey(address: string) {
   return `${TRIAL_KEY_PREFIX}:${compactDayStamp()}:${normalized}`;
 }
 
-export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop. Win. Repeat.' }: EntryExperienceProps) {
+function referralStorageKey(inviter: string, invitee: string) {
+  return `${REFERRAL_KEY_PREFIX}:${compactDayStamp()}:${inviter}:${invitee}`;
+}
+
+export default function EntryExperience({
+  shareScore,
+  shareBoard,
+  tagline = 'Pop. Win. Repeat.',
+  inviterAddress,
+}: EntryExperienceProps) {
   const [rememberFlag, setRememberFlag] = useState<0 | 1>(() => readRememberedFlag());
   const [rememberedAddress, setRememberedAddress] = useState<string | null>(() => readRememberedAddress());
   const { ready: walletReady, hasProvider } = useWalletSession((flag, address) => {
@@ -261,10 +272,12 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   const shopSourceRef = useRef<'home' | 'header' | 'gate' | 'no_runs'>('home');
   const lastGateReasonRef = useRef<string | null>(null);
   const lastNoRunsLoggedRef = useRef(false);
+  const referralAttemptRef = useRef<string | null>(null);
 
   const walletAddress = useWalletStore((state) => state.address);
   const walletConnected = Boolean(walletAddress);
   const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
+  const grantBooster = useGameStore((state) => state.grantBooster);
   const rewardBoosts = useRewardBoostStore((state) => state.boosts);
   const refreshBoosts = useRewardBoostStore((state) => state.refresh);
   const grantRewardBoost = useRewardBoostStore((state) => state.grant);
@@ -306,7 +319,6 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
   const resumeRun = useGameStore((state) => state.resumeRun);
   const resetToStart = useGameStore((state) => state.resetToStart);
   const phase = useGameStore((state) => state.phase);
-  const grantBooster = useGameStore((state) => state.grantBooster);
   const setHudSafeArea = useGameStore((state) => state.setHudSafeArea);
 
   const identityGradient = useMemo(
@@ -359,6 +371,73 @@ export default function EntryExperience({ shareScore, shareBoard, tagline = 'Pop
     },
     [showToast]
   );
+
+  useEffect(() => {
+    if (!inviterAddress || !walletAddress || typeof window === 'undefined') {
+      if (!walletAddress) {
+        referralAttemptRef.current = null;
+      }
+      return;
+    }
+    const inviter = inviterAddress.toLowerCase();
+    const invitee = walletAddress.toLowerCase();
+    const storageKey = referralStorageKey(inviter, invitee);
+    if (referralAttemptRef.current === storageKey) {
+      return;
+    }
+    referralAttemptRef.current = storageKey;
+    try {
+      if (window.localStorage.getItem(storageKey) === 'done') {
+        return;
+      }
+    } catch {
+      // ignore storage read issues
+    }
+
+    (async () => {
+      try {
+        const response = await fetch('/api/referral/claim', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ inviterAddress: inviter, inviteeAddress: invitee }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (payload?.ok) {
+          try {
+            window.localStorage.setItem(storageKey, 'done');
+          } catch {
+            // ignore storage issues
+          }
+          if (payload.reward?.type === 'boost') {
+            grantRewardBoost('invite');
+          } else if (payload.reward?.type === 'bubbles') {
+            const amount = Number(payload.reward?.amount ?? 1);
+            if (Number.isFinite(amount) && amount > 0) {
+              grantBooster(amount, 'other');
+            }
+          }
+          logEvent('referral_claim', {
+            inviter,
+            invitee,
+            rewardType: payload.reward?.type,
+            rewardAmount: payload.reward?.amount,
+          });
+          handleToast('Invite bonus unlocked! Enjoy your reward.');
+        } else if (payload?.error === 'duplicate') {
+          try {
+            window.localStorage.setItem(storageKey, 'done');
+          } catch {
+            // ignore storage issues
+          }
+          logEvent('referral_duplicate', { inviter, invitee });
+        } else {
+          referralAttemptRef.current = null;
+        }
+      } catch {
+        referralAttemptRef.current = null;
+      }
+    })();
+  }, [inviterAddress, walletAddress, grantRewardBoost, grantBooster, handleToast]);
 
   useEffect(() => {
     if (!stageRef.current || typeof window === 'undefined') {
