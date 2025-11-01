@@ -23,11 +23,13 @@ test.describe('end-of-run overlay', () => {
   });
 
   test('overlay shows stats and actions and play again opens gate', async ({ page }) => {
+    let onchainBest = 300;
+
     await page.route('**/api/leaderboard/me**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 300 }),
+        body: JSON.stringify({ ok: true, bestScore: onchainBest, season: 'S1' }),
       });
     });
 
@@ -37,6 +39,7 @@ test.describe('end-of-run overlay', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           ok: true,
+          runId: 'server-run-2',
           token: 'token',
           payload: { address: MOCK_ADDRESS, nonce: 'def', issuedAt: Date.now() },
         }),
@@ -44,6 +47,7 @@ test.describe('end-of-run overlay', () => {
     });
 
     await page.route('**/api/leaderboard/submit', async (route) => {
+      onchainBest = 1200;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
