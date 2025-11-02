@@ -35,6 +35,12 @@ type EntryExperienceProps = {
   referrerAddress?: string;
 };
 
+type FarcasterProfile = {
+  username?: string | null;
+  displayName?: string | null;
+  pfpUrl?: string | null;
+};
+
 const SCREEN_DURATION = 0.24;
 const SCREEN_EASE: [number, number, number, number] = [0.22, 0.88, 0.22, 1];
 
@@ -258,6 +264,7 @@ export default function EntryExperience({
   const [showSettings, setShowSettings] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const [farcasterProfile, setFarcasterProfile] = useState<FarcasterProfile | null>(null);
   const [tickets, setTickets] = useState<number>(() => readStoredTickets());
   const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
   const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
@@ -281,6 +288,7 @@ export default function EntryExperience({
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
+  const phaserBundleLoadedRef = useRef(false);
   const runStateRef = useRef<{ started: boolean; ended: boolean; mode: EntryMode | null; startedAt: number }>(
     { started: false, ended: false, mode: null, startedAt: 0 }
   );
@@ -302,8 +310,74 @@ export default function EntryExperience({
   const lastNoRunsLoggedRef = useRef(false);
   const referralClaimKeyRef = useRef<string | null>(null);
   const referralAttemptedRef = useRef(false);
-
+  const overlayRefreshAttemptedRef = useRef(false);
+  const runCompletedLoggedRef = useRef(false);
+  const stats = useGameStore((state) => state.stats);
   const walletAddress = useWalletStore((state) => state.address);
+
+  const refreshBestScore = useCallback(
+    async ({
+      reason,
+      attempts = 2,
+      delayMs = 450,
+      toastOnFailure = false,
+      previousBest,
+    }: {
+      reason: 'submit' | 'overlay';
+      attempts?: number;
+      delayMs?: number;
+      toastOnFailure?: boolean;
+      previousBest?: number;
+    }) => {
+      if (!walletAddress || leaderboardStatus !== 'ready') {
+        return null;
+      }
+      const attemptCount = Math.max(1, Number.isFinite(attempts) ? Math.floor(attempts) : 1);
+      const baselineBest =
+        typeof previousBest === 'number' && Number.isFinite(previousBest)
+          ? previousBest
+          : runTokenRef.current?.bestBefore ?? bestScoreOnChain ?? 0;
+      let response: Awaited<ReturnType<typeof fetchBestScore>> | null = null;
+      setBestScoreRefreshing(true);
+      try {
+        for (let index = 0; index < attemptCount; index += 1) {
+          const result = await fetchBestScore(walletAddress);
+          response = result;
+          if (result.ok) {
+            setBestScoreOnChain(result.bestScore);
+            setLeaderboardSeason(result.season ?? null);
+            if (runTokenRef.current) {
+              runTokenRef.current.bestBefore = result.bestScore;
+            }
+            logEvent('leader_me_fetch', { bestScore: result.bestScore, reason });
+            if (reason === 'submit') {
+              const improved = result.bestScore > baselineBest && result.bestScore >= stats.score;
+              if (improved) {
+                setCelebrateBest(true);
+              }
+            }
+            break;
+          }
+          if (index < attemptCount - 1) {
+            const pause = Math.max(0, Number.isFinite(delayMs) ? Math.floor(delayMs * (index + 1)) : 0);
+            if (pause > 0) {
+              await new Promise((resolve) => setTimeout(resolve, pause));
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[leaderboard] refresh best failed', error);
+      } finally {
+        setBestScoreRefreshing(false);
+      }
+      if (response?.ok !== true && toastOnFailure) {
+        showToast('Unable to refresh best score. Try again soon.');
+      }
+      return response;
+    },
+    [walletAddress, leaderboardStatus, bestScoreOnChain, stats.score, showToast]
+  );
+
   const walletConnected = Boolean(walletAddress);
   const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
   const rewardBoosts = useRewardBoostStore((state) => state.boosts);
@@ -338,6 +412,10 @@ export default function EntryExperience({
           setBestScoreOnChain(result.bestScore);
           setLeaderboardSeason(result.season ?? null);
           setLeaderboardStatus('ready');
+          if (runTokenRef.current) {
+            runTokenRef.current.bestBefore = result.bestScore;
+          }
+          logEvent('leader_me_fetch', { bestScore: result.bestScore, reason: 'initial' });
         } else if (result.reason === 'disabled') {
           setBestScoreOnChain(null);
           setLeaderboardSeason(null);
@@ -412,8 +490,19 @@ export default function EntryExperience({
   const phase = useGameStore((state) => state.phase);
   const grantBooster = useGameStore((state) => state.grantBooster);
   const setHudSafeArea = useGameStore((state) => state.setHudSafeArea);
-  const stats = useGameStore((state) => state.stats);
   const treasureFound = useGameStore((state) => state.treasureFound);
+
+  useEffect(() => {
+    if (phaserBundleLoadedRef.current) {
+      return;
+    }
+    if (phase === 'playing' || phase === 'storm') {
+      phaserBundleLoadedRef.current = true;
+      import('@/app/game/phaser/scene').catch(() => {
+        /* noop */
+      });
+    }
+  }, [phase]);
 
   const identityGradient = useMemo(
     () => createIdenticonGradient(walletAddress ?? rememberedAddress),
@@ -423,6 +512,23 @@ export default function EntryExperience({
     () => shortenAddress(walletAddress ?? rememberedAddress ?? ''),
     [rememberedAddress, walletAddress]
   );
+  const farcasterDisplayName = useMemo(() => {
+    if (!farcasterProfile) return null;
+    const name = farcasterProfile.displayName?.trim();
+    if (name && name.length > 0) {
+      return name;
+    }
+    const username = farcasterProfile.username?.trim().replace(/^@/, '');
+    if (username && username.length > 0) {
+      return `@${username}`;
+    }
+    return null;
+  }, [farcasterProfile]);
+  const farcasterHandle = useMemo(() => {
+    if (!farcasterProfile?.username) return null;
+    const handle = farcasterProfile.username.trim().replace(/^@/, '');
+    return handle.length > 0 ? `@${handle}` : null;
+  }, [farcasterProfile]);
   const showIdentityChip = walletConnected || (rememberFlag === 1 && Boolean(rememberedAddress));
   const checkingWallet = !showIdentityChip && (!hydrated || (rememberFlag === 1 && !walletReady));
   const leaderboardHighlight = useMemo(() => {
@@ -461,6 +567,52 @@ export default function EntryExperience({
     setHydrated(true);
     setRememberFlag(readRememberedFlag());
     setRememberedAddress(readRememberedAddress());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const assets = ['/game-icons/splash.png', '/game-icons/icon.png', '/game-icons/og.png'];
+    const images = assets.map((src) => {
+      const img = new Image();
+      img.src = src;
+      return img;
+    });
+    return () => {
+      images.forEach((img) => {
+        img.src = '';
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    (async () => {
+      try {
+        const { sdk } = await import('@farcaster/miniapp-sdk');
+        const inMiniApp = await sdk.isInMiniApp().catch(() => false);
+        if (!inMiniApp || cancelled) {
+          return;
+        }
+        await sdk.actions.ready().catch(() => {});
+        const context = await sdk.context.catch(() => null);
+        if (cancelled || !context?.user) {
+          return;
+        }
+        setFarcasterProfile({
+          username: context.user.username ?? null,
+          displayName: context.user.displayName ?? null,
+          pfpUrl: context.user.pfpUrl ?? null,
+        });
+      } catch {
+        // ignore SDK failures outside Farcaster
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -730,9 +882,11 @@ export default function EntryExperience({
     if (!tokenState || tokenState.submitted) {
       return;
     }
+    const previousBestBeforeSubmit = tokenState.bestBefore;
     tokenState.submitted = true;
     setSubmittingScore(true);
     setSubmitError(null);
+    logEvent('leader_submit', { score: stats.score });
     submitScoreRequest({
       player: walletAddress,
       score: stats.score,
@@ -749,8 +903,12 @@ export default function EntryExperience({
           return;
         }
         setBestScoreOnChain(response.bestScore);
-        const improved = response.bestScore > tokenState.bestBefore && response.bestScore === stats.score;
+        const improved = response.bestScore > tokenState.bestBefore && response.bestScore >= stats.score;
         setCelebrateBest(improved);
+        if (runTokenRef.current) {
+          runTokenRef.current.bestBefore = response.bestScore;
+        }
+        void refreshBestScore({ reason: 'submit', toastOnFailure: true, previousBest: previousBestBeforeSubmit });
       })
       .catch(() => {
         setSubmitError('Unable to sync score to Base. Try again soon.');
@@ -758,7 +916,17 @@ export default function EntryExperience({
       .finally(() => {
         setSubmittingScore(false);
       });
-  }, [leaderboardStatus, leaderboardSeason, phase, stats.bestCombo, stats.rareHits, stats.score, stats.streak, walletAddress]);
+  }, [
+    leaderboardStatus,
+    leaderboardSeason,
+    phase,
+    stats.bestCombo,
+    stats.rareHits,
+    stats.score,
+    stats.streak,
+    walletAddress,
+    refreshBestScore,
+  ]);
 
   useEffect(() => {
     if (phase !== 'summary' && showEndOverlay) {
@@ -767,31 +935,40 @@ export default function EntryExperience({
   }, [phase, showEndOverlay]);
 
   useEffect(() => {
-    if (!showEndOverlay || leaderboardStatus !== 'ready' || !walletAddress) {
+    if (!showEndOverlay) {
+      overlayRefreshAttemptedRef.current = false;
       return;
     }
-    let cancelled = false;
-    setBestScoreRefreshing(true);
-    fetchBestScore(walletAddress)
-      .then((result) => {
-        if (cancelled) return;
-        if (result.ok) {
-          setBestScoreOnChain(result.bestScore);
-          setLeaderboardSeason(result.season ?? null);
-        }
-      })
-      .catch(() => {
-        /* ignore refresh errors */
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setBestScoreRefreshing(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [leaderboardStatus, showEndOverlay, walletAddress]);
+    if (overlayRefreshAttemptedRef.current || bestScoreRefreshing) {
+      return;
+    }
+    if (leaderboardStatus !== 'ready' || !walletAddress) {
+      return;
+    }
+    overlayRefreshAttemptedRef.current = true;
+    void refreshBestScore({ reason: 'overlay' });
+  }, [bestScoreRefreshing, leaderboardStatus, refreshBestScore, showEndOverlay, walletAddress]);
+
+  useEffect(() => {
+    if (!showEndOverlay) {
+      runCompletedLoggedRef.current = false;
+      return;
+    }
+    if (runCompletedLoggedRef.current) {
+      return;
+    }
+    const bestForLog = bestScoreOnChain ?? runTokenRef.current?.bestBefore ?? stats.score;
+    logEvent('run_completed', {
+      score: stats.score,
+      best: bestForLog,
+      achievements: {
+        combo: achievementsState.combo,
+        rare: achievementsState.rare,
+        treasure: achievementsState.treasure,
+      },
+    });
+    runCompletedLoggedRef.current = true;
+  }, [achievementsState, bestScoreOnChain, showEndOverlay, stats.score]);
 
   const handleConsumeTrial = useCallback(() => {
     if (typeof window !== 'undefined' && walletAddress) {
@@ -1263,6 +1440,9 @@ export default function EntryExperience({
                     onManage={handleManageFromChip}
                     onDisconnect={handleDisconnect}
                     background={identityGradient}
+                    profileName={farcasterDisplayName}
+                    profileHandle={farcasterHandle}
+                    profileAvatarUrl={farcasterProfile?.pfpUrl ?? null}
                   />
                 ) : checkingWallet ? (
                   <div

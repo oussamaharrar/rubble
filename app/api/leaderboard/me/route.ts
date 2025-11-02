@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { normalizeAddress } from '@/lib/address';
 import { logEvent } from '@/lib/server/log-event';
-import { isLeaderboardConfigured, readBest, readSeason } from '@/lib/server/leaderboard';
+import { isLeaderboardConfigured, readBest } from '@/lib/server/leaderboard';
 
 export async function GET(request: Request) {
   if (!isLeaderboardConfigured()) {
@@ -15,8 +15,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, reason: 'invalid_address' }, { status: 400 });
   }
 
-  const [bestScoreRaw, season] = await Promise.all([readBest(address), readSeason()]);
+  const bestScoreRaw = await readBest(address);
   const bestScore = bestScoreRaw ?? 0;
-  logEvent('leader_me_fetch', { address, found: typeof bestScoreRaw === 'number', season });
-  return NextResponse.json({ ok: true, bestScore, season: season ?? null });
+  const season = process.env.LEADER_SEASON ?? null;
+  logEvent('leader_me_fetch', {
+    address,
+    bestScore,
+    season,
+  });
+  return NextResponse.json({ ok: true, bestScore, season });
 }

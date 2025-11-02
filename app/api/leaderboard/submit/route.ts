@@ -20,14 +20,14 @@ function withinRateLimit(key: string) {
 
 export async function POST(request: Request) {
   if (!isLeaderboardConfigured()) {
-    return NextResponse.json({ ok: false, reason: 'disabled' }, { status: 404 });
+    return NextResponse.json({ ok: false, reason: 'disabled', status: 404 }, { status: 404 });
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ ok: false, reason: 'bad_request' }, { status: 400 });
+    return NextResponse.json({ ok: false, reason: 'bad_request', status: 400 }, { status: 400 });
   }
 
   const playerValue = (body as { player?: unknown })?.player;
@@ -48,11 +48,11 @@ export async function POST(request: Request) {
   const season = typeof seasonValue === 'string' ? seasonValue : undefined;
 
   if (!player || !Number.isFinite(score)) {
-    return NextResponse.json({ ok: false, reason: 'invalid_payload' }, { status: 400 });
+    return NextResponse.json({ ok: false, reason: 'invalid_payload', status: 400 }, { status: 400 });
   }
 
   if (!withinRateLimit(player)) {
-    return NextResponse.json({ ok: false, reason: 'rate_limited' }, { status: 429 });
+    return NextResponse.json({ ok: false, reason: 'rate_limited', status: 429 }, { status: 429 });
   }
 
   const sanitizedScore = Math.min(10_000_000, Math.max(0, Math.floor(score)));
@@ -65,27 +65,28 @@ export async function POST(request: Request) {
     const verification = verifyRunToken(hmacKey, tokenValue, player);
     if (!verification.valid) {
       logEvent('leader_submit', { player, runId, status: 'token_reject', reason: verification.reason });
-      return NextResponse.json({ ok: false, reason: 'invalid_token' }, { status: 400 });
+      return NextResponse.json({ ok: false, reason: 'invalid_token', status: 400 }, { status: 400 });
     }
   }
 
   try {
-    const { bestScore } = await submitOnchain(player, sanitizedScore);
+    const { bestScore: minedBest } = await submitOnchain(player, sanitizedScore);
     logEvent('leader_submit', {
       player,
       runId,
       score: sanitizedScore,
-      bestScore,
+      bestScore: minedBest,
       comboMax: sanitizedCombo,
       hits: sanitizedHits,
       rareHits: sanitizedRareHits,
       season: season ?? null,
     });
-    const latestBest = Number.isFinite(bestScore) ? bestScore : await readBest(player);
-    return NextResponse.json({ ok: true, bestScore: latestBest ?? sanitizedScore });
+    const latestBest = Number.isFinite(minedBest) ? minedBest : await readBest(player);
+    const resolvedBest = Number.isFinite(latestBest) ? Number(latestBest) : sanitizedScore;
+    return NextResponse.json({ ok: true, bestScore: resolvedBest });
   } catch (error) {
     console.warn('[leaderboard] submit failed', error);
     logEvent('leader_submit', { player, runId, score: sanitizedScore, status: 'error' });
-    return NextResponse.json({ ok: false, reason: 'submit_failed' }, { status: 500 });
+    return NextResponse.json({ ok: false, reason: 'submit_failed', status: 500 }, { status: 500 });
   }
 }

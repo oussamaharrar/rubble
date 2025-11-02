@@ -122,6 +122,13 @@ export default function EndOfRunOverlay({
                 <h2 className="mt-2 text-3xl font-semibold text-white">
                   {celebrate ? 'Congrats!' : 'Nice run!'}
                 </h2>
+                <p
+                  className={`mt-1 text-sm ${
+                    celebrate ? 'text-emerald-200' : 'text-slate-300/80'
+                  }`}
+                >
+                  {celebrate ? 'Congrats! Personal Best.' : 'Your streak is building momentum.'}
+                </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-sky-400/40 bg-sky-500/10 p-4 text-center">
@@ -177,24 +184,24 @@ export default function EndOfRunOverlay({
               <div className="grid gap-3 sm:grid-cols-3">
                 <button
                   type="button"
+                  onClick={onPlayAgain}
+                  className="min-h-[48px] rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                >
+                  Play Again
+                </button>
+                <button
+                  type="button"
                   onClick={onShare}
-                  className="rounded-2xl bg-gradient-to-r from-purple-500 to-sky-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
+                  className="min-h-[48px] rounded-2xl bg-gradient-to-r from-purple-500 to-sky-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
                 >
                   Share on Farcaster
                 </button>
                 <button
                   type="button"
                   onClick={onShowLeaderboard}
-                  className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                  className="min-h-[48px] rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                 >
                   View Leaderboard
-                </button>
-                <button
-                  type="button"
-                  onClick={onPlayAgain}
-                  className="rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-                >
-                  Play Again
                 </button>
               </div>
               <button
