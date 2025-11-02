@@ -11,6 +11,9 @@ interface HeaderIdentityChipProps {
   onManage: () => void;
   onDisconnect?: () => void;
   background?: string;
+  profileName?: string | null;
+  profileHandle?: string | null;
+  profileAvatarUrl?: string | null;
 }
 
 export default function HeaderIdentityChip({
@@ -21,6 +24,9 @@ export default function HeaderIdentityChip({
   onManage,
   onDisconnect,
   background,
+  profileName,
+  profileHandle,
+  profileAvatarUrl,
 }: HeaderIdentityChipProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -59,21 +65,54 @@ export default function HeaderIdentityChip({
   }, [menuOpen]);
 
   const bubbleLabel = new Intl.NumberFormat().format(bubbles);
+  const trimmedName = profileName?.trim();
+  const trimmedHandle = profileHandle?.trim();
+  const hasProfile = Boolean(trimmedName || trimmedHandle);
+  const primaryLabel = trimmedName ?? trimmedHandle ?? shortAddress;
+  const secondaryLabel = hasProfile
+    ? trimmedName && trimmedHandle
+      ? trimmedHandle
+      : shortAddress
+    : null;
 
   return (
     <div className="relative">
       <div
         className={clsx(
-          'group inline-flex min-h-[44px] items-center gap-2 rounded-full border border-white/18 bg-white/12 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(15,23,42,0.32)] transition',
+          'group inline-flex min-h-[44px] items-center gap-3 rounded-full border border-white/18 bg-white/12 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(15,23,42,0.32)] transition',
           'backdrop-blur-md focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-200'
         )}
         role="status"
         aria-label={`Connected wallet ${address}`}
         style={background ? { backgroundImage: background } : undefined}
       >
-        <span className="rounded-full bg-black/35 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/85">
-          {shortAddress}
-        </span>
+        {profileAvatarUrl ? (
+          <span className="relative h-9 w-9 overflow-hidden rounded-full border border-white/25 bg-black/30">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={profileAvatarUrl}
+              alt={`${primaryLabel} avatar`}
+              className="h-full w-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          </span>
+        ) : null}
+        {hasProfile ? (
+          <div className="flex flex-col items-start leading-tight">
+            <span className="rounded-full bg-black/35 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/85">
+              {primaryLabel}
+            </span>
+            {secondaryLabel ? (
+              <span className="mt-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-white/60">
+                {secondaryLabel}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <span className="rounded-full bg-black/35 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/85">
+            {primaryLabel}
+          </span>
+        )}
         <span
           className="inline-flex min-h-[28px] items-center gap-1 rounded-full bg-black/30 px-3 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100"
           aria-label={`Bubbles balance ${bubbleLabel}`}

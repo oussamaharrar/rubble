@@ -23,7 +23,6 @@ type LeaderboardClients = {
 
 let clients: LeaderboardClients | null = null;
 let summaryLogged = false;
-let cachedSeason: { value: string; fetchedAt: number } | null = null;
 
 function mask(address: string) {
   if (address.length <= 10) return address;
@@ -103,31 +102,6 @@ export async function readBest(playerAddress: string): Promise<number | null> {
     return Number.isFinite(numeric) ? numeric : 0;
   } catch (error) {
     console.warn('[leaderboard] failed to read bestScore', error);
-    return null;
-  }
-}
-
-export async function readSeason(): Promise<string | null> {
-  const ctx = ensureClients();
-  if (!ctx) {
-    return null;
-  }
-  if (cachedSeason && Date.now() - cachedSeason.fetchedAt < 5 * 60 * 1000) {
-    return cachedSeason.value;
-  }
-  try {
-    const value = await ctx.reader.readContract({
-      abi,
-      address: ctx.contract,
-      functionName: 'season',
-    });
-    if (typeof value === 'string') {
-      cachedSeason = { value, fetchedAt: Date.now() };
-      return value;
-    }
-    return null;
-  } catch (error) {
-    console.warn('[leaderboard] failed to read season', error);
     return null;
   }
 }

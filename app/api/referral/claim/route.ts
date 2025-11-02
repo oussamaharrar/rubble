@@ -1,13 +1,34 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { normalizeAddress } from '@/lib/address';
 import { kvSetIfAbsent } from '@/lib/server/kv';
 import { logEvent } from '@/lib/server/log-event';
 
-const DAY_SECONDS = 24 * 60 * 60;
+const YEAR_SECONDS = 365 * 24 * 60 * 60;
+const COOKIE_PREFIX = 'rb_ref_';
+const fallbackSecret = randomBytes(16).toString('hex');
+const COOKIE_SECRET = process.env.REFERRAL_COOKIE_SECRET ?? fallbackSecret;
 
-function todayKey() {
-  const now = new Date();
-  return `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
+const inMemoryClaims = new Map<string, number>();
+
+function memoryClaimed(key: string) {
+  const expiresAt = inMemoryClaims.get(key);
+  if (!expiresAt) return false;
+  if (expiresAt <= Date.now()) {
+    inMemoryClaims.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function storeMemoryClaim(key: string) {
+  inMemoryClaims.set(key, Date.now() + YEAR_SECONDS * 1000);
+}
+
+function cookieName(inviter: string, invitee: string) {
+  const hash = createHash('sha256').update(`${inviter}:${invitee}:${COOKIE_SECRET}`).digest('hex');
+  return `${COOKIE_PREFIX}${hash.slice(0, 32)}`;
 }
 
 function resolveReward() {
@@ -36,14 +57,57 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, reason: 'invalid_addresses' }, { status: 400 });
   }
 
-  const key = `ref:${todayKey()}:${inviter}:${invitee}`;
-  const stored = await kvSetIfAbsent(key, '1', DAY_SECONDS);
+  const cookieStore = await cookies();
+  const pairKey = `${inviter}:${invitee}`;
+  const kvKey = `ref:${pairKey}`;
+  const cookieKey = cookieName(inviter, invitee);
+
+  const existingCookie = cookieStore.get(cookieKey);
+  if (existingCookie?.value === '1' || memoryClaimed(pairKey)) {
+    logEvent('referral_duplicate', { inviter, invitee, source: 'cookie' });
+    const duplicateResponse = NextResponse.json({ ok: false, reason: 'duplicate' }, { status: 200 });
+    duplicateResponse.cookies.set({
+      name: cookieKey,
+      value: '1',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: true,
+      path: '/',
+      maxAge: YEAR_SECONDS,
+    });
+    storeMemoryClaim(pairKey);
+    return duplicateResponse;
+  }
+
+  const stored = await kvSetIfAbsent(kvKey, '1', YEAR_SECONDS);
   if (!stored) {
-    logEvent('referral_duplicate', { inviter, invitee });
-    return NextResponse.json({ ok: false, reason: 'duplicate' }, { status: 200 });
+    logEvent('referral_duplicate', { inviter, invitee, source: 'kv' });
+    const duplicateResponse = NextResponse.json({ ok: false, reason: 'duplicate' }, { status: 200 });
+    duplicateResponse.cookies.set({
+      name: cookieKey,
+      value: '1',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: true,
+      path: '/',
+      maxAge: YEAR_SECONDS,
+    });
+    storeMemoryClaim(pairKey);
+    return duplicateResponse;
   }
 
   const reward = resolveReward();
   logEvent('referral_claim', { inviter, invitee, reward });
-  return NextResponse.json({ ok: true, reward });
+  storeMemoryClaim(pairKey);
+  const response = NextResponse.json({ ok: true, reward });
+  response.cookies.set({
+    name: cookieKey,
+    value: '1',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: true,
+    path: '/',
+    maxAge: YEAR_SECONDS,
+  });
+  return response;
 }
