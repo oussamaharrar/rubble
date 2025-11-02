@@ -30,6 +30,7 @@ test.describe('daily reward flow', () => {
       Math.random = () => 0; // force boost reward branch
       window.__rubbleOriginalRandom = originalRandom;
     });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
   });
 
@@ -47,21 +48,28 @@ test.describe('daily reward flow', () => {
   test('claiming daily reward grants boost and disables gift', async ({ page }) => {
     await initWalletStub(page);
     await page.reload({ waitUntil: 'domcontentloaded' });
-
-    const giftButton = page.getByRole('button', { name: 'Claim daily reward' });
+    await page.waitForLoadState('networkidle');
+    const giftButton = page.getByTestId('daily-reward-button');
     await expect(giftButton).toBeVisible();
+    await expect(giftButton).toBeEnabled();
+    await expect(giftButton).toBeEnabled();
 
     await giftButton.click();
-    await expect(page.getByText('You claimed today’s boost! 🎉')).toBeVisible();
+    await expect(giftButton).toHaveAttribute('aria-label', 'Daily reward claimed');
+    await expect(giftButton).toBeDisabled();
 
-    await expect(page.getByRole('button', { name: 'Daily reward claimed' })).toBeDisabled();
+    await expect
+      .poll(async () => {
+        return page.evaluate(() => Boolean((window as any).__rubbleRewardBoostStore));
+      })
+      .toBe(true);
 
     const key = await page.evaluate(() => {
       const prefix = 'rubble:lastClaimDate';
       return window.localStorage.getItem(prefix);
     });
     const expected = todayKey('rubble:lastClaimDate');
-    expect(key).toContain(expected.split(':')[1]);
+    expect(key).toBe(expected.split(':').pop());
 
     const boostSources = await page.evaluate(() => {
       const store = window.__rubbleRewardBoostStore;

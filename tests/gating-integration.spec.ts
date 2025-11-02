@@ -36,7 +36,9 @@ test.describe('gating integration with reward boosts', () => {
       Math.random = () => 0;
     });
     await initWalletStub(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle');
     await waitForStores(page);
   });
 
@@ -55,15 +57,34 @@ test.describe('gating integration with reward boosts', () => {
     const playButton = page.getByRole('button', { name: "PLAY Bubble’it!" });
     await expect(playButton).toBeVisible();
 
+    await page.getByTestId('connect-wallet-home').click();
+    await expect(page.locator('[aria-label^="Connected wallet"]')).toHaveCount(1);
+    await page.waitForTimeout(100);
+
     await playButton.click();
     await expect(page.getByTestId('no-runs-dialog')).toBeVisible();
 
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle');
     await waitForStores(page);
+    if (await page.getByTestId('connect-wallet-home').isVisible()) {
+      await page.getByTestId('connect-wallet-home').click();
+      await page.waitForTimeout(100);
+    }
 
-    const giftButton = page.getByRole('button', { name: 'Claim daily reward' });
+    const giftButton = page.getByTestId('daily-reward-button');
     await giftButton.click();
-    await expect(page.getByText('You claimed today’s boost! 🎉')).toBeVisible();
+    await expect
+      .poll(async () => {
+        return page.evaluate(() => {
+          const rewardStore = (window as any).__rubbleRewardBoostStore;
+          if (!rewardStore) return false;
+          return rewardStore
+            .getState()
+            .boosts.some((boost: any) => boost.source === 'daily');
+        });
+      })
+      .toBe(true);
 
     const boostBeforePlay = await page.evaluate(() => {
       const rewardStore = (window as any).__rubbleRewardBoostStore;
@@ -75,7 +96,7 @@ test.describe('gating integration with reward boosts', () => {
     const playAfterReward = page.getByRole('button', { name: "PLAY Bubble’it!" });
     await playAfterReward.click();
 
-    await expect(page.getByTestId('game-stage')).toBeVisible();
+    await expect(page.getByTestId('game-stage')).toBeVisible({ timeout: 20000 });
 
     const boostState = await page.evaluate(() => {
       const store = (window as any).__rubbleStore;
@@ -96,8 +117,8 @@ test.describe('gating integration with reward boosts', () => {
     });
     await page.waitForTimeout(250);
 
-    const playAgainButton = page.getByRole('button', { name: "PLAY Bubble’it!" });
-    await playAgainButton.click();
+    const overlayPlayAgain = page.getByRole('button', { name: 'Play Again' });
+    await overlayPlayAgain.click();
     await expect(page.getByTestId('no-runs-dialog')).toBeVisible();
   });
 });

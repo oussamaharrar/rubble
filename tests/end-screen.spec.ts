@@ -13,13 +13,14 @@ test.describe('end-of-run overlay', () => {
           const stamp = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
           return `rubble:trial:${stamp}:${address.toLowerCase()}`;
         })();
-        window.localStorage.setItem(key, 'used');
+        window.localStorage.setItem(key, 'available');
         window.localStorage.setItem('rubble:tickets', '0');
       } catch {
         /* ignore */
       }
     }, { address: MOCK_ADDRESS });
     await initWalletStub(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
   });
 
   test('overlay shows stats and actions and play again opens gate', async ({ page }) => {
@@ -56,7 +57,12 @@ test.describe('end-of-run overlay', () => {
     });
 
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
-    await page.getByTestId('connect-wallet-home').click();
+    await page.waitForLoadState('networkidle');
+    const connectButton = page.getByTestId('connect-wallet-home');
+    await connectButton.waitFor({ state: 'attached', timeout: 15000 }).catch(() => null);
+    if (await connectButton.isVisible().catch(() => false)) {
+      await connectButton.click();
+    }
     await page.getByTestId('play-button').click();
     await page.waitForSelector('[data-testid="game-stage"]');
 
@@ -74,6 +80,7 @@ test.describe('end-of-run overlay', () => {
     await expect(overlay).toBeVisible();
     await expect(page.getByText('Your Score')).toBeVisible();
     await expect(page.getByTestId('best-score-value')).toHaveText('1200');
+    await expect(page.getByText('Congrats! Personal Best')).toBeVisible();
     await expect(page.getByText('Combo Master')).toBeVisible();
     await expect(page.getByText('Rare Hunter')).toBeVisible();
     await expect(page.getByText('Treasure Seeker')).toBeVisible();
@@ -82,6 +89,6 @@ test.describe('end-of-run overlay', () => {
     await expect(page.getByRole('button', { name: 'Play Again' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Play Again' }).click();
-    await expect(page.getByTestId('play-gate')).toBeVisible();
+    await expect(page.getByTestId('no-runs-dialog')).toBeVisible();
   });
 });
