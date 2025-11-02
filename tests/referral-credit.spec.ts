@@ -51,14 +51,14 @@ test.describe('referral credit flow', () => {
     });
     expect(inviteBoosts).toBe(2);
 
-    const duplicate = await page.evaluate(async (inviter, invitee) => {
+    const duplicate = await page.evaluate(async ({ inviter, invitee }) => {
       const response = await fetch('/api/referral/claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inviterAddress: inviter, inviteeAddress: invitee }),
       });
       return response.json();
-    }, INVITER, MOCK_ADDRESS);
+    }, { inviter: INVITER, invitee: MOCK_ADDRESS });
 
     expect(duplicate.reason).toBe('duplicate');
     expect(claimCount).toBe(2);

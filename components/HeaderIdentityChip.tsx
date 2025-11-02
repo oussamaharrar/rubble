@@ -7,6 +7,8 @@ interface HeaderIdentityChipProps {
   address: string;
   shortAddress: string;
   bubbles: number;
+  profileName?: string | null;
+  profileAvatarUrl?: string | null;
   onCopy: () => void;
   onManage: () => void;
   onDisconnect?: () => void;
@@ -17,6 +19,8 @@ export default function HeaderIdentityChip({
   address,
   shortAddress,
   bubbles,
+  profileName,
+  profileAvatarUrl,
   onCopy,
   onManage,
   onDisconnect,
@@ -59,20 +63,41 @@ export default function HeaderIdentityChip({
   }, [menuOpen]);
 
   const bubbleLabel = new Intl.NumberFormat().format(bubbles);
+  const normalizedProfile = profileName?.trim() || null;
+  const displayLabel = normalizedProfile
+    ? normalizedProfile.startsWith('@')
+      ? normalizedProfile
+      : `@${normalizedProfile}`
+    : shortAddress;
+  const hasProfile = Boolean(normalizedProfile);
+  const accessibleLabel = hasProfile
+    ? `Connected wallet ${displayLabel} (${address})`
+    : `Connected wallet ${address}`;
+  const avatarUrl = profileAvatarUrl?.trim() ? profileAvatarUrl : null;
+  const labelClasses = clsx(
+    'rounded-full bg-black/35 px-3 py-1 font-semibold text-white/85',
+    hasProfile ? 'text-sm tracking-normal' : 'text-xs uppercase tracking-[0.24em]'
+  );
 
   return (
     <div className="relative">
       <div
         className={clsx(
-          'group inline-flex min-h-[44px] items-center gap-2 rounded-full border border-white/18 bg-white/12 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(15,23,42,0.32)] transition',
+          'group inline-flex min-h-[44px] items-center gap-3 rounded-full border border-white/18 bg-white/12 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(15,23,42,0.32)] transition',
           'backdrop-blur-md focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-200'
         )}
         role="status"
-        aria-label={`Connected wallet ${address}`}
+        aria-label={accessibleLabel}
         style={background ? { backgroundImage: background } : undefined}
       >
-        <span className="rounded-full bg-black/35 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/85">
-          {shortAddress}
+        {avatarUrl ? (
+          <span className="flex h-8 w-8 overflow-hidden rounded-full border border-white/25 bg-black/30">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+          </span>
+        ) : null}
+        <span className={labelClasses} title={hasProfile ? `${displayLabel} · ${address}` : address}>
+          {displayLabel}
         </span>
         <span
           className="inline-flex min-h-[28px] items-center gap-1 rounded-full bg-black/30 px-3 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100"

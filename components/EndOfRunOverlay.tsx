@@ -116,12 +116,15 @@ export default function EndOfRunOverlay({
             transition={{ duration: 0.25 }}
             className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900/90 p-6 text-slate-100 shadow-2xl shadow-sky-500/20"
           >
-            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4">
               <div className="text-center">
                 <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-300">Run Complete</p>
                 <h2 className="mt-2 text-3xl font-semibold text-white">
                   {celebrate ? 'Congrats!' : 'Nice run!'}
                 </h2>
+                {celebrate ? (
+                  <p className="mt-1 text-sm font-medium text-emerald-100">Congrats! Personal Best</p>
+                ) : null}
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-sky-400/40 bg-sky-500/10 p-4 text-center">
@@ -178,21 +181,21 @@ export default function EndOfRunOverlay({
                 <button
                   type="button"
                   onClick={onShare}
-                  className="rounded-2xl bg-gradient-to-r from-purple-500 to-sky-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
+                  className="rounded-2xl bg-gradient-to-r from-purple-500 to-sky-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200 min-h-[48px]"
                 >
                   Share on Farcaster
                 </button>
                 <button
                   type="button"
                   onClick={onShowLeaderboard}
-                  className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                  className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 min-h-[48px]"
                 >
                   View Leaderboard
                 </button>
                 <button
                   type="button"
                   onClick={onPlayAgain}
-                  className="rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                  className="rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/30 transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 min-h-[48px]"
                 >
                   Play Again
                 </button>
@@ -200,7 +203,7 @@ export default function EndOfRunOverlay({
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full rounded-2xl border border-white/10 bg-transparent px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                className="w-full rounded-2xl border border-white/10 bg-transparent px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 min-h-[48px]"
               >
                 Back to Home
               </button>

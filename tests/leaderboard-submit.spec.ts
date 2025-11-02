@@ -15,12 +15,13 @@ test.describe('onchain leaderboard integration', () => {
     await initWalletStub(page);
   });
 
-  test('submitting a score updates best score display', async ({ page }) => {
+  test('submitting a score updates best score display after refresh', async ({ page }) => {
     let submitCount = 0;
-
+    let bestFetchCount = 0;
     let onchainBest = 500;
 
     await page.route('**/api/leaderboard/me**', async (route) => {
+      bestFetchCount += 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -43,11 +44,11 @@ test.describe('onchain leaderboard integration', () => {
 
     await page.route('**/api/leaderboard/submit', async (route) => {
       submitCount += 1;
-      onchainBest = 800;
+      onchainBest = 830;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 800 }),
+        body: JSON.stringify({ ok: true, bestScore: 780 }),
       });
     });
 
@@ -69,7 +70,8 @@ test.describe('onchain leaderboard integration', () => {
 
     const overlay = page.getByTestId('end-of-run-overlay');
     await expect(overlay).toBeVisible();
-    await expect(page.getByTestId('best-score-value')).toHaveText('800');
+    await expect(page.getByTestId('best-score-value')).toHaveText('830');
     expect(submitCount).toBe(1);
+    expect(bestFetchCount).toBeGreaterThanOrEqual(2);
   });
 });

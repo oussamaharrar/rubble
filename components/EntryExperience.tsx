@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { sdk } from '@farcaster/miniapp-sdk';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import GameCanvas from '@/app/game/GameCanvas';
@@ -35,6 +36,12 @@ type EntryExperienceProps = {
   referrerAddress?: string;
 };
 
+type FarcasterProfile = {
+  username: string | null;
+  displayName: string | null;
+  pfpUrl: string | null;
+};
+
 const SCREEN_DURATION = 0.24;
 const SCREEN_EASE: [number, number, number, number] = [0.22, 0.88, 0.22, 1];
 
@@ -52,6 +59,17 @@ const GLASS_BUTTON_CLASS =
 const REMEMBER_KEY = 'rubble:remember';
 const REMEMBER_ADDRESS_KEY = 'rubble:address';
 const TRIAL_KEY_PREFIX = 'rubble:trial';
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    const schedule = typeof window !== 'undefined' ? window.setTimeout : setTimeout;
+    const cancel = typeof window !== 'undefined' ? window.clearTimeout : clearTimeout;
+    const timer = schedule(() => {
+      cancel(timer);
+      resolve(undefined);
+    }, Math.max(0, ms));
+  });
+}
 
 function persistRememberedWallet(address: string | null): 0 | 1 {
   if (typeof window === 'undefined') return 0;
@@ -265,6 +283,7 @@ export default function EntryExperience({
   const [measureToken, setMeasureToken] = useState(0);
   const [mascotBounces, setMascotBounces] = useState(0);
   const [safeLogged, setSafeLogged] = useState(false);
+  const [farcasterProfile, setFarcasterProfile] = useState<FarcasterProfile | null>(null);
   const [shareClaimedToday, setShareClaimedToday] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(todayKey('rubble:shared')) === 'done';
@@ -302,6 +321,9 @@ export default function EntryExperience({
   const lastNoRunsLoggedRef = useRef(false);
   const referralClaimKeyRef = useRef<string | null>(null);
   const referralAttemptedRef = useRef(false);
+  const bestRefreshesActiveRef = useRef(0);
+  const lastBestRefreshRunRef = useRef<string | null>(null);
+  const lastRunCompletedRef = useRef<string | null>(null);
 
   const walletAddress = useWalletStore((state) => state.address);
   const walletConnected = Boolean(walletAddress);
@@ -338,6 +360,7 @@ export default function EntryExperience({
           setBestScoreOnChain(result.bestScore);
           setLeaderboardSeason(result.season ?? null);
           setLeaderboardStatus('ready');
+          logEvent('leader_me_fetch', { bestScore: result.bestScore });
         } else if (result.reason === 'disabled') {
           setBestScoreOnChain(null);
           setLeaderboardSeason(null);
@@ -423,6 +446,13 @@ export default function EntryExperience({
     () => shortenAddress(walletAddress ?? rememberedAddress ?? ''),
     [rememberedAddress, walletAddress]
   );
+  const farcasterName = useMemo(() => {
+    if (!farcasterProfile) {
+      return null;
+    }
+    return farcasterProfile.username ?? farcasterProfile.displayName ?? null;
+  }, [farcasterProfile]);
+  const farcasterAvatar = farcasterProfile?.pfpUrl ?? null;
   const showIdentityChip = walletConnected || (rememberFlag === 1 && Boolean(rememberedAddress));
   const checkingWallet = !showIdentityChip && (!hydrated || (rememberFlag === 1 && !walletReady));
   const leaderboardHighlight = useMemo(() => {
@@ -446,6 +476,50 @@ export default function EntryExperience({
   const previousBestForCelebrate = runTokenRef.current?.bestBefore ?? bestScoreOnChain ?? 0;
   const overlayCelebrate = showEndOverlay && (celebrateBest || (leaderboardStatus !== 'ready' && stats.score > previousBestForCelebrate));
 
+  const fetchBestScoreWithRetry = useCallback(
+    async (
+      attempts = 2,
+      baseDelayMs = 600
+    ): Promise<
+      | { ok: true; bestScore: number; season: string | null }
+      | { ok: false; reason: string }
+    > => {
+      if (!walletAddress) {
+        return { ok: false as const, reason: 'missing_address' };
+      }
+      bestRefreshesActiveRef.current += 1;
+      if (bestRefreshesActiveRef.current === 1) {
+        setBestScoreRefreshing(true);
+      }
+      try {
+        let attempt = 0;
+        let lastReason = 'unknown';
+        while (attempt < attempts) {
+          const response = await fetchBestScore(walletAddress);
+          if (response.ok) {
+            logEvent('leader_me_fetch', { bestScore: response.bestScore });
+            return { ok: true as const, bestScore: response.bestScore, season: response.season ?? null };
+          }
+          lastReason = response.reason ?? 'unknown';
+          if (response.reason === 'disabled') {
+            return { ok: false as const, reason: 'disabled' };
+          }
+          attempt += 1;
+          if (attempt < attempts) {
+            await wait(baseDelayMs * (attempt + 1));
+          }
+        }
+        return { ok: false as const, reason: lastReason };
+      } finally {
+        bestRefreshesActiveRef.current = Math.max(0, bestRefreshesActiveRef.current - 1);
+        if (bestRefreshesActiveRef.current === 0) {
+          setBestScoreRefreshing(false);
+        }
+      }
+    },
+    [walletAddress, setBestScoreRefreshing]
+  );
+
   const pendingModeRef = useRef<EntryMode | null>(null);
 
   const updateRemember = useCallback(
@@ -461,6 +535,66 @@ export default function EntryExperience({
     setHydrated(true);
     setRememberFlag(readRememberedFlag());
     setRememberedAddress(readRememberedAddress());
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    const assets = [
+      '/game-icons/icon.png',
+      '/game-icons/splash.png',
+      '/game-icons/booster.svg',
+      '/game-icons/booster-double.png',
+      '/game-icons/booster-freeze.png',
+      '/game-icons/booster-magnet.png',
+      '/game-icons/crown.png',
+    ];
+    const images = assets.map((src) => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = src;
+      return img;
+    });
+    return () => {
+      images.forEach((img) => {
+        img.src = '';
+      });
+    };
+  }, [hydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+    sdk
+      .isInMiniApp()
+      .then(async (inMiniApp) => {
+        if (!inMiniApp || cancelled) {
+          return;
+        }
+        try {
+          await sdk.actions.ready();
+        } catch (error) {
+          console.warn('[miniapp] ready() failed', error);
+        }
+        try {
+          const context = await sdk.context;
+          if (!cancelled) {
+            setFarcasterProfile({
+              username: context.user?.username ?? null,
+              displayName: context.user?.displayName ?? null,
+              pfpUrl: context.user?.pfpUrl ?? null,
+            });
+          }
+        } catch (error) {
+          console.warn('[miniapp] context fetch failed', error);
+        }
+      })
+      .catch(() => {
+        /* ignore readiness errors outside of miniapp */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -596,6 +730,18 @@ export default function EntryExperience({
   }, [hudRect, safeLogged, setHudSafeArea, stageRect]);
 
   useEffect(() => {
+    if (phaserScenePrefetchedRef.current) {
+      return;
+    }
+    if (phase === 'intro' || phase === 'playing' || phase === 'storm') {
+      phaserScenePrefetchedRef.current = true;
+      import('@/app/game/phaser/scene').catch((error) => {
+        console.warn('[phaser] preload failed', error);
+      });
+    }
+  }, [phase]);
+
+  useEffect(() => {
     if (!runtime.trialEnabled || typeof window === 'undefined') {
       setTrialAvailable(false);
       trialKeyRef.current = null;
@@ -643,16 +789,10 @@ export default function EntryExperience({
   const eligibleToPlay =
     walletConnected && (trialAvailable || hasTicketsOrBoosts || hasDailyRewardBoost || hasInviteBoost);
 
-  useEffect(() => {
-    console.log(
-      `GATE: connected=${walletConnected} remember=${rememberFlag} trial=${trialAvailable} eligible=${eligibleToPlay}`
-    );
-  }, [eligibleToPlay, rememberFlag, trialAvailable, walletConnected]);
-
-  useEffect(() => {
-    if (gateOpen && eligibleToPlay) {
-      setGateOpen(false);
-    }
+    useEffect(() => {
+      if (gateOpen && eligibleToPlay) {
+        setGateOpen(false);
+      }
     if (noRunsOpen && eligibleToPlay) {
       setNoRunsOpen(false);
     }
@@ -675,6 +815,35 @@ export default function EntryExperience({
       lastNoRunsLoggedRef.current = false;
     }
   }, [noRunsOpen]);
+
+  useEffect(() => {
+    if (!showEndOverlay) {
+      return;
+    }
+    const currentRunId = runTokenRef.current?.runId ?? `local:${runStateRef.current.startedAt}`;
+    if (currentRunId && lastRunCompletedRef.current === currentRunId) {
+      return;
+    }
+    if (currentRunId) {
+      lastRunCompletedRef.current = currentRunId;
+    }
+    logEvent('run_completed', {
+      score: stats.score,
+      best: bestScoreOnChain ?? 0,
+      achievements: {
+        combo: achievementsState.combo,
+        rare: achievementsState.rare,
+        treasure: achievementsState.treasure,
+      },
+    });
+  }, [
+    achievementsState.combo,
+    achievementsState.rare,
+    achievementsState.treasure,
+    bestScoreOnChain,
+    showEndOverlay,
+    stats.score,
+  ]);
 
   useEffect(() => {
     if (phase === 'paused') {
@@ -733,32 +902,89 @@ export default function EntryExperience({
     tokenState.submitted = true;
     setSubmittingScore(true);
     setSubmitError(null);
-    submitScoreRequest({
-      player: walletAddress,
-      score: stats.score,
-      comboMax: stats.bestCombo,
-      hits: stats.streak,
-      rareHits: stats.rareHits,
-      season: leaderboardSeason,
-      token: tokenState.token,
-      runId: tokenState.runId,
-    })
-      .then((response) => {
+    logEvent('leader_submit', { score: stats.score });
+    const bestBefore = tokenState.bestBefore;
+    const runId = tokenState.runId;
+    lastBestRefreshRunRef.current = runId;
+    let cancelled = false;
+
+    const syncScore = async () => {
+      try {
+        const response = await submitScoreRequest({
+          player: walletAddress,
+          score: stats.score,
+          comboMax: stats.bestCombo,
+          hits: stats.streak,
+          rareHits: stats.rareHits,
+          season: leaderboardSeason,
+          token: tokenState.token,
+          runId: tokenState.runId,
+        });
         if (!response.ok) {
-          setSubmitError('Unable to sync score to Base. Try again soon.');
+          if (!cancelled) {
+            setSubmitError('Unable to sync score to Base. Try again soon.');
+          }
+          if (lastBestRefreshRunRef.current === runId) {
+            lastBestRefreshRunRef.current = null;
+          }
+          return;
+        }
+        if (cancelled) {
           return;
         }
         setBestScoreOnChain(response.bestScore);
-        const improved = response.bestScore > tokenState.bestBefore && response.bestScore === stats.score;
-        setCelebrateBest(improved);
-      })
-      .catch(() => {
-        setSubmitError('Unable to sync score to Base. Try again soon.');
-      })
-      .finally(() => {
-        setSubmittingScore(false);
-      });
-  }, [leaderboardStatus, leaderboardSeason, phase, stats.bestCombo, stats.rareHits, stats.score, stats.streak, walletAddress]);
+        const immediateImproved =
+          response.bestScore > bestBefore && response.bestScore >= stats.score;
+        setCelebrateBest(immediateImproved);
+        const refresh = await fetchBestScoreWithRetry(2, 650);
+        if (cancelled) {
+          return;
+        }
+        if (refresh.ok) {
+          setBestScoreOnChain(refresh.bestScore);
+          setLeaderboardSeason(refresh.season ?? null);
+          const improved = refresh.bestScore > bestBefore && refresh.bestScore >= stats.score;
+          setCelebrateBest(improved);
+        } else {
+          if (lastBestRefreshRunRef.current === runId) {
+            lastBestRefreshRunRef.current = null;
+          }
+          if (refresh.reason !== 'disabled') {
+            handleToast('Leaderboard refresh delayed. Best score may update soon.');
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[leaderboard] submit error', error);
+          setSubmitError('Unable to sync score to Base. Try again soon.');
+        }
+        if (lastBestRefreshRunRef.current === runId) {
+          lastBestRefreshRunRef.current = null;
+        }
+      } finally {
+        if (!cancelled) {
+          setSubmittingScore(false);
+        }
+      }
+    };
+
+    syncScore();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fetchBestScoreWithRetry,
+    handleToast,
+    leaderboardSeason,
+    leaderboardStatus,
+    phase,
+    stats.bestCombo,
+    stats.rareHits,
+    stats.score,
+    stats.streak,
+    walletAddress,
+  ]);
 
   useEffect(() => {
     if (phase !== 'summary' && showEndOverlay) {
@@ -770,28 +996,29 @@ export default function EntryExperience({
     if (!showEndOverlay || leaderboardStatus !== 'ready' || !walletAddress) {
       return;
     }
-    let cancelled = false;
-    setBestScoreRefreshing(true);
-    fetchBestScore(walletAddress)
+    const currentRunId = runTokenRef.current?.runId ?? null;
+    if (currentRunId && lastBestRefreshRunRef.current === currentRunId) {
+      return;
+    }
+    let active = true;
+    fetchBestScoreWithRetry(1, 500)
       .then((result) => {
-        if (cancelled) return;
+        if (!active) return;
         if (result.ok) {
           setBestScoreOnChain(result.bestScore);
           setLeaderboardSeason(result.season ?? null);
+          if (currentRunId) {
+            lastBestRefreshRunRef.current = currentRunId;
+          }
         }
       })
       .catch(() => {
         /* ignore refresh errors */
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setBestScoreRefreshing(false);
-        }
       });
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [leaderboardStatus, showEndOverlay, walletAddress]);
+  }, [fetchBestScoreWithRetry, leaderboardStatus, showEndOverlay, walletAddress]);
 
   const handleConsumeTrial = useCallback(() => {
     if (typeof window !== 'undefined' && walletAddress) {
@@ -923,17 +1150,19 @@ export default function EntryExperience({
       pendingModeRef.current = mode;
       startRun(mode);
       beginGameplay();
-    const runId = createRunId();
-    runTokenRef.current = {
-      runId,
-      requestId: runId,
-      bestBefore: bestScoreOnChain ?? 0,
-      submitted: false,
-      requested: false,
-    };
-    setCelebrateBest(false);
-    setSubmitError(null);
-    setLeaderboardRank('—');
+      const runId = createRunId();
+      runTokenRef.current = {
+        runId,
+        requestId: runId,
+        bestBefore: bestScoreOnChain ?? 0,
+        submitted: false,
+        requested: false,
+      };
+      lastBestRefreshRunRef.current = null;
+      lastRunCompletedRef.current = null;
+      setCelebrateBest(false);
+      setSubmitError(null);
+      setLeaderboardRank('—');
       runStateRef.current = {
         started: true,
         ended: false,
@@ -1243,6 +1472,7 @@ export default function EntryExperience({
                     ease: 'easeInOut',
                   }}
                   aria-label={dailyAvailable ? 'Claim daily reward' : 'Daily reward claimed'}
+                  data-testid="daily-reward-button"
                 >
                   🎁
                   {dailyAvailable ? (
@@ -1259,6 +1489,8 @@ export default function EntryExperience({
                     address={walletAddress ?? rememberedAddress ?? ''}
                     shortAddress={shortAddress}
                     bubbles={boosterOrbs}
+                    profileName={farcasterName}
+                    profileAvatarUrl={farcasterAvatar}
                     onCopy={handleCopyAddress}
                     onManage={handleManageFromChip}
                     onDisconnect={handleDisconnect}

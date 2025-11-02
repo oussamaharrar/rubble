@@ -28,8 +28,19 @@ test.describe('wallet + trial gate', () => {
         },
       });
     });
+    await page.addInitScript(() => {
+      window.open = () => {
+        const stub = { closed: false } as Window;
+        setTimeout(() => {
+          stub.closed = true;
+        }, 100);
+        return stub;
+      };
+    });
     await initWalletStub(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle');
 
     let connected = false;
     let rememberFlag: 0 | 1 = 0;
@@ -58,6 +69,7 @@ test.describe('wallet + trial gate', () => {
 
     // Remember me keeps connection hidden on reload.
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('connect-wallet-home')).toHaveCount(0);
     await expect(page.locator('[aria-label^="Connected wallet"]')).toHaveCount(1);
     rememberFlag = await page.evaluate(() => (window.localStorage.getItem('rubble:remember') === '1' ? 1 : 0));
@@ -105,7 +117,7 @@ test.describe('wallet + trial gate', () => {
     const noRunsDialog = page.getByTestId('no-runs-dialog');
     await expect(noRunsDialog).toBeVisible();
     await page.getByRole('button', { name: 'Invite a Friend' }).click();
-    await expect(page.getByText('Boost granted!')).toBeVisible();
+    await expect(page.getByText('Thanks for sharing! +1 Boost added 🎁')).toBeVisible();
     await expect(page.getByTestId('no-runs-dialog')).toHaveCount(0);
 
     // Boost enables another run.
