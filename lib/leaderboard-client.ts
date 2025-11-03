@@ -15,6 +15,12 @@ export type BestScoreResponse =
   | { ok: true; bestScore: number; season: string | null }
   | { ok: false; reason: string; status?: number };
 
+export type LeaderboardTopItem = { address: string; bestScore: number };
+
+export type LeaderboardTopResponse =
+  | { ok: true; items: LeaderboardTopItem[]; updatedAt: string | null }
+  | { ok: false; reason: string; status?: number };
+
 function safeJson(response: Response) {
   return response
     .json()
@@ -91,7 +97,9 @@ export async function submitScoreRequest(input: {
 
 export async function fetchBestScore(address: string): Promise<BestScoreResponse> {
   try {
-    const response = await fetch(`/api/leaderboard/me?address=${encodeURIComponent(address)}`);
+    const response = await fetch(`/api/leaderboard/me?address=${encodeURIComponent(address)}`, {
+      cache: 'no-store',
+    });
     if (!response.ok) {
       if (response.status === 404) {
         return { ok: false, reason: 'disabled', status: response.status };
@@ -105,6 +113,36 @@ export async function fetchBestScore(address: string): Promise<BestScoreResponse
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {
     console.warn('[leaderboard] fetch best score failed', error);
+    return { ok: false, reason: 'network_error' };
+  }
+}
+
+export async function fetchLeaderboardTop(): Promise<LeaderboardTopResponse> {
+  try {
+    const response = await fetch('/api/leaderboard/top', { cache: 'no-store' });
+    if (!response.ok) {
+      return { ok: false, reason: 'http_error', status: response.status };
+    }
+    const data = await safeJson(response);
+    if (data.ok) {
+      const items = Array.isArray((data as { items?: unknown }).items)
+        ? ((data as { items?: unknown[] }).items ?? [])
+            .filter(
+              (entry): entry is LeaderboardTopItem =>
+                typeof entry === 'object' &&
+                entry !== null &&
+                typeof (entry as LeaderboardTopItem).address === 'string' &&
+                typeof (entry as LeaderboardTopItem).bestScore === 'number',
+            )
+        : [];
+      const updatedAt = typeof (data as { updatedAt?: unknown }).updatedAt === 'string'
+        ? ((data as { updatedAt: string }).updatedAt ?? null)
+        : null;
+      return { ok: true, items, updatedAt };
+    }
+    return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
+  } catch (error) {
+    console.warn('[leaderboard] fetch top failed', error);
     return { ok: false, reason: 'network_error' };
   }
 }

@@ -3,6 +3,7 @@ import { Analytics } from '@vercel/analytics/react';
 import './globals.css';
 import '@/styles/mobile-frame.css';
 import { getSiteConfig } from '@/lib/site-config';
+import FarcasterMiniAppReady from '@/components/FarcasterMiniAppReady';
 
 const site = getSiteConfig();
 
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="bg-[#030712] text-slate-100 antialiased">
         <Analytics />
+        <FarcasterMiniAppReady />
         {children}
       </body>
     </html>

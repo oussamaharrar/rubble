@@ -285,6 +285,7 @@ export default function EntryExperience({
   const [celebrateBest, setCelebrateBest] = useState(false);
   const [leaderboardRank, setLeaderboardRank] = useState<string>('—');
   const [bestScoreRefreshing, setBestScoreRefreshing] = useState(false);
+  const [leaderboardRefreshToken, setLeaderboardRefreshToken] = useState(0);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
@@ -312,6 +313,7 @@ export default function EntryExperience({
   const referralAttemptedRef = useRef(false);
   const overlayRefreshAttemptedRef = useRef(false);
   const runCompletedLoggedRef = useRef(false);
+  const sharePromptedRef = useRef(false);
   const stats = useGameStore((state) => state.stats);
   const walletAddress = useWalletStore((state) => state.address);
 
@@ -512,6 +514,11 @@ export default function EntryExperience({
     () => shortenAddress(walletAddress ?? rememberedAddress ?? ''),
     [rememberedAddress, walletAddress]
   );
+  const leaderboardAddress = useMemo(
+    () => normalizeAddress(walletAddress ?? rememberedAddress ?? undefined) ?? null,
+    [walletAddress, rememberedAddress],
+  );
+
   const farcasterDisplayName = useMemo(() => {
     if (!farcasterProfile) return null;
     const name = farcasterProfile.displayName?.trim();
@@ -531,13 +538,6 @@ export default function EntryExperience({
   }, [farcasterProfile]);
   const showIdentityChip = walletConnected || (rememberFlag === 1 && Boolean(rememberedAddress));
   const checkingWallet = !showIdentityChip && (!hydrated || (rememberFlag === 1 && !walletReady));
-  const leaderboardHighlight = useMemo(() => {
-    if (typeof shareScore === 'number' && Number.isFinite(shareScore)) {
-      return { board: shareBoard ?? 'normal', score: shareScore, combo: 0, streak: 0 } as const;
-    }
-    return null;
-  }, [shareBoard, shareScore]);
-
   const normalizedReferrer = useMemo(() => (referrerAddress ? normalizeAddress(referrerAddress) ?? null : null), [referrerAddress]);
   const bestScoreLoading = leaderboardStatus === 'loading' || bestScoreRefreshing;
 
@@ -568,6 +568,17 @@ export default function EntryExperience({
     setRememberFlag(readRememberedFlag());
     setRememberedAddress(readRememberedAddress());
   }, []);
+
+  useEffect(() => {
+    if (sharePromptedRef.current) {
+      return;
+    }
+    if (typeof shareScore === 'number' && Number.isFinite(shareScore)) {
+      sharePromptedRef.current = true;
+      setShowScoreboard(true);
+      logEvent('leader_share_param', { score: shareScore, board: shareBoard ?? 'normal' });
+    }
+  }, [shareBoard, shareScore]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -887,35 +898,49 @@ export default function EntryExperience({
     setSubmittingScore(true);
     setSubmitError(null);
     logEvent('leader_submit', { score: stats.score });
-    submitScoreRequest({
-      player: walletAddress,
-      score: stats.score,
-      comboMax: stats.bestCombo,
-      hits: stats.streak,
-      rareHits: stats.rareHits,
-      season: leaderboardSeason,
-      token: tokenState.token,
-      runId: tokenState.runId,
-    })
-      .then((response) => {
+    const submitAndRefresh = async () => {
+      try {
+        const response = await submitScoreRequest({
+          player: walletAddress,
+          score: stats.score,
+          comboMax: stats.bestCombo,
+          hits: stats.streak,
+          rareHits: stats.rareHits,
+          season: leaderboardSeason,
+          token: tokenState.token,
+          runId: tokenState.runId,
+        });
         if (!response.ok) {
           setSubmitError('Unable to sync score to Base. Try again soon.');
           return;
         }
-        setBestScoreOnChain(response.bestScore);
-        const improved = response.bestScore > tokenState.bestBefore && response.bestScore >= stats.score;
-        setCelebrateBest(improved);
-        if (runTokenRef.current) {
-          runTokenRef.current.bestBefore = response.bestScore;
+        const refreshResult = await refreshBestScore({
+          reason: 'submit',
+          toastOnFailure: true,
+          previousBest: previousBestBeforeSubmit,
+        });
+        if (!refreshResult?.ok) {
+          setBestScoreOnChain(response.bestScore);
+          if (runTokenRef.current) {
+            runTokenRef.current.bestBefore = response.bestScore;
+          }
+          const improved = response.bestScore > previousBestBeforeSubmit && response.bestScore >= stats.score;
+          if (improved) {
+            setCelebrateBest(true);
+          }
         }
-        void refreshBestScore({ reason: 'submit', toastOnFailure: true, previousBest: previousBestBeforeSubmit });
-      })
-      .catch(() => {
+        if (showScoreboard) {
+          setLeaderboardRefreshToken((value) => value + 1);
+        }
+      } catch (error) {
+        console.warn('[leaderboard] submit refresh failed', error);
         setSubmitError('Unable to sync score to Base. Try again soon.');
-      })
-      .finally(() => {
+      } finally {
         setSubmittingScore(false);
-      });
+      }
+    };
+
+    void submitAndRefresh();
   }, [
     leaderboardStatus,
     leaderboardSeason,
@@ -926,6 +951,7 @@ export default function EntryExperience({
     stats.streak,
     walletAddress,
     refreshBestScore,
+    showScoreboard,
   ]);
 
   useEffect(() => {
@@ -1757,7 +1783,9 @@ export default function EntryExperience({
         <LeaderboardModal
           open={showScoreboard}
           onClose={() => setShowScoreboard(false)}
-          highlight={leaderboardHighlight}
+          address={leaderboardAddress}
+          fallbackBest={bestScoreOnChain}
+          refreshToken={leaderboardRefreshToken}
         />
 
         <EndOfRunOverlay

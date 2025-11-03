@@ -1,148 +1,208 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import clsx from 'clsx';
 import Modal from './Modal';
-import { getBoard, shareUrl, type LeaderboardEntry } from '@/lib/leaderboard';
-import type { BoardKind } from '@/types/game';
+import { fetchBestScore, fetchLeaderboardTop, type LeaderboardTopItem } from '@/lib/leaderboard-client';
+import { shortenAddress } from '@/lib/address';
 
 interface LeaderboardModalProps {
   open: boolean;
   onClose: () => void;
-  highlight?: {
-    board: BoardKind;
-    score: number;
-    combo: number;
-    streak: number;
-    dailyKey?: string;
-  } | null;
+  address: string | null;
+  fallbackBest?: number | null;
+  refreshToken: number;
 }
 
-const BOARDS: { label: string; value: BoardKind }[] = [
-  { label: 'Normal', value: 'normal' },
-  { label: 'Daily', value: 'daily' },
-];
+type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
-function formatDate(value: string) {
-  const parsed = new Date(value);
+function formatRank(index: number) {
+  return `#${index + 1}`;
+}
+
+function formatUpdatedAt(updatedAt: string | null) {
+  if (!updatedAt) return null;
+  const parsed = new Date(updatedAt);
   if (Number.isNaN(parsed.getTime())) {
-    return value;
+    return null;
   }
   return parsed.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    month: 'short',
+    day: 'numeric',
   });
 }
 
-export default function LeaderboardModal({ open, onClose, highlight }: LeaderboardModalProps) {
-  const [activeBoard, setActiveBoard] = useState<BoardKind>('normal');
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+export default function LeaderboardModal({ open, onClose, address, fallbackBest = null, refreshToken }: LeaderboardModalProps) {
+  const [topItems, setTopItems] = useState<LeaderboardTopItem[]>([]);
+  const [topState, setTopState] = useState<LoadState>('idle');
+  const [topError, setTopError] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [selfState, setSelfState] = useState<LoadState>('idle');
+  const [selfBest, setSelfBest] = useState<number | null>(fallbackBest ?? null);
+  const [selfSeason, setSelfSeason] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-    setEntries(getBoard(activeBoard));
-  }, [open, activeBoard]);
-
-  useEffect(() => {
-    if (!highlight) return;
-    setActiveBoard(highlight.board);
-  }, [highlight]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleStorage = () => {
-      setEntries(getBoard(activeBoard));
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [open, activeBoard]);
-
-  const activeHighlight = useMemo(() => {
-    if (!highlight) return null;
-    if (highlight.board !== activeBoard) return null;
-    return highlight;
-  }, [activeBoard, highlight]);
-
-  const shareTarget = useMemo(() => {
-    if (activeHighlight) {
-      return activeHighlight;
+    if (!open) {
+      return;
     }
-    const [first] = entries;
-    if (!first) return null;
-    return { board: activeBoard, score: first.score, combo: first.combo, streak: first.streak, dailyKey: first.dailyKey };
-  }, [activeBoard, activeHighlight, entries]);
+    let cancelled = false;
+    setTopState('loading');
+    setTopError(null);
+    fetchLeaderboardTop()
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setTopItems(result.items);
+          setUpdatedAt(result.updatedAt ?? null);
+          setTopState('ready');
+        } else {
+          setTopItems([]);
+          setTopState('error');
+          setTopError('Unable to load leaderboard.');
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTopItems([]);
+        setTopState('error');
+        setTopError('Unable to load leaderboard.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshToken]);
 
-  const shareHref = useMemo(() => {
-    if (!shareTarget) return '';
-    const url = shareUrl({ score: shareTarget.score, board: shareTarget.board, dailyKey: shareTarget.dailyKey });
-    const castText = `My Rubble ${shareTarget.board === 'daily' ? 'Daily Challenge' : 'Arcade'} score: ${shareTarget.score}!`;
-    const composer = new URL('https://warpcast.com/~/compose');
-    composer.searchParams.set('text', `${castText}\n${url}`);
-    return composer.toString();
-  }, [shareTarget]);
+  useEffect(() => {
+    setSelfBest(fallbackBest ?? null);
+  }, [fallbackBest]);
+
+  useEffect(() => {
+    if (!open || address) {
+      return;
+    }
+    setSelfState('idle');
+    setSelfSeason(null);
+  }, [open, address]);
+
+  useEffect(() => {
+    if (!open || !address) {
+      return;
+    }
+    let cancelled = false;
+    setSelfState('loading');
+    fetchBestScore(address)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setSelfBest(result.bestScore);
+          setSelfSeason(result.season ?? null);
+          setSelfState('ready');
+        } else if (result.reason === 'disabled') {
+          setSelfState('error');
+          setSelfBest(null);
+        } else {
+          setSelfState('error');
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSelfState('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, address, refreshToken]);
+
+  const showFallback = topState === 'ready' && topItems.length === 0;
+  const bestDisplay = useMemo(() => {
+    if (selfState === 'loading') {
+      return 'Loading…';
+    }
+    if (typeof selfBest === 'number') {
+      return selfBest;
+    }
+    if (fallbackBest !== null && typeof fallbackBest === 'number') {
+      return fallbackBest;
+    }
+    return '—';
+  }, [fallbackBest, selfBest, selfState]);
+
+  const updatedLabel = useMemo(() => formatUpdatedAt(updatedAt), [updatedAt]);
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Leaderboard"
+      className="bg-slate-950/95"
       footer={
         <button
           type="button"
           onClick={onClose}
-          className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+          className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
         >
           Close
         </button>
       }
     >
-      <div className="mb-4 flex gap-2">
-        {BOARDS.map((board) => (
-          <button
-            key={board.value}
-            type="button"
-            onClick={() => setActiveBoard(board.value)}
-            className={`flex-1 rounded-2xl px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
-              activeBoard === board.value ? 'bg-sky-500/70 text-slate-900' : 'bg-white/5 text-slate-200'
-            }`}
-          >
-            {board.label}
-          </button>
-        ))}
-      </div>
-      <div className="space-y-2">
-        {entries.length === 0 ? (
-          <p className="text-sm text-slate-300">No scores yet. Play a run to populate this board.</p>
-        ) : (
-          entries.map((entry, index) => (
-            <div
-              key={`${entry.date}-${entry.score}-${index}`}
-              className={`flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm ${
-                activeHighlight && entry.score === activeHighlight.score && entry.combo === activeHighlight.combo && entry.streak === activeHighlight.streak
-                  ? 'border-sky-400/70 bg-sky-500/10'
-                  : ''
-              }`}
-            >
-              <div>
-                <p className="text-base font-semibold text-slate-100">{entry.score}</p>
-                <p className="text-xs text-slate-300">Combo ×{entry.combo} · Streak {entry.streak}</p>
-              </div>
-              <p className="text-xs text-slate-400">{formatDate(entry.date)}</p>
+      <div className="space-y-4">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-white/70">Top Players</p>
+            {updatedLabel ? <p className="text-xs text-white/50">Updated {updatedLabel}</p> : null}
+          </div>
+          {topState === 'loading' ? (
+            <p className="mt-4 text-sm text-white/70">Loading leaderboard…</p>
+          ) : topState === 'error' ? (
+            <p className="mt-4 text-sm text-rose-200">{topError ?? 'Leaderboard unavailable right now.'}</p>
+          ) : showFallback ? (
+            <div className="mt-4 space-y-2">
+              <h3 className="text-lg font-semibold text-white">Your Rank Only</h3>
+              <p className="text-sm text-white/70">
+                Scores are syncing. You can still view your personal best below while the global board refreshes.
+              </p>
             </div>
-          ))
-        )}
+          ) : (
+            <ul className="mt-4 space-y-2" data-testid="leaderboard-top-list">
+              {topItems.map((entry, index) => (
+                <li
+                  key={`${entry.address}-${index}`}
+                  className={clsx(
+                    'flex items-center justify-between rounded-2xl border border-white/12 bg-black/30 px-4 py-3 text-sm text-white shadow-sm',
+                    index === 0 && 'border-amber-400/60 bg-amber-500/20',
+                    index === 1 && 'border-sky-400/60 bg-sky-500/20',
+                    index === 2 && 'border-emerald-400/60 bg-emerald-500/20',
+                  )}
+                  data-testid={`leaderboard-row-${index}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-semibold uppercase tracking-[0.28em] text-white/70">{formatRank(index)}</span>
+                    <span className="text-base font-semibold">{shortenAddress(entry.address)}</span>
+                  </div>
+                  <span className="text-lg font-bold">{entry.bestScore}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-4" data-testid="leaderboard-your-best">
+          <p className="text-sm font-semibold uppercase tracking-[0.28em] text-white/70">Your Best</p>
+          <p className="mt-2 text-3xl font-semibold text-white" data-testid="leaderboard-best-score">
+            {bestDisplay}
+          </p>
+          {selfSeason ? (
+            <p className="text-xs text-white/60">Season {selfSeason}</p>
+          ) : null}
+          {selfState === 'error' && address ? (
+            <p className="mt-2 text-xs text-rose-200">Unable to refresh your best score. Try again later.</p>
+          ) : null}
+          {!address ? (
+            <p className="mt-2 text-xs text-white/60">Connect a Base wallet to join the leaderboard.</p>
+          ) : null}
+        </div>
       </div>
-      {shareTarget && shareHref ? (
-        <a
-          href={shareHref}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-purple-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
-        >
-          Share to Farcaster
-        </a>
-      ) : null}
     </Modal>
   );
 }
