@@ -40,7 +40,13 @@ test.describe('end-of-run overlay', () => {
       }
       window.localStorage.setItem('rubble:remember', '1');
       window.localStorage.setItem('rubble:address', address);
-      window.localStorage.setItem('rubble:tickets', '3');
+      window.localStorage.setItem('rubble:tickets', '1');
+      const now = new Date();
+      const stamp = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(
+        now.getUTCDate(),
+      ).padStart(2, '0')}`;
+      const trialKey = `rubble:trial:${stamp}:${address.toLowerCase()}`;
+      window.localStorage.setItem(trialKey, 'used');
     }, { address: MOCK_ADDRESS });
 
     await initWalletStub(page);
@@ -70,6 +76,9 @@ test.describe('end-of-run overlay', () => {
     await expect(overlay).toBeVisible();
     await expect(page.getByText('Your Score')).toBeVisible();
     await expect(page.getByTestId('best-score-value')).toHaveText('200');
+    const rankCard = overlay.locator('div').filter({ hasText: 'Rank' }).first();
+    await expect(rankCard).toContainText('Rank');
+    await expect(rankCard).toContainText('—');
     await expect(page.getByText('Congrats! Personal Best.')).toBeVisible();
 
     await expect(page.getByText('Combo Master')).toBeVisible();
@@ -82,6 +91,6 @@ test.describe('end-of-run overlay', () => {
     await expect(playAgainButton).toBeVisible();
 
     await playAgainButton.click();
-    await page.waitForSelector('[data-testid="game-stage"]');
+    await expect(page.getByTestId('no-runs-dialog')).toBeVisible();
   });
 });

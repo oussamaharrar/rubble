@@ -1,5 +1,6 @@
 'use client';
 
+import * as miniAppSdk from '@farcaster/miniapp-sdk';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
@@ -27,6 +28,14 @@ import { useDailyRewardStore } from '@/lib/stores/daily-reward';
 import { useRewardBoostStore } from '@/lib/stores/reward-boost';
 
 type ScreenState = 'home' | 'playing' | 'paused';
+
+function resolveMiniAppSdk() {
+  const candidate = miniAppSdk as unknown as {
+    sdk?: typeof miniAppSdk.sdk;
+    default?: typeof miniAppSdk.sdk;
+  };
+  return candidate.sdk ?? candidate.default ?? null;
+}
 
 type EntryExperienceProps = {
   shareScore?: number;
@@ -241,8 +250,8 @@ function trialStorageKey(address: string) {
 }
 
 export default function EntryExperience({
-  shareScore,
-  shareBoard,
+  shareScore: _shareScore,
+  shareBoard: _shareBoard,
   tagline = 'Pop. Win. Repeat.',
   referrerAddress,
 }: EntryExperienceProps) {
@@ -257,6 +266,15 @@ export default function EntryExperience({
   const site = useMemo(() => getSiteConfig(), []);
   const prefersReducedMotion = useReducedMotion();
   const { toast, showToast } = useToast();
+
+  useEffect(() => {
+    try {
+      const sdkInstance = resolveMiniAppSdk();
+      void sdkInstance?.actions?.ready?.();
+    } catch {
+      // ignore sdk issues outside Farcaster
+    }
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [screen, setScreen] = useState<ScreenState>('home');
   const [gateOpen, setGateOpen] = useState(false);
@@ -285,6 +303,7 @@ export default function EntryExperience({
   const [celebrateBest, setCelebrateBest] = useState(false);
   const [leaderboardRank, setLeaderboardRank] = useState<string>('—');
   const [bestScoreRefreshing, setBestScoreRefreshing] = useState(false);
+  const [leaderboardRefreshToken, setLeaderboardRefreshToken] = useState(0);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
@@ -314,6 +333,14 @@ export default function EntryExperience({
   const runCompletedLoggedRef = useRef(false);
   const stats = useGameStore((state) => state.stats);
   const walletAddress = useWalletStore((state) => state.address);
+  const leaderboardAddress = walletAddress ?? rememberedAddress ?? null;
+
+  useEffect(() => {
+    if (!showScoreboard) {
+      return;
+    }
+    setLeaderboardRefreshToken((value) => value + 1);
+  }, [showScoreboard, leaderboardAddress]);
 
   const refreshBestScore = useCallback(
     async ({
@@ -350,6 +377,9 @@ export default function EntryExperience({
               runTokenRef.current.bestBefore = result.bestScore;
             }
             logEvent('leader_me_fetch', { bestScore: result.bestScore, reason });
+            if (showScoreboard) {
+              setLeaderboardRefreshToken((value) => value + 1);
+            }
             if (reason === 'submit') {
               const improved = result.bestScore > baselineBest && result.bestScore >= stats.score;
               if (improved) {
@@ -375,7 +405,15 @@ export default function EntryExperience({
       }
       return response;
     },
-    [walletAddress, leaderboardStatus, bestScoreOnChain, stats.score, showToast]
+    [
+      walletAddress,
+      leaderboardStatus,
+      bestScoreOnChain,
+      stats.score,
+      showToast,
+      showScoreboard,
+      setLeaderboardRefreshToken,
+    ]
   );
 
   const walletConnected = Boolean(walletAddress);
@@ -529,15 +567,12 @@ export default function EntryExperience({
     const handle = farcasterProfile.username.trim().replace(/^@/, '');
     return handle.length > 0 ? `@${handle}` : null;
   }, [farcasterProfile]);
+  const leaderboardIdentityLabel = useMemo(
+    () => farcasterDisplayName ?? farcasterHandle ?? shortAddress,
+    [farcasterDisplayName, farcasterHandle, shortAddress],
+  );
   const showIdentityChip = walletConnected || (rememberFlag === 1 && Boolean(rememberedAddress));
   const checkingWallet = !showIdentityChip && (!hydrated || (rememberFlag === 1 && !walletReady));
-  const leaderboardHighlight = useMemo(() => {
-    if (typeof shareScore === 'number' && Number.isFinite(shareScore)) {
-      return { board: shareBoard ?? 'normal', score: shareScore, combo: 0, streak: 0 } as const;
-    }
-    return null;
-  }, [shareBoard, shareScore]);
-
   const normalizedReferrer = useMemo(() => (referrerAddress ? normalizeAddress(referrerAddress) ?? null : null), [referrerAddress]);
   const bestScoreLoading = leaderboardStatus === 'loading' || bestScoreRefreshing;
 
@@ -585,26 +620,37 @@ export default function EntryExperience({
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
     if (typeof window === 'undefined') {
-      return undefined;
+      return;
     }
+    const sdkInstance = resolveMiniAppSdk();
+    if (!sdkInstance) {
+      return;
+    }
+    let cancelled = false;
     (async () => {
       try {
-        const { sdk } = await import('@farcaster/miniapp-sdk');
-        const inMiniApp = await sdk.isInMiniApp().catch(() => false);
+        const inMiniApp = await sdkInstance.isInMiniApp?.().catch(() => false);
         if (!inMiniApp || cancelled) {
           return;
         }
-        await sdk.actions.ready().catch(() => {});
-        const context = await sdk.context.catch(() => null);
-        if (cancelled || !context?.user) {
+        let context: unknown = null;
+        try {
+          context = await sdkInstance.context;
+        } catch {
+          context = null;
+        }
+        if (cancelled) {
+          return;
+        }
+        const castContext = context as { user?: { username?: string | null; displayName?: string | null; pfpUrl?: string | null } } | null;
+        if (!castContext?.user) {
           return;
         }
         setFarcasterProfile({
-          username: context.user.username ?? null,
-          displayName: context.user.displayName ?? null,
-          pfpUrl: context.user.pfpUrl ?? null,
+          username: castContext.user.username ?? null,
+          displayName: castContext.user.displayName ?? null,
+          pfpUrl: castContext.user.pfpUrl ?? null,
         });
       } catch {
         // ignore SDK failures outside Farcaster
@@ -897,7 +943,7 @@ export default function EntryExperience({
       token: tokenState.token,
       runId: tokenState.runId,
     })
-      .then((response) => {
+      .then(async (response) => {
         if (!response.ok) {
           setSubmitError('Unable to sync score to Base. Try again soon.');
           return;
@@ -908,7 +954,7 @@ export default function EntryExperience({
         if (runTokenRef.current) {
           runTokenRef.current.bestBefore = response.bestScore;
         }
-        void refreshBestScore({ reason: 'submit', toastOnFailure: true, previousBest: previousBestBeforeSubmit });
+        await refreshBestScore({ reason: 'submit', toastOnFailure: true, previousBest: previousBestBeforeSubmit });
       })
       .catch(() => {
         setSubmitError('Unable to sync score to Base. Try again soon.');
@@ -1757,7 +1803,9 @@ export default function EntryExperience({
         <LeaderboardModal
           open={showScoreboard}
           onClose={() => setShowScoreboard(false)}
-          highlight={leaderboardHighlight}
+          address={leaderboardAddress}
+          identityLabel={leaderboardIdentityLabel}
+          refreshToken={leaderboardRefreshToken}
         />
 
         <EndOfRunOverlay

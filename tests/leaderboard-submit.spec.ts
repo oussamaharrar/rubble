@@ -17,6 +17,9 @@ test.describe('leaderboard submit flow', () => {
     await page.route('**/api/leaderboard/me**', async (route) => {
       leaderboardMeCalls += 1;
       const bestScore = leaderboardMeCalls === 1 ? 120 : 180;
+      if (leaderboardMeCalls === 2) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -30,7 +33,7 @@ test.describe('leaderboard submit flow', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 180 }),
+        body: JSON.stringify({ ok: true, bestScore: 150 }),
       });
     });
 
@@ -73,7 +76,9 @@ test.describe('leaderboard submit flow', () => {
 
     const overlay = page.getByTestId('end-of-run-overlay');
     await expect(overlay).toBeVisible();
-    await expect(page.getByTestId('best-score-value')).toHaveText('180');
+    const bestValue = page.getByTestId('best-score-value');
+    await expect(bestValue).toHaveText('150');
+    await expect(bestValue).toHaveText('180');
 
     expect(submitPayload).not.toBeNull();
     expect(submitPayload?.score).toBe(180);
