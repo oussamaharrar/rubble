@@ -105,3 +105,7 @@ export async function kvSet(
 export async function kvSetIfAbsent(key: string, value: string, ttlSeconds?: number) {
   return kvSet(key, value, ttlSeconds, { onlyIfAbsent: true });
 }
+
+export function kvReady() {
+  return Boolean(kvUrl && kvToken);
+}

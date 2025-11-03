@@ -16,9 +16,17 @@ export type BestScoreResponse =
   | { ok: false; reason: string; status?: number };
 
 function safeJson(response: Response) {
-  return response
-    .json()
-    .catch(() => ({})) as Promise<Record<string, unknown> & { ok?: boolean; bestScore?: number; token?: string; payload?: unknown; reason?: string }>;
+  return response.json().catch(() => ({})) as Promise<
+    Record<string, unknown> & {
+      ok?: boolean;
+      bestScore?: number;
+      token?: string;
+      payload?: unknown;
+      reason?: string;
+      items?: unknown;
+      updatedAt?: unknown;
+    }
+  >;
 }
 
 export async function issueRunTokenRequest(address: string): Promise<RunTokenResponse> {
@@ -91,7 +99,9 @@ export async function submitScoreRequest(input: {
 
 export async function fetchBestScore(address: string): Promise<BestScoreResponse> {
   try {
-    const response = await fetch(`/api/leaderboard/me?address=${encodeURIComponent(address)}`);
+    const response = await fetch(`/api/leaderboard/me?address=${encodeURIComponent(address)}`, {
+      cache: 'no-store',
+    });
     if (!response.ok) {
       if (response.status === 404) {
         return { ok: false, reason: 'disabled', status: response.status };
@@ -105,6 +115,41 @@ export async function fetchBestScore(address: string): Promise<BestScoreResponse
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {
     console.warn('[leaderboard] fetch best score failed', error);
+    return { ok: false, reason: 'network_error' };
+  }
+}
+
+export type LeaderboardTopItem = { address: string; bestScore: number };
+
+export type LeaderboardTopResponse =
+  | { ok: true; items: LeaderboardTopItem[]; updatedAt: string | null }
+  | { ok: false; reason: string; status?: number };
+
+export async function fetchLeaderboardTop(): Promise<LeaderboardTopResponse> {
+  try {
+    const response = await fetch('/api/leaderboard/top', { cache: 'no-store' });
+    if (!response.ok) {
+      return { ok: false, reason: 'http_error', status: response.status };
+    }
+    const data = await safeJson(response);
+    if (data.ok) {
+      const rawItems = Array.isArray(data.items) ? (data.items as { address?: string; bestScore?: number }[]) : [];
+      const items = rawItems
+        .map((entry) => {
+          const address = typeof entry.address === 'string' ? entry.address : undefined;
+          const bestScore = Number(entry.bestScore);
+          if (!address || !Number.isFinite(bestScore)) {
+            return null;
+          }
+          return { address, bestScore: Math.floor(bestScore) };
+        })
+        .filter((entry): entry is LeaderboardTopItem => Boolean(entry));
+      const updatedAt = typeof data.updatedAt === 'string' ? data.updatedAt : null;
+      return { ok: true, items, updatedAt };
+    }
+    return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
+  } catch (error) {
+    console.warn('[leaderboard] fetch top failed', error);
     return { ok: false, reason: 'network_error' };
   }
 }
