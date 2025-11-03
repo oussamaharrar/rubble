@@ -30,7 +30,7 @@ test.describe('leaderboard submit flow', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 180 }),
+        body: JSON.stringify({ ok: true, bestScore: 150 }),
       });
     });
 

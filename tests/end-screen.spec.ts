@@ -81,7 +81,20 @@ test.describe('end-of-run overlay', () => {
     const playAgainButton = page.getByRole('button', { name: 'Play Again' });
     await expect(playAgainButton).toBeVisible();
 
+    await page.evaluate(() => {
+      const global = window as any;
+      global.__mockWalletConnected = false;
+      const walletStore = global.__rubbleWalletStore;
+      walletStore?.getState().reset();
+      try {
+        window.localStorage.setItem('rubble:remember', '0');
+        window.localStorage.removeItem('rubble:address');
+      } catch {
+        // ignore
+      }
+    });
+
     await playAgainButton.click();
-    await page.waitForSelector('[data-testid="game-stage"]');
+    await expect(page.getByTestId('play-gate')).toBeVisible();
   });
 });
