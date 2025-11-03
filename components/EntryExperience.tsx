@@ -3,6 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
+import { sdk as farcasterSdk } from '@farcaster/miniapp-sdk';
+
+const farcasterSdkClient = farcasterSdk as unknown as {
+  actions?: {
+    ready?: () => void | Promise<void>;
+  };
+  isInMiniApp?: () => Promise<boolean>;
+  context?: Promise<{
+    user?: {
+      username?: string | null;
+      displayName?: string | null;
+      pfpUrl?: string | null;
+    } | null;
+  }>;
+};
 import GameCanvas from '@/app/game/GameCanvas';
 import GameplayHud from '@/components/GameplayHud';
 import SettingsModal from '@/components/SettingsModal';
@@ -285,6 +300,7 @@ export default function EntryExperience({
   const [celebrateBest, setCelebrateBest] = useState(false);
   const [leaderboardRank, setLeaderboardRank] = useState<string>('—');
   const [bestScoreRefreshing, setBestScoreRefreshing] = useState(false);
+  const [leaderboardRefreshToken, setLeaderboardRefreshToken] = useState(0);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
@@ -552,6 +568,20 @@ export default function EntryExperience({
   const previousBestForCelebrate = runTokenRef.current?.bestBefore ?? bestScoreOnChain ?? 0;
   const overlayCelebrate = showEndOverlay && (celebrateBest || (leaderboardStatus !== 'ready' && stats.score > previousBestForCelebrate));
 
+  useEffect(() => {
+    try {
+      farcasterSdkClient.actions?.ready?.();
+    } catch {
+      // ignore SDK readiness failures
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showScoreboard) {
+      setLeaderboardRefreshToken((value) => value + 1);
+    }
+  }, [showScoreboard]);
+
   const pendingModeRef = useRef<EntryMode | null>(null);
 
   const updateRemember = useCallback(
@@ -591,13 +621,16 @@ export default function EntryExperience({
     }
     (async () => {
       try {
-        const { sdk } = await import('@farcaster/miniapp-sdk');
-        const inMiniApp = await sdk.isInMiniApp().catch(() => false);
+        const inMiniApp = (await farcasterSdkClient.isInMiniApp?.().catch(() => false)) ?? false;
         if (!inMiniApp || cancelled) {
           return;
         }
-        await sdk.actions.ready().catch(() => {});
-        const context = await sdk.context.catch(() => null);
+        try {
+          await farcasterSdkClient.actions?.ready?.();
+        } catch {
+          // ignore readiness failures
+        }
+        const context = (await farcasterSdkClient.context?.catch(() => null)) ?? null;
         if (cancelled || !context?.user) {
           return;
         }
@@ -897,7 +930,7 @@ export default function EntryExperience({
       token: tokenState.token,
       runId: tokenState.runId,
     })
-      .then((response) => {
+      .then(async (response) => {
         if (!response.ok) {
           setSubmitError('Unable to sync score to Base. Try again soon.');
           return;
@@ -908,7 +941,10 @@ export default function EntryExperience({
         if (runTokenRef.current) {
           runTokenRef.current.bestBefore = response.bestScore;
         }
-        void refreshBestScore({ reason: 'submit', toastOnFailure: true, previousBest: previousBestBeforeSubmit });
+        await refreshBestScore({ reason: 'submit', toastOnFailure: true, previousBest: previousBestBeforeSubmit });
+        if (showScoreboard) {
+          setLeaderboardRefreshToken((value) => value + 1);
+        }
       })
       .catch(() => {
         setSubmitError('Unable to sync score to Base. Try again soon.');
@@ -926,6 +962,7 @@ export default function EntryExperience({
     stats.streak,
     walletAddress,
     refreshBestScore,
+    showScoreboard,
   ]);
 
   useEffect(() => {
@@ -1758,6 +1795,7 @@ export default function EntryExperience({
           open={showScoreboard}
           onClose={() => setShowScoreboard(false)}
           highlight={leaderboardHighlight}
+          refreshToken={leaderboardRefreshToken}
         />
 
         <EndOfRunOverlay

@@ -16,7 +16,7 @@ test.describe('leaderboard submit flow', () => {
     let leaderboardMeCalls = 0;
     await page.route('**/api/leaderboard/me**', async (route) => {
       leaderboardMeCalls += 1;
-      const bestScore = leaderboardMeCalls === 1 ? 120 : 180;
+      const bestScore = leaderboardMeCalls === 1 ? 120 : 220;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -73,7 +73,7 @@ test.describe('leaderboard submit flow', () => {
 
     const overlay = page.getByTestId('end-of-run-overlay');
     await expect(overlay).toBeVisible();
-    await expect(page.getByTestId('best-score-value')).toHaveText('180');
+    await expect(page.getByTestId('best-score-value')).toHaveText('220');
 
     expect(submitPayload).not.toBeNull();
     expect(submitPayload?.score).toBe(180);
