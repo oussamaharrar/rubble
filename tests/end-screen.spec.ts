@@ -16,7 +16,7 @@ test.describe('end-of-run overlay', () => {
     let bestCounter = 0;
     await page.route('**/api/leaderboard/me**', async (route) => {
       bestCounter += 1;
-      const bestScore = bestCounter === 1 ? 120 : 200;
+      const bestScore = bestCounter === 1 ? 120 : 240;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -28,7 +28,7 @@ test.describe('end-of-run overlay', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, bestScore: 200 }),
+        body: JSON.stringify({ ok: true, bestScore: 180 }),
       });
     });
 
@@ -69,7 +69,8 @@ test.describe('end-of-run overlay', () => {
     const overlay = page.getByTestId('end-of-run-overlay');
     await expect(overlay).toBeVisible();
     await expect(page.getByText('Your Score')).toBeVisible();
-    await expect(page.getByTestId('best-score-value')).toHaveText('200');
+    await expect(page.getByTestId('best-score-value')).toHaveText('240');
+    await expect(page.getByText('Rank')).toBeVisible();
     await expect(page.getByText('Congrats! Personal Best.')).toBeVisible();
 
     await expect(page.getByText('Combo Master')).toBeVisible();

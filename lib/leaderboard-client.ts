@@ -18,7 +18,17 @@ export type BestScoreResponse =
 function safeJson(response: Response) {
   return response
     .json()
-    .catch(() => ({})) as Promise<Record<string, unknown> & { ok?: boolean; bestScore?: number; token?: string; payload?: unknown; reason?: string }>;
+    .catch(() => ({})) as Promise<
+    Record<string, unknown> & {
+      ok?: boolean;
+      bestScore?: number;
+      token?: string;
+      payload?: unknown;
+      reason?: string;
+      items?: unknown;
+      updatedAt?: unknown;
+    }
+  >;
 }
 
 export async function issueRunTokenRequest(address: string): Promise<RunTokenResponse> {
@@ -91,7 +101,7 @@ export async function submitScoreRequest(input: {
 
 export async function fetchBestScore(address: string): Promise<BestScoreResponse> {
   try {
-    const response = await fetch(`/api/leaderboard/me?address=${encodeURIComponent(address)}`);
+    const response = await fetch(`/api/leaderboard/me?address=${encodeURIComponent(address)}`, { cache: 'no-store' });
     if (!response.ok) {
       if (response.status === 404) {
         return { ok: false, reason: 'disabled', status: response.status };
@@ -105,6 +115,35 @@ export async function fetchBestScore(address: string): Promise<BestScoreResponse
     return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
   } catch (error) {
     console.warn('[leaderboard] fetch best score failed', error);
+    return { ok: false, reason: 'network_error' };
+  }
+}
+
+export type TopLeaderboardResponse =
+  | { ok: true; items: { address: string; bestScore: number }[]; updatedAt: string | null }
+  | { ok: false; reason: string; status?: number };
+
+export async function fetchTopLeaderboard(): Promise<TopLeaderboardResponse> {
+  try {
+    const response = await fetch('/api/leaderboard/top', { cache: 'no-store' });
+    if (!response.ok) {
+      return { ok: false, reason: 'http_error', status: response.status };
+    }
+    const data = await safeJson(response);
+    if (data.ok) {
+      const itemsRaw = Array.isArray(data.items) ? data.items : [];
+      const items = itemsRaw
+        .filter(
+          (entry): entry is { address: string; bestScore: number } =>
+            Boolean(entry && typeof entry.address === 'string' && Number.isFinite((entry as { bestScore?: number }).bestScore))
+        )
+        .map((entry) => ({ address: entry.address, bestScore: Number(entry.bestScore) }));
+      const updatedAt = typeof data.updatedAt === 'string' ? data.updatedAt : null;
+      return { ok: true, items, updatedAt };
+    }
+    return { ok: false, reason: typeof data.reason === 'string' ? data.reason : 'unknown' };
+  } catch (error) {
+    console.warn('[leaderboard] fetch top failed', error);
     return { ok: false, reason: 'network_error' };
   }
 }

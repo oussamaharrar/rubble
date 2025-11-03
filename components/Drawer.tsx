@@ -1,13 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import PayButton from '@/components/PayButton';
 import { useGameStore } from '@/lib/store';
-import { getBoard, shareUrl, type LeaderboardEntry } from '@/lib/leaderboard';
-import type { BoardKind } from '@/types/game';
+import { shareUrl } from '@/lib/leaderboard';
 import type { LifetimeStats } from '@/components/StatsModal';
+import type { BoardKind } from '@/types/game';
+import { useWalletStore } from '@/lib/wallet-store';
+import { normalizeAddress, shortenAddress } from '@/lib/address';
+import { useLeaderboardSnapshot } from '@/lib/hooks/use-leaderboard-snapshot';
 
 export type DrawerView = 'missions' | 'shop' | 'leaderboard' | 'howto' | 'stats';
 
@@ -26,6 +29,7 @@ interface DrawerProps {
   } | null;
   lifetimeStats: LifetimeStats;
   onShowTutorial: () => void;
+  leaderboardRefreshToken?: number;
 }
 
 const VIEW_TABS: { label: string; value: DrawerView }[] = [
@@ -222,95 +226,109 @@ function ShopView() {
   );
 }
 
-const BOARDS: { label: string; value: BoardKind }[] = [
-  { label: 'Normal', value: 'normal' },
-  { label: 'Daily', value: 'daily' },
-];
+function formatUpdatedAt(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function Spinner() {
+  return (
+    <div className="flex justify-center py-6">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" />
+    </div>
+  );
+}
 
 function LeaderboardView({
   highlight,
+  open,
+  refreshToken,
 }: {
   highlight: DrawerProps['highlight'];
+  open: boolean;
+  refreshToken: number;
 }) {
-  const [activeBoard, setActiveBoard] = useState<BoardKind>('normal');
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-
-  useEffect(() => {
-    setEntries(getBoard(activeBoard));
-  }, [activeBoard]);
-
-  useEffect(() => {
-    if (!highlight) return;
-    setActiveBoard(highlight.board);
-  }, [highlight]);
-
-  useEffect(() => {
-    const handler = () => setEntries(getBoard(activeBoard));
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [activeBoard]);
-
-  const activeHighlight = useMemo(() => {
-    if (!highlight) return null;
-    if (highlight.board !== activeBoard) return null;
-    return highlight;
-  }, [activeBoard, highlight]);
+  const walletAddress = useWalletStore((state) => state.address);
+  const normalizedWallet = useMemo(() => normalizeAddress(walletAddress ?? undefined), [walletAddress]);
+  const walletLabel = useMemo(() => shortenAddress(normalizedWallet ?? ''), [normalizedWallet]);
+  const snapshot = useLeaderboardSnapshot({ enabled: open, address: walletAddress, refreshToken });
+  const updatedLabel = useMemo(() => formatUpdatedAt(snapshot.topUpdatedAt), [snapshot.topUpdatedAt]);
 
   const shareHref = useMemo(() => {
-    if (!activeHighlight) return '';
+    if (!highlight) return '';
     return shareUrl({
-      score: activeHighlight.score,
-      board: activeHighlight.board,
-      dailyKey: activeHighlight.dailyKey,
+      score: highlight.score,
+      board: highlight.board,
+      dailyKey: highlight.dailyKey,
     });
-  }, [activeHighlight]);
+  }, [highlight]);
+
+  const topContent = snapshot.topLoading ? (
+    <Spinner />
+  ) : snapshot.topItems.length > 0 ? (
+    <div className="mt-3 space-y-2">
+      {snapshot.topItems.slice(0, 50).map((entry, index) => {
+        const normalizedEntry = normalizeAddress(entry.address);
+        const isYou = normalizedWallet && normalizedEntry === normalizedWallet;
+        return (
+          <div
+            key={`${entry.address}-${index}`}
+            className={clsx(
+              'flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3',
+              isYou && 'border-sky-400/70 bg-sky-500/10'
+            )}
+          >
+            <div>
+              <p className="text-base font-semibold text-slate-100">{index + 1}. {entry.bestScore}</p>
+              <p className="text-xs text-slate-300">{isYou ? 'You' : shortenAddress(normalizedEntry ?? entry.address)}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : (
+    <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+      <p className="text-sm font-semibold text-slate-100">Your Rank Only</p>
+      <p className="mt-1 text-xs text-slate-300/80">
+        Global placements are warming up. Keep chasing your personal best and we’ll sync the full leaderboard soon.
+      </p>
+    </div>
+  );
+
+  const bestValue = snapshot.bestLoading ? 'Loading…' : snapshot.bestScore ?? (snapshot.disabled ? 'Disabled' : '—');
 
   return (
     <div className="space-y-4 text-sm text-slate-200">
-      <div className="flex gap-2">
-        {BOARDS.map((board) => (
-          <button
-            key={board.value}
-            type="button"
-            onClick={() => setActiveBoard(board.value)}
-            className={clsx(
-              'button-tap flex-1 rounded-2xl px-3 py-2 text-sm font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-              activeBoard === board.value ? 'bg-sky-500/80 text-slate-900' : 'border border-white/10 bg-white/5 text-slate-200',
-            )}
-          >
-            {board.label}
-          </button>
-        ))}
+      <div>
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-300">Top Players</p>
+          {updatedLabel ? (
+            <p className="text-[0.65rem] uppercase tracking-[0.24em] text-slate-500">Updated {updatedLabel}</p>
+          ) : null}
+        </div>
+        {topContent}
       </div>
-      <div className="space-y-2">
-        {entries.length === 0 ? (
-          <p className="text-sm text-slate-300">No scores yet. Play a run to populate this board.</p>
-        ) : (
-          entries.map((entry, index) => {
-            const highlighted =
-              activeHighlight &&
-              entry.score === activeHighlight.score &&
-              entry.combo === activeHighlight.combo &&
-              entry.streak === activeHighlight.streak;
-            return (
-              <div
-                key={`${entry.date}-${entry.score}-${index}`}
-                className={clsx(
-                  'flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3',
-                  highlighted && 'border-sky-400/70 bg-sky-500/10',
-                )}
-              >
-                <div>
-                  <p className="text-base font-semibold text-slate-100">{entry.score}</p>
-                  <p className="text-xs text-slate-300">Combo ×{entry.combo} · Streak {entry.streak}</p>
-                </div>
-                <p className="text-xs text-slate-400">{new Date(entry.date).toLocaleString()}</p>
-              </div>
-            );
-          })
-        )}
+      <div className="rounded-2xl border border-indigo-400/40 bg-indigo-500/10 p-4 text-center">
+        <p className="text-xs uppercase tracking-[0.28em] text-indigo-100/80">Your Best</p>
+        <p className="mt-1 text-2xl font-semibold text-white">{bestValue}</p>
+        <p className="mt-2 text-xs text-indigo-100/70">
+          {normalizedWallet
+            ? `Tracking for ${walletLabel}`
+            : snapshot.disabled
+              ? 'Leaderboard disabled.'
+              : 'Connect a wallet to track your rank.'}
+        </p>
       </div>
-      {activeHighlight ? (
+      {highlight && shareHref ? (
         <a
           href={shareHref}
           target="_blank"
@@ -376,7 +394,16 @@ function StatsView({ stats }: { stats: LifetimeStats }) {
   );
 }
 
-export default function Drawer({ open, view, onClose, onSelect, highlight, lifetimeStats, onShowTutorial }: DrawerProps) {
+export default function Drawer({
+  open,
+  view,
+  onClose,
+  onSelect,
+  highlight,
+  lifetimeStats,
+  onShowTutorial,
+  leaderboardRefreshToken = 0,
+}: DrawerProps) {
   return (
     <AnimatePresence>
       {open ? (
@@ -426,7 +453,13 @@ export default function Drawer({ open, view, onClose, onSelect, highlight, lifet
               <div className="drawer-content mt-5 h-[calc(100%-88px)] overflow-y-auto pr-1">
                 {view === 'missions' ? <MissionsView /> : null}
                 {view === 'shop' ? <ShopView /> : null}
-                {view === 'leaderboard' ? <LeaderboardView highlight={highlight} /> : null}
+                {view === 'leaderboard' ? (
+                  <LeaderboardView
+                    highlight={highlight}
+                    open={open && view === 'leaderboard'}
+                    refreshToken={leaderboardRefreshToken}
+                  />
+                ) : null}
                 {view === 'howto' ? <HowToView onShowTutorial={onShowTutorial} /> : null}
                 {view === 'stats' ? <StatsView stats={lifetimeStats} /> : null}
               </div>

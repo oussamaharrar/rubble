@@ -1,9 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import clsx from 'clsx';
 import Modal from './Modal';
-import { getBoard, shareUrl, type LeaderboardEntry } from '@/lib/leaderboard';
+import { shareUrl } from '@/lib/leaderboard';
 import type { BoardKind } from '@/types/game';
+import { useWalletStore } from '@/lib/wallet-store';
+import { normalizeAddress, shortenAddress } from '@/lib/address';
+import { useLeaderboardSnapshot } from '@/lib/hooks/use-leaderboard-snapshot';
 
 interface LeaderboardModalProps {
   open: boolean;
@@ -15,17 +19,14 @@ interface LeaderboardModalProps {
     streak: number;
     dailyKey?: string;
   } | null;
+  refreshToken?: number;
 }
 
-const BOARDS: { label: string; value: BoardKind }[] = [
-  { label: 'Normal', value: 'normal' },
-  { label: 'Daily', value: 'daily' },
-];
-
-function formatDate(value: string) {
+function formatUpdatedAt(value: string | null) {
+  if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return value;
+    return null;
   }
   return parsed.toLocaleString(undefined, {
     month: 'short',
@@ -35,43 +36,24 @@ function formatDate(value: string) {
   });
 }
 
-export default function LeaderboardModal({ open, onClose, highlight }: LeaderboardModalProps) {
-  const [activeBoard, setActiveBoard] = useState<BoardKind>('normal');
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+function Spinner() {
+  return (
+    <div className="flex justify-center py-6" data-testid="leaderboard-spinner">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" />
+    </div>
+  );
+}
 
-  useEffect(() => {
-    if (!open) return;
-    setEntries(getBoard(activeBoard));
-  }, [open, activeBoard]);
-
-  useEffect(() => {
-    if (!highlight) return;
-    setActiveBoard(highlight.board);
-  }, [highlight]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleStorage = () => {
-      setEntries(getBoard(activeBoard));
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [open, activeBoard]);
-
-  const activeHighlight = useMemo(() => {
-    if (!highlight) return null;
-    if (highlight.board !== activeBoard) return null;
-    return highlight;
-  }, [activeBoard, highlight]);
+export default function LeaderboardModal({ open, onClose, highlight, refreshToken = 0 }: LeaderboardModalProps) {
+  const walletAddress = useWalletStore((state) => state.address);
+  const normalizedWallet = useMemo(() => normalizeAddress(walletAddress ?? undefined), [walletAddress]);
+  const walletLabel = useMemo(() => shortenAddress(normalizedWallet ?? ''), [normalizedWallet]);
+  const snapshot = useLeaderboardSnapshot({ enabled: open, address: walletAddress, refreshToken });
 
   const shareTarget = useMemo(() => {
-    if (activeHighlight) {
-      return activeHighlight;
-    }
-    const [first] = entries;
-    if (!first) return null;
-    return { board: activeBoard, score: first.score, combo: first.combo, streak: first.streak, dailyKey: first.dailyKey };
-  }, [activeBoard, activeHighlight, entries]);
+    if (!highlight) return null;
+    return highlight;
+  }, [highlight]);
 
   const shareHref = useMemo(() => {
     if (!shareTarget) return '';
@@ -81,6 +63,9 @@ export default function LeaderboardModal({ open, onClose, highlight }: Leaderboa
     composer.searchParams.set('text', `${castText}\n${url}`);
     return composer.toString();
   }, [shareTarget]);
+
+  const bestValue = snapshot.bestLoading ? 'Loading…' : snapshot.bestScore ?? (snapshot.disabled ? 'Disabled' : '—');
+  const updatedLabel = formatUpdatedAt(snapshot.topUpdatedAt);
 
   return (
     <Modal
@@ -97,52 +82,68 @@ export default function LeaderboardModal({ open, onClose, highlight }: Leaderboa
         </button>
       }
     >
-      <div className="mb-4 flex gap-2">
-        {BOARDS.map((board) => (
-          <button
-            key={board.value}
-            type="button"
-            onClick={() => setActiveBoard(board.value)}
-            className={`flex-1 rounded-2xl px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
-              activeBoard === board.value ? 'bg-sky-500/70 text-slate-900' : 'bg-white/5 text-slate-200'
-            }`}
-          >
-            {board.label}
-          </button>
-        ))}
-      </div>
-      <div className="space-y-2">
-        {entries.length === 0 ? (
-          <p className="text-sm text-slate-300">No scores yet. Play a run to populate this board.</p>
-        ) : (
-          entries.map((entry, index) => (
-            <div
-              key={`${entry.date}-${entry.score}-${index}`}
-              className={`flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm ${
-                activeHighlight && entry.score === activeHighlight.score && entry.combo === activeHighlight.combo && entry.streak === activeHighlight.streak
-                  ? 'border-sky-400/70 bg-sky-500/10'
-                  : ''
-              }`}
-            >
-              <div>
-                <p className="text-base font-semibold text-slate-100">{entry.score}</p>
-                <p className="text-xs text-slate-300">Combo ×{entry.combo} · Streak {entry.streak}</p>
-              </div>
-              <p className="text-xs text-slate-400">{formatDate(entry.date)}</p>
+      <div className="space-y-4">
+        <section>
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-300">Top Players</p>
+            {updatedLabel ? <p className="text-[0.65rem] uppercase tracking-[0.24em] text-slate-500">Updated {updatedLabel}</p> : null}
+          </div>
+          {snapshot.topLoading ? (
+            <Spinner />
+          ) : snapshot.topItems.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {snapshot.topItems.slice(0, 50).map((entry, index) => {
+                const normalizedEntry = normalizeAddress(entry.address);
+                const isYou = normalizedWallet && normalizedEntry === normalizedWallet;
+                return (
+                  <div
+                    key={`${entry.address}-${index}`}
+                    className={clsx(
+                      'flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm',
+                      isYou && 'border-sky-400/70 bg-sky-500/10'
+                    )}
+                  >
+                    <div>
+                      <p className="text-base font-semibold text-slate-100">{index + 1}. {entry.bestScore}</p>
+                      <p className="text-xs text-slate-300">{isYou ? 'You' : shortenAddress(normalizedEntry ?? entry.address)}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))
-        )}
+          ) : (
+            <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+              <p className="font-semibold text-slate-100">Your Rank Only</p>
+              <p className="mt-1 text-xs text-slate-300/80">
+                Global placements are warming up. Keep chasing your personal best and we’ll sync the full leaderboard soon.
+              </p>
+            </div>
+          )}
+        </section>
+        <section className="rounded-2xl border border-indigo-400/40 bg-indigo-500/10 p-4 text-center">
+          <p className="text-xs uppercase tracking-[0.28em] text-indigo-100/80">Your Best</p>
+          <p className="mt-1 text-3xl font-semibold text-white" data-testid="best-score-value">
+            {bestValue}
+          </p>
+          <p className="mt-2 text-xs text-indigo-100/70">
+            {normalizedWallet
+              ? `Tracking for ${walletLabel}`
+              : snapshot.disabled
+                ? 'Leaderboard disabled.'
+                : 'Connect a wallet to track your rank.'}
+          </p>
+        </section>
+        {shareTarget && shareHref ? (
+          <a
+            href={shareHref}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-purple-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
+          >
+            Share to Farcaster
+          </a>
+        ) : null}
       </div>
-      {shareTarget && shareHref ? (
-        <a
-          href={shareHref}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-purple-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-200"
-        >
-          Share to Farcaster
-        </a>
-      ) : null}
     </Modal>
   );
 }
