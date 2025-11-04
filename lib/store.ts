@@ -856,7 +856,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     };
   };
 
-  const hitGoldenOrb = (source: 'tap' | 'burst', position?: { x: number; y: number }) => {
+  const hitGoldenOrb = (_source: 'tap' | 'burst', position?: { x: number; y: number }) => {
     const state = get();
     if (!state.golden.active) {
       return { hit: false, toxic: false };

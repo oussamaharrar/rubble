@@ -27,9 +27,9 @@ test.describe('leaderboard submit flow', () => {
       });
     });
 
-    let submitPayload: Record<string, unknown> | null = null;
+    let submitPayload: { score?: unknown } | null = null;
     await page.route('**/api/leaderboard/submit', async (route) => {
-      submitPayload = route.request().postDataJSON() as Record<string, unknown>;
+      submitPayload = route.request().postDataJSON() as { score?: unknown };
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -81,7 +81,8 @@ test.describe('leaderboard submit flow', () => {
     await expect(bestValue).toHaveText('180');
 
     expect(submitPayload).not.toBeNull();
-    expect(submitPayload?.score).toBe(180);
+    const payload = (submitPayload ?? {}) as { score?: unknown };
+    expect(payload.score).toBe(180);
     expect(leaderboardMeCalls).toBeGreaterThanOrEqual(2);
   });
 });

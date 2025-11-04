@@ -1,6 +1,6 @@
 'use client';
 
-import * as miniAppSdk from '@farcaster/miniapp-sdk';
+import sdk from '@farcaster/miniapp-sdk';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
@@ -26,15 +26,20 @@ import type { EntryMode } from '@/types/game';
 import { getSiteConfig } from '@/lib/site-config';
 import { useDailyRewardStore } from '@/lib/stores/daily-reward';
 import { useRewardBoostStore } from '@/lib/stores/reward-boost';
+import { fetchWhoAmI } from '@/lib/client/farcaster';
+import { useFarcasterIdentityStore } from '@/lib/stores/farcaster-identity';
+import { isDisallowed } from '@/lib/wallet/providerFilter';
 
 type ScreenState = 'home' | 'playing' | 'paused';
 
-function resolveMiniAppSdk() {
-  const candidate = miniAppSdk as unknown as {
-    sdk?: typeof miniAppSdk.sdk;
-    default?: typeof miniAppSdk.sdk;
-  };
-  return candidate.sdk ?? candidate.default ?? null;
+type MiniAppCandidate = typeof sdk | null;
+
+function resolveMiniAppSdk(): MiniAppCandidate {
+  try {
+    return sdk ?? null;
+  } catch {
+    return null;
+  }
 }
 
 type EntryExperienceProps = {
@@ -44,11 +49,7 @@ type EntryExperienceProps = {
   referrerAddress?: string;
 };
 
-type FarcasterProfile = {
-  username?: string | null;
-  displayName?: string | null;
-  pfpUrl?: string | null;
-};
+type EntryPhase = 'initial' | 'fc-auth' | 'wallet-link' | 'ready';
 
 const SCREEN_DURATION = 0.24;
 const SCREEN_EASE: [number, number, number, number] = [0.22, 0.88, 0.22, 1];
@@ -269,8 +270,7 @@ export default function EntryExperience({
 
   useEffect(() => {
     try {
-      const sdkInstance = resolveMiniAppSdk();
-      void sdkInstance?.actions?.ready?.();
+      void sdk.actions.ready?.();
     } catch {
       // ignore sdk issues outside Farcaster
     }
@@ -282,7 +282,20 @@ export default function EntryExperience({
   const [showSettings, setShowSettings] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [farcasterProfile, setFarcasterProfile] = useState<FarcasterProfile | null>(null);
+  const farcasterIdentity = useFarcasterIdentityStore((state) => state.identity);
+  const farcasterStatus = useFarcasterIdentityStore((state) => state.status);
+  const setFarcasterIdentity = useFarcasterIdentityStore((state) => state.setIdentity);
+  const setFarcasterStatus = useFarcasterIdentityStore((state) => state.setStatus);
+  const resetFarcasterIdentity = useFarcasterIdentityStore((state) => state.reset);
+  const [entryPhase, setEntryPhase] = useState<EntryPhase>('initial');
+  const [isFarcasterContext, setIsFarcasterContext] = useState(false);
+  const [blockedProviderInfo, setBlockedProviderInfo] = useState<{ rdns?: string | null; name?: string | null } | null>(null);
+  const [unknownProviderPending, setUnknownProviderPending] = useState(false);
+  const [availableProviders, setAvailableProviders] = useState<
+    Array<{ rdns?: string | null; name?: string | null }>
+  >([]);
+  const providerInfoRef = useRef<{ rdns?: string | null; name?: string | null } | null>(null);
+  const whoAmILogRef = useRef<'none' | 'success' | 'missing'>('none');
   const [tickets, setTickets] = useState<number>(() => readStoredTickets());
   const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
   const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
@@ -551,26 +564,57 @@ export default function EntryExperience({
     [rememberedAddress, walletAddress]
   );
   const farcasterDisplayName = useMemo(() => {
-    if (!farcasterProfile) return null;
-    const name = farcasterProfile.displayName?.trim();
+    if (!farcasterIdentity) return null;
+    const name = farcasterIdentity.displayName?.trim();
     if (name && name.length > 0) {
       return name;
     }
-    const username = farcasterProfile.username?.trim().replace(/^@/, '');
+    const username = farcasterIdentity.username?.trim().replace(/^@/, '');
     if (username && username.length > 0) {
       return `@${username}`;
     }
     return null;
-  }, [farcasterProfile]);
+  }, [farcasterIdentity]);
   const farcasterHandle = useMemo(() => {
-    if (!farcasterProfile?.username) return null;
-    const handle = farcasterProfile.username.trim().replace(/^@/, '');
+    if (!farcasterIdentity?.username) return null;
+    const handle = farcasterIdentity.username.trim().replace(/^@/, '');
     return handle.length > 0 ? `@${handle}` : null;
-  }, [farcasterProfile]);
+  }, [farcasterIdentity]);
   const leaderboardIdentityLabel = useMemo(
     () => farcasterDisplayName ?? farcasterHandle ?? shortAddress,
     [farcasterDisplayName, farcasterHandle, shortAddress],
   );
+  const farcasterStatusMessage = useMemo(() => {
+    if (farcasterStatus === 'loading') {
+      return 'Verifying your Farcaster identity…';
+    }
+    if (farcasterStatus === 'error') {
+      return "We couldn’t verify your Farcaster session.";
+    }
+    if (farcasterStatus === 'ready') {
+      return 'Farcaster linked.';
+    }
+    return 'Connect your Farcaster to continue.';
+  }, [farcasterStatus]);
+  const recommendedWallets = useMemo(() => {
+    const discovered = availableProviders
+      .map((provider) => provider.name ?? provider.rdns ?? null)
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.replace(/^https?:\/\//, ''))
+      .filter((value, index, array) => array.indexOf(value) === index)
+      .slice(0, 6);
+    if (discovered.length > 0) {
+      return discovered;
+    }
+    return ['MetaMask', 'Coinbase Wallet', 'OKX Wallet', 'Rabby', 'Rainbow'];
+  }, [availableProviders]);
+  const blockedWalletLabel = useMemo(() => {
+    const label = blockedProviderInfo?.name ?? blockedProviderInfo?.rdns ?? null;
+    if (!label) {
+      return 'embedded wallet';
+    }
+    return label;
+  }, [blockedProviderInfo]);
   const showIdentityChip = walletConnected || (rememberFlag === 1 && Boolean(rememberedAddress));
   const checkingWallet = !showIdentityChip && (!hydrated || (rememberFlag === 1 && !walletReady));
   const normalizedReferrer = useMemo(() => (referrerAddress ? normalizeAddress(referrerAddress) ?? null : null), [referrerAddress]);
@@ -598,6 +642,40 @@ export default function EntryExperience({
     []
   );
 
+  const readProviderInfo = useCallback(async () => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    const provider = window.ethereum as (typeof window.ethereum) & {
+      meta?: { name?: string | null };
+      name?: string | null;
+      rdns?: string | null;
+    };
+    if (!provider?.request) {
+      return null;
+    }
+    try {
+      const response = (await provider.request({ method: 'wallet_getProviderInfo' })) as
+        | { rdns?: unknown; name?: unknown }
+        | null;
+      const rdns = typeof response?.rdns === 'string' ? response.rdns : null;
+      const name = typeof response?.name === 'string' ? response.name : null;
+      if (rdns || name) {
+        return { rdns, name };
+      }
+    } catch (error) {
+      console.debug('[wallet] provider info unavailable', error);
+    }
+    const fallbackRdns = typeof provider?.rdns === 'string' ? provider.rdns : null;
+    const fallbackName = typeof provider?.name === 'string' ? provider.name : null;
+    const metaName = typeof provider?.meta?.name === 'string' ? provider.meta.name : null;
+    const name = fallbackName ?? metaName ?? null;
+    if (fallbackRdns || name) {
+      return { rdns: fallbackRdns, name };
+    }
+    return { rdns: null, name: null };
+  }, []);
+
   useEffect(() => {
     setHydrated(true);
     setRememberFlag(readRememberedFlag());
@@ -621,43 +699,151 @@ export default function EntryExperience({
 
   useEffect(() => {
     if (typeof window === 'undefined') {
+      setIsFarcasterContext(false);
       return;
     }
     const sdkInstance = resolveMiniAppSdk();
-    if (!sdkInstance) {
+    const quickFlag = Boolean((window as typeof window & { FarcasterMiniApp?: unknown }).FarcasterMiniApp);
+    if (quickFlag) {
+      setIsFarcasterContext(true);
+    }
+    if (!sdkInstance?.isInMiniApp) {
+      if (!quickFlag) {
+        setIsFarcasterContext(false);
+      }
+      if (entryPhase === 'initial') {
+        setEntryPhase('ready');
+      }
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const inMiniApp = await sdkInstance.isInMiniApp?.().catch(() => false);
-        if (!inMiniApp || cancelled) {
-          return;
-        }
-        let context: unknown = null;
-        try {
-          context = await sdkInstance.context;
-        } catch {
-          context = null;
-        }
+        const inMiniApp = await sdkInstance.isInMiniApp?.().catch(() => quickFlag);
         if (cancelled) {
           return;
         }
-        const castContext = context as { user?: { username?: string | null; displayName?: string | null; pfpUrl?: string | null } } | null;
-        if (!castContext?.user) {
+        const active = Boolean(inMiniApp || quickFlag);
+        setIsFarcasterContext(active);
+        if (!active && entryPhase === 'initial') {
+          setEntryPhase('ready');
+        }
+      } catch {
+        if (cancelled) {
           return;
         }
-        setFarcasterProfile({
-          username: castContext.user.username ?? null,
-          displayName: castContext.user.displayName ?? null,
-          pfpUrl: castContext.user.pfpUrl ?? null,
-        });
-      } catch {
-        // ignore SDK failures outside Farcaster
+        if (!quickFlag) {
+          setIsFarcasterContext(false);
+          if (entryPhase === 'initial') {
+            setEntryPhase('ready');
+          }
+        }
       }
     })();
     return () => {
       cancelled = true;
+    };
+  }, [entryPhase]);
+
+  const runWhoAmI = useCallback(async () => {
+    setFarcasterStatus('loading');
+    const identity = await fetchWhoAmI();
+    if (identity) {
+      setFarcasterIdentity({
+        fid: identity.fid,
+        username: identity.username,
+        displayName: identity.displayName,
+        pfpUrl: identity.pfpUrl,
+      });
+      setFarcasterStatus('ready');
+      if (whoAmILogRef.current !== 'success') {
+        logEvent('fc_whoami_success', {
+          fid: identity.fid,
+          username: identity.username ?? null,
+        });
+        whoAmILogRef.current = 'success';
+      }
+    } else {
+      setFarcasterStatus('error', 'missing');
+      if (whoAmILogRef.current !== 'missing') {
+        logEvent('fc_whoami_missing');
+        whoAmILogRef.current = 'missing';
+      }
+    }
+  }, [setFarcasterIdentity, setFarcasterStatus]);
+
+  useEffect(() => {
+    if (!isFarcasterContext) {
+      if (farcasterStatus !== 'idle') {
+        setFarcasterStatus('idle');
+      }
+      if (entryPhase !== 'ready') {
+        setEntryPhase('ready');
+      }
+      if (farcasterIdentity) {
+        resetFarcasterIdentity();
+      }
+      whoAmILogRef.current = 'none';
+      return;
+    }
+    if (farcasterIdentity) {
+      return;
+    }
+    if (farcasterStatus !== 'idle') {
+      return;
+    }
+    void runWhoAmI();
+  }, [
+    entryPhase,
+    farcasterIdentity,
+    farcasterStatus,
+    isFarcasterContext,
+    resetFarcasterIdentity,
+    runWhoAmI,
+    setFarcasterStatus,
+  ]);
+
+  useEffect(() => {
+    if (!isFarcasterContext) {
+      return;
+    }
+    if (farcasterIdentity) {
+      if (walletAddress) {
+        setEntryPhase('ready');
+      } else {
+        setEntryPhase('wallet-link');
+      }
+      return;
+    }
+    setEntryPhase('fc-auth');
+  }, [farcasterIdentity, isFarcasterContext, walletAddress]);
+
+  useEffect(() => {
+    if (walletConnected) {
+      setBlockedProviderInfo(null);
+      setUnknownProviderPending(false);
+    }
+  }, [walletConnected, setBlockedProviderInfo, setUnknownProviderPending]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const providers = new Map<string, { rdns?: string | null; name?: string | null }>();
+    const handle = (event: Event) => {
+      const detail = (event as CustomEvent<{ info?: { rdns?: string | null; name?: string | null } }>).detail;
+      if (!detail?.info) {
+        return;
+      }
+      const info = detail.info;
+      const key = info.rdns ?? info.name ?? `provider-${providers.size}`;
+      providers.set(key, { rdns: info.rdns ?? null, name: info.name ?? null });
+      setAvailableProviders(Array.from(providers.values()));
+    };
+    window.addEventListener('eip6963:announceProvider', handle as EventListener);
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+    return () => {
+      window.removeEventListener('eip6963:announceProvider', handle as EventListener);
     };
   }, []);
 
@@ -1105,22 +1291,68 @@ export default function EntryExperience({
     }, 15000);
   }, [grantRewardBoost, handleToast, site.siteUrl]);
 
-  const attemptConnect = useCallback(async () => {
-    if (walletConnected) return;
-    if (typeof window === 'undefined') return;
-    if (!hasProvider || !window.ethereum) {
-      dispatchWalletModalOpen();
-      return;
-    }
-    try {
-      const address = await ensureBaseNetwork();
-      useWalletStore.getState().setWallet(address, BASE_CHAIN_ID_HEX);
-      updateRemember(address);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
-      handleToast(message);
-    }
-  }, [handleToast, hasProvider, updateRemember, walletConnected]);
+  const attemptConnect = useCallback(
+    async ({ override = false }: { override?: boolean } = {}) => {
+      if (walletConnected) return;
+      if (entryPhase === 'fc-auth') {
+        handleToast('Connect your Farcaster to continue');
+        return;
+      }
+      if (typeof window === 'undefined') return;
+      if (!hasProvider || !window.ethereum) {
+        dispatchWalletModalOpen();
+        return;
+      }
+      try {
+        if (!override) {
+          const info = await readProviderInfo();
+          providerInfoRef.current = info;
+          if (isDisallowed(info)) {
+            setBlockedProviderInfo(info);
+            setUnknownProviderPending(false);
+            handleToast('Please connect an external wallet (MetaMask, Coinbase Wallet, …)');
+            logEvent('wallet_disallowed_detected', {
+              rdns: info?.rdns ?? null,
+              name: info?.name ?? null,
+            });
+            return;
+          }
+          if (!info || (!info.rdns && !info.name)) {
+            setUnknownProviderPending(true);
+            setBlockedProviderInfo(null);
+            handleToast('We could not verify this wallet. Please choose an external wallet or override.');
+            return;
+          }
+          setBlockedProviderInfo(null);
+          setUnknownProviderPending(false);
+        } else {
+          const info = providerInfoRef.current;
+          logEvent('wallet_override_accept', {
+            rdns: info?.rdns ?? null,
+            name: info?.name ?? null,
+          });
+          setBlockedProviderInfo(null);
+          setUnknownProviderPending(false);
+        }
+        const address = await ensureBaseNetwork();
+        useWalletStore.getState().setWallet(address, BASE_CHAIN_ID_HEX);
+        updateRemember(address);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
+        handleToast(message);
+      }
+    },
+    [
+      entryPhase,
+      handleToast,
+      hasProvider,
+      readProviderInfo,
+      setBlockedProviderInfo,
+      setUnknownProviderPending,
+      updateRemember,
+      walletConnected,
+    ],
+  );
 
   const showGate = useCallback(
     (reason: string) => {
@@ -1477,9 +1709,35 @@ export default function EntryExperience({
                     </span>
                   ) : null}
                 </motion.button>
-                {showIdentityChip ? (
+                {entryPhase === 'fc-auth' ? (
+                  <div
+                    className="flex min-w-[240px] flex-col gap-2 rounded-3xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white shadow-xl shadow-cyan-500/10 backdrop-blur"
+                    data-testid="farcaster-auth-card"
+                  >
+                    <span className="text-xs font-semibold uppercase tracking-[0.34em] text-cyan-200/80">Farcaster</span>
+                    <p className="text-sm font-semibold tracking-[0.12em] text-white/90">{farcasterStatusMessage}</p>
+                    {farcasterStatus === 'error' ? (
+                      <p className="text-[0.7rem] font-medium normal-case tracking-normal text-rose-100/80">
+                        Open the mini-app from Warpcast or try again below.
+                      </p>
+                    ) : null}
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.26em] text-white/90 transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+                        onClick={() => {
+                          if (farcasterStatus !== 'loading') {
+                            void runWhoAmI();
+                          }
+                        }}
+                        disabled={farcasterStatus === 'loading'}
+                      >
+                        {farcasterStatus === 'loading' ? 'Checking…' : 'Retry'}
+                      </button>
+                    </div>
+                  </div>
+                ) : showIdentityChip ? (
                   <HeaderIdentityChip
-                    address={walletAddress ?? rememberedAddress ?? ''}
                     shortAddress={shortAddress}
                     bubbles={boosterOrbs}
                     onCopy={handleCopyAddress}
@@ -1488,7 +1746,7 @@ export default function EntryExperience({
                     background={identityGradient}
                     profileName={farcasterDisplayName}
                     profileHandle={farcasterHandle}
-                    profileAvatarUrl={farcasterProfile?.pfpUrl ?? null}
+                    profileAvatarUrl={farcasterIdentity?.pfpUrl ?? null}
                   />
                 ) : checkingWallet ? (
                   <div
@@ -1498,15 +1756,59 @@ export default function EntryExperience({
                     Checking wallet…
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    data-testid="connect-wallet-home"
-                    className={clsx(GLASS_BUTTON_CLASS, (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-50')}
-                    onClick={attemptConnect}
-                    disabled={!hasProvider || !walletReady}
-                  >
-                    {walletReady ? 'Connect Wallet' : 'Checking…'}
-                  </button>
+                  <div className="flex flex-col items-end gap-2">
+                    <button
+                      type="button"
+                      data-testid="connect-wallet-home"
+                      className={clsx(
+                        GLASS_BUTTON_CLASS,
+                        (!hasProvider || !walletReady || farcasterStatus === 'loading') && 'cursor-not-allowed opacity-50',
+                      )}
+                      onClick={() => attemptConnect()}
+                      disabled={!hasProvider || !walletReady || farcasterStatus === 'loading'}
+                    >
+                      {walletReady ? 'Connect Wallet' : 'Checking…'}
+                    </button>
+                    {blockedProviderInfo ? (
+                      <div className="max-w-xs rounded-2xl border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-left shadow-lg shadow-rose-500/20">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-rose-200/90">
+                          External wallet required
+                        </p>
+                        <p className="mt-1 text-[0.7rem] font-medium leading-snug text-rose-100/90">
+                          Please connect an external wallet ({recommendedWallets.join(', ')}).
+                        </p>
+                        <p className="mt-1 text-[0.68rem] font-medium leading-snug text-rose-100/80">
+                          Detected: {blockedWalletLabel} — blocked for Farcaster mini-apps.
+                        </p>
+                      </div>
+                    ) : null}
+                    {unknownProviderPending ? (
+                      <div className="max-w-xs rounded-2xl border border-amber-300/40 bg-amber-400/15 px-3 py-2 text-left shadow-lg shadow-amber-400/20">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-amber-200/90">
+                          Wallet brand not detected
+                        </p>
+                        <p className="mt-1 text-[0.7rem] leading-snug text-amber-100/90">
+                          Use an external wallet ({recommendedWallets.join(', ')}) or override if you trust this provider.
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.26em] text-white/90 transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+                            onClick={() => attemptConnect({ override: true })}
+                          >
+                            Use anyway
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-full border border-white/15 bg-transparent px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.26em] text-white/70 transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+                            onClick={dispatchWalletModalOpen}
+                          >
+                            Choose wallet
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 )}
               </div>
             </header>
@@ -1709,7 +2011,7 @@ export default function EntryExperience({
                           GLASS_BUTTON_CLASS,
                           (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-40'
                         )}
-                        onClick={attemptConnect}
+                        onClick={() => attemptConnect()}
                         disabled={!hasProvider || !walletReady}
                       >
                         {walletReady ? 'Connect Wallet' : 'Checking…'}
