@@ -21,11 +21,7 @@ test.describe('invite sharing rewards', () => {
     await page.addInitScript(() => {
       const originalOpen = window.open;
       (window as any).__originalOpen = originalOpen;
-      window.open = ((
-        _url?: string,
-        _target?: string,
-        _features?: string
-      ) => {
+      window.open = ((url?: string, target?: string, features?: string) => {
         const stub: any = { closed: false };
         setTimeout(() => {
           stub.closed = true;
@@ -64,7 +60,7 @@ test.describe('invite sharing rewards', () => {
       if (!rewardStore) return [];
       return rewardStore.getState().boosts.map((boost: any) => boost.source);
     });
-    expect(sources.filter((source: string) => source === 'invite').length).toBe(1);
+    expect(sources.filter((source) => source === 'invite').length).toBe(1);
 
     const shareKey = await page.evaluate(() => {
       const now = new Date();
@@ -81,6 +77,6 @@ test.describe('invite sharing rewards', () => {
       if (!rewardStore) return [];
       return rewardStore.getState().boosts.map((boost: any) => boost.source);
     });
-    expect(sourcesAfter.filter((source: string) => source === 'invite').length).toBe(1);
+    expect(sourcesAfter.filter((source) => source === 'invite').length).toBe(1);
   });
 });

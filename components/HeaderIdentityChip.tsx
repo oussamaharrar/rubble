@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 
 interface HeaderIdentityChipProps {
+  address: string;
   shortAddress: string;
   bubbles: number;
   onCopy: () => void;
@@ -16,6 +17,7 @@ interface HeaderIdentityChipProps {
 }
 
 export default function HeaderIdentityChip({
+  address,
   shortAddress,
   bubbles,
   onCopy,
@@ -67,10 +69,11 @@ export default function HeaderIdentityChip({
   const trimmedHandle = profileHandle?.trim();
   const hasProfile = Boolean(trimmedName || trimmedHandle);
   const primaryLabel = trimmedName ?? trimmedHandle ?? shortAddress;
-  const secondaryLabel = hasProfile && trimmedName && trimmedHandle ? trimmedHandle : null;
-  const ariaLabel = hasProfile
-    ? `Connected wallet ${shortAddress} linked to ${primaryLabel}`
-    : `Connected wallet ${shortAddress}`;
+  const secondaryLabel = hasProfile
+    ? trimmedName && trimmedHandle
+      ? trimmedHandle
+      : shortAddress
+    : null;
 
   return (
     <div className="relative">
@@ -80,7 +83,7 @@ export default function HeaderIdentityChip({
           'backdrop-blur-md focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-200'
         )}
         role="status"
-        aria-label={ariaLabel}
+        aria-label={`Connected wallet ${address}`}
         style={background ? { backgroundImage: background } : undefined}
       >
         {profileAvatarUrl ? (
@@ -118,11 +121,6 @@ export default function HeaderIdentityChip({
           <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-cyan-300" />
           {bubbleLabel}
         </span>
-        {hasProfile ? (
-          <span className="inline-flex min-h-[26px] items-center rounded-full border border-white/15 bg-black/30 px-3 text-[0.6rem] font-semibold uppercase tracking-[0.26em] text-white/75">
-            {shortAddress}
-          </span>
-        ) : null}
         <button
           ref={toggleButtonRef}
           type="button"
@@ -150,10 +148,10 @@ export default function HeaderIdentityChip({
           role="menuitem"
           data-menu-item
           className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.26em] text-white/90 transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
-            onClick={() => {
-              onCopy();
-              setMenuOpen(false);
-            }}
+          onClick={() => {
+            onCopy();
+            setMenuOpen(false);
+          }}
         >
           Copy address
         </button>
