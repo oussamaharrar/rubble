@@ -2,8 +2,6 @@ import type { Metadata } from 'next';
 import { Analytics } from '@vercel/analytics/react';
 import './globals.css';
 import '@/styles/mobile-frame.css';
-import { Providers } from '@/components/Providers';
-import MiniAppBoot from '@/components/MiniAppBoot';
 import { getSiteConfig } from '@/lib/site-config';
 
 const site = getSiteConfig();
@@ -50,11 +48,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="format-detection" content="telephone=no" />
       </head>
       <body className="bg-[#030712] text-slate-100 antialiased">
-        <Providers>
-          <MiniAppBoot />
-          <Analytics />
-          {children}
-        </Providers>
+        <Analytics />
+        {children}
       </body>
     </html>
   );
