@@ -6,6 +6,8 @@ import { PrimaryButton, GhostButton } from './Buttons';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
+import { ConnectWalletButton } from '@/components/ConnectWalletButton';
+import { useConnect } from 'wagmi';
 
 const STATUS_VARIANTS = {
   initial: { opacity: 0, y: -4 },
@@ -25,110 +27,21 @@ export default function WalletBar() {
   const address = useWalletStore((state) => state.address);
   const chainId = useWalletStore((state) => state.chainId);
   const setWallet = useWalletStore((state) => state.setWallet);
-  const setChainId = useWalletStore((state) => state.setChainId);
-  const resetWallet = useWalletStore((state) => state.reset);
 
-  const [connecting, setConnecting] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [hasProvider, setHasProvider] = useState(false);
+  const { connectors } = useConnect();
+  const hasConnector = connectors.length > 0;
 
   const normalisedChainId = normalizeChainId(chainId);
   const onBase = normalisedChainId === BASE_CHAIN_ID_HEX;
   const connected = Boolean(address);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const provider = window.ethereum as (typeof window.ethereum) & {
-      on?: (event: string, handler: (...args: unknown[]) => void) => void;
-      removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
-    };
-    if (!provider) {
-      setHasProvider(false);
-      return;
-    }
-    setHasProvider(true);
-
-    let cancelled = false;
-
-    const syncAccounts = async () => {
-      try {
-        const accounts = (await provider.request<string[]>({ method: 'eth_accounts' })) ?? [];
-        const [primary] = accounts;
-        const currentChain = await provider.request<string>({ method: 'eth_chainId' }).catch(() => null);
-        if (!cancelled) {
-          if (primary) {
-            setWallet(primary, normalizeChainId(currentChain));
-          } else {
-            resetWallet();
-          }
-        }
-      } catch (error) {
-        console.debug('Wallet sync failed', error);
-      }
-    };
-
-    void syncAccounts();
-
-    const handleAccountsChanged = (accounts: unknown) => {
-      if (!Array.isArray(accounts)) return;
-      const [primary] = accounts as string[];
-      if (primary) {
-        provider
-          .request<string>({ method: 'eth_chainId' })
-          .then((next) => setWallet(primary, normalizeChainId(next)))
-          .catch(() => setWallet(primary, normalizeChainId(null)));
-      } else {
-        resetWallet();
-      }
-    };
-
-    const handleChainChanged = (nextChainId: unknown) => {
-      if (typeof nextChainId !== 'string') return;
-      setChainId(normalizeChainId(nextChainId));
-    };
-
-    provider.on?.('accountsChanged', handleAccountsChanged);
-    provider.on?.('chainChanged', handleChainChanged);
-
-    return () => {
-      cancelled = true;
-      provider.removeListener?.('accountsChanged', handleAccountsChanged);
-      provider.removeListener?.('chainChanged', handleChainChanged);
-    };
-  }, [resetWallet, setChainId, setWallet]);
-
-  useEffect(() => {
     if (!statusMessage) return undefined;
     const timeout = window.setTimeout(() => setStatusMessage(null), 3500);
     return () => window.clearTimeout(timeout);
   }, [statusMessage]);
-
-  const handleConnect = useCallback(async () => {
-    if (connecting || switching) return;
-    if (typeof window === 'undefined' || !window.ethereum) {
-      setStatusMessage('No wallet detected. Install Coinbase Wallet or MetaMask.');
-      return;
-    }
-    try {
-      setConnecting(true);
-      dispatchWalletModalOpen();
-      const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
-      const [primary] = accounts;
-      const currentChain = await window.ethereum
-        .request<string>({ method: 'eth_chainId' })
-        .catch(() => null);
-      if (primary) {
-        setWallet(primary, normalizeChainId(currentChain));
-        setStatusMessage('Wallet connected.');
-      }
-    } catch (error) {
-      console.debug('Wallet connection rejected', error);
-      setStatusMessage('Wallet connection was cancelled.');
-    } finally {
-      setConnecting(false);
-    }
-  }, [connecting, switching, setWallet]);
 
   const handleSwitchNetwork = useCallback(async () => {
     if (switching) return;
@@ -149,8 +62,8 @@ export default function WalletBar() {
   }, [setWallet, switching]);
 
   const statusLabel = useMemo(() => {
-    if (!hasProvider) {
-      return 'Install a Base-compatible wallet to play.';
+    if (!hasConnector) {
+      return 'Open this mini-app in Warpcast to access the Farcaster wallet.';
     }
     if (!connected) {
       return 'Connect your wallet to unlock Base boosts.';
@@ -159,7 +72,7 @@ export default function WalletBar() {
       return 'Switch to Base Mainnet (chain 8453) to continue.';
     }
     return 'Ready on Base Mainnet.';
-  }, [connected, hasProvider, onBase]);
+  }, [connected, hasConnector, onBase]);
 
   return (
     <div className="flex w-full flex-col gap-2 rounded-3xl border border-white/10 bg-slate-900/60 p-4 shadow-inner shadow-black/20">
@@ -189,9 +102,9 @@ export default function WalletBar() {
             </GhostButton>
           ) : null}
           {!connected ? (
-            <PrimaryButton onClick={handleConnect} disabled={connecting || !hasProvider}>
-              {connecting ? 'Connecting…' : 'Connect Wallet'}
-            </PrimaryButton>
+            <ConnectWalletButton asChild>
+              <PrimaryButton disabled={!hasConnector}>Connect Wallet</PrimaryButton>
+            </ConnectWalletButton>
           ) : null}
         </div>
       </div>
