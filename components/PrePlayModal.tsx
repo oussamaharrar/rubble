@@ -1,14 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useConnect } from 'wagmi';
 import Modal from './Modal';
 import { PrimaryButton } from './Buttons';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWallet } from '@/lib/hooks/useWallet';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
-import { useWalletStore } from '@/lib/wallet-store';
 import { getDailyKeyUTC } from '@/lib/daily';
+import { ensureBaseNetwork } from '@/lib/base';
 
 const TRIAL_PREFIX = 'trial_used_';
 
@@ -46,50 +47,55 @@ interface PrePlayModalProps {
 
 export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalProps) {
   const { walletConnected } = useWallet();
-  const setWallet = useWalletStore((state) => state.setWallet);
   const grantPaidOrb = useGameStore((state) => state.grantOrbOnPaidEntry);
   const boardKind = useGameStore((state) => state.boardKind);
   const dailyEligible = useGameStore((state) => state.officialDailyEligible);
   const dailyRunCount = useGameStore((state) => state.dailyRunCount);
   const { payToPlay, loading, error, status, resetError } = useBoost();
+  const { connectAsync, connectors, status: connectStatus } = useConnect();
+  const farcasterConnector = useMemo(
+    () =>
+      connectors.find(
+        (connector) =>
+          connector.id?.toLowerCase().includes('farcaster') ||
+          connector.name?.toLowerCase().includes('farcaster')
+      ) ?? connectors[0] ?? null,
+    [connectors]
+  );
 
   const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState(false);
+  const connecting = connectStatus === 'pending';
+  const hasConnector = Boolean(farcasterConnector);
 
   useEffect(() => {
     if (open) {
       setTrialUnavailable(hasUsedTrial());
-      setConnectError(null);
+      setConnectError(hasConnector ? null : 'Open this mini-app in Farcaster to connect your wallet.');
       resetError();
     }
-  }, [open, resetError]);
+  }, [hasConnector, open, resetError]);
 
   const handleConnect = useCallback(async () => {
-    if (connecting) return;
-    if (typeof window === 'undefined' || !window.ethereum) {
-      setConnectError('No wallet detected. Install Coinbase Wallet or MetaMask.');
+    if (connecting) {
+      return;
+    }
+    if (!farcasterConnector) {
+      setConnectError('Open this mini-app in Farcaster to connect your wallet.');
       return;
     }
     try {
-      setConnecting(true);
       setConnectError(null);
       dispatchWalletModalOpen();
-      const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
-      const [primary] = accounts;
-      if (!primary) {
-        setConnectError('Wallet connection was cancelled.');
-        return;
+      await connectAsync({ connector: farcasterConnector });
+      if (typeof window !== 'undefined' && window.ethereum) {
+        await ensureBaseNetwork().catch(() => null);
       }
-      const chainId = await window.ethereum.request<string>({ method: 'eth_chainId' }).catch(() => null);
-      setWallet(primary, chainId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Wallet connection was cancelled.';
       setConnectError(message);
-    } finally {
-      setConnecting(false);
     }
-  }, [connecting, setWallet]);
+  }, [connectAsync, connecting, farcasterConnector]);
 
   const handleTrial = useCallback(() => {
     markTrialUsed();
@@ -156,7 +162,11 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
               </button>,
             ].filter(Boolean)
           : [
-              <PrimaryButton key="connect" onClick={handleConnect} disabled={connecting}>
+              <PrimaryButton
+                key="connect"
+                onClick={handleConnect}
+                disabled={connecting || !hasConnector}
+              >
                 {connecting ? 'Connecting…' : 'Connect Wallet'}
               </PrimaryButton>,
             ]

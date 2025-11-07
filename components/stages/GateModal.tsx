@@ -1,12 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useConnect } from 'wagmi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
 import { getDailyKeyUTC } from '@/lib/daily';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWalletStore } from '@/lib/wallet-store';
+import { ensureBaseNetwork } from '@/lib/base';
 import type { EntryMode } from '@/types/game';
 
 const TRIAL_PREFIX = 'trial_used_';
@@ -46,46 +48,51 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
   const officialDaily = useGameStore((state) => state.officialDailyEligible);
   const dailyRunCount = useGameStore((state) => state.dailyRunCount);
   const address = useWalletStore((state) => state.address);
-  const setWallet = useWalletStore((state) => state.setWallet);
+  const { connectAsync, connectors, status: connectStatus } = useConnect();
+  const farcasterConnector = useMemo(
+    () =>
+      connectors.find(
+        (connector) =>
+          connector.id?.toLowerCase().includes('farcaster') ||
+          connector.name?.toLowerCase().includes('farcaster')
+      ) ?? connectors[0] ?? null,
+    [connectors]
+  );
 
   const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
-  const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const connecting = connectStatus === 'pending';
+  const hasConnector = Boolean(farcasterConnector);
 
   const connected = Boolean(address);
 
   useEffect(() => {
     if (!open) return;
     setTrialUnavailable(hasUsedTrial());
-    setConnectError(null);
+    setConnectError(hasConnector ? null : 'Open this mini-app in Farcaster to connect your wallet.');
     resetError();
-  }, [open, resetError]);
+  }, [hasConnector, open, resetError]);
 
   const handleConnect = useCallback(async () => {
-    if (connecting) return;
-    if (typeof window === 'undefined' || !window.ethereum) {
-      setConnectError('No wallet detected. Install Coinbase Wallet or MetaMask.');
+    if (connecting) {
+      return;
+    }
+    if (!farcasterConnector) {
+      setConnectError('Open this mini-app in Farcaster to connect your wallet.');
       return;
     }
     try {
-      setConnecting(true);
       setConnectError(null);
       dispatchWalletModalOpen();
-      const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
-      const [primary] = accounts;
-      if (!primary) {
-        setConnectError('Wallet connection was cancelled.');
-        return;
+      await connectAsync({ connector: farcasterConnector });
+      if (typeof window !== 'undefined' && window.ethereum) {
+        await ensureBaseNetwork().catch(() => null);
       }
-      const chainId = await window.ethereum.request<string>({ method: 'eth_chainId' }).catch(() => null);
-      setWallet(primary, chainId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Wallet connection was cancelled.';
       setConnectError(message);
-    } finally {
-      setConnecting(false);
     }
-  }, [connecting, setWallet]);
+  }, [connectAsync, connecting, farcasterConnector]);
 
   const handleTrial = useCallback(() => {
     markTrialUsed();
@@ -152,8 +159,8 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
                 <button
                   type="button"
                   onClick={handleConnect}
-                  className="button-tap inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-                  disabled={connecting}
+                  className="button-tap inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={connecting || !hasConnector}
                 >
                   {connecting ? 'Connecting…' : 'Connect Wallet'}
                 </button>
