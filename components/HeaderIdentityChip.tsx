@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
+import { useFarcasterStore } from '@/lib/stores/farcaster';
 
 interface HeaderIdentityChipProps {
   address: string;
@@ -11,9 +12,6 @@ interface HeaderIdentityChipProps {
   onManage: () => void;
   onDisconnect?: () => void;
   background?: string;
-  profileName?: string | null;
-  profileHandle?: string | null;
-  profileAvatarUrl?: string | null;
 }
 
 export default function HeaderIdentityChip({
@@ -24,13 +22,11 @@ export default function HeaderIdentityChip({
   onManage,
   onDisconnect,
   background,
-  profileName,
-  profileHandle,
-  profileAvatarUrl,
 }: HeaderIdentityChipProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const farcasterIdentity = useFarcasterStore((state) => state.identity);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -65,15 +61,23 @@ export default function HeaderIdentityChip({
   }, [menuOpen]);
 
   const bubbleLabel = new Intl.NumberFormat().format(bubbles);
-  const trimmedName = profileName?.trim();
-  const trimmedHandle = profileHandle?.trim();
-  const hasProfile = Boolean(trimmedName || trimmedHandle);
-  const primaryLabel = trimmedName ?? trimmedHandle ?? shortAddress;
-  const secondaryLabel = hasProfile
-    ? trimmedName && trimmedHandle
-      ? trimmedHandle
-      : shortAddress
-    : null;
+  const profile = useMemo(() => {
+    const displayName = farcasterIdentity?.displayName?.trim();
+    const username = farcasterIdentity?.username?.trim().replace(/^@/, '');
+    const avatar = farcasterIdentity?.pfpUrl ?? null;
+    return {
+      displayName: displayName && displayName.length > 0 ? displayName : null,
+      username: username && username.length > 0 ? `@${username}` : null,
+      avatar: avatar && avatar.length > 0 ? avatar : null,
+    };
+  }, [farcasterIdentity]);
+  const hasProfile = Boolean(profile.displayName || profile.username);
+  const primaryLabel = profile.displayName ?? profile.username ?? shortAddress;
+  const showShortBadge = hasProfile && shortAddress && shortAddress !== primaryLabel;
+  const avatarUrl = profile.avatar;
+  const statusLabel = farcasterIdentity
+    ? `Connected wallet ${shortAddress}`
+    : `Connected wallet ${address}`;
 
   return (
     <div className="relative">
@@ -83,36 +87,30 @@ export default function HeaderIdentityChip({
           'backdrop-blur-md focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-200'
         )}
         role="status"
-        aria-label={`Connected wallet ${address}`}
+        aria-label={statusLabel}
         style={background ? { backgroundImage: background } : undefined}
       >
-        {profileAvatarUrl ? (
-          <span className="relative h-9 w-9 overflow-hidden rounded-full border border-white/25 bg-black/30">
+        {avatarUrl ? (
+          <span className="relative h-7 w-7 overflow-hidden rounded-full border border-white/20 bg-black/30">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={profileAvatarUrl}
+              src={avatarUrl}
               alt={`${primaryLabel} avatar`}
               className="h-full w-full object-cover"
               referrerPolicy="no-referrer"
             />
           </span>
         ) : null}
-        {hasProfile ? (
-          <div className="flex flex-col items-start leading-tight">
-            <span className="rounded-full bg-black/35 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/85">
-              {primaryLabel}
-            </span>
-            {secondaryLabel ? (
-              <span className="mt-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-white/60">
-                {secondaryLabel}
-              </span>
-            ) : null}
-          </div>
-        ) : (
+        <div className="flex flex-col items-start leading-tight">
           <span className="rounded-full bg-black/35 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/85">
             {primaryLabel}
           </span>
-        )}
+          {showShortBadge ? (
+            <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-black/30 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-white/60">
+              {shortAddress}
+            </span>
+          ) : null}
+        </div>
         <span
           className="inline-flex min-h-[28px] items-center gap-1 rounded-full bg-black/30 px-3 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100"
           aria-label={`Bubbles balance ${bubbleLabel}`}
