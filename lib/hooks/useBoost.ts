@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
-import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
 
 type UnknownRecord = Record<string, unknown>;
@@ -229,7 +228,6 @@ export function useBoost() {
         setLoading(true);
         setError(null);
         setStatus('Preparing Base entry…');
-        dispatchWalletModalOpen();
         const account = await ensureBaseNetwork();
         setWallet(account, BASE_CHAIN_ID_HEX);
         setStatus('Confirm in your wallet…');

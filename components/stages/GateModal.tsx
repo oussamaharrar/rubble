@@ -5,7 +5,6 @@ import { useConnect } from 'wagmi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
 import { getDailyKeyUTC } from '@/lib/daily';
-import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWalletStore } from '@/lib/wallet-store';
 import { ensureBaseNetwork } from '@/lib/base';
@@ -83,7 +82,6 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
     }
     try {
       setConnectError(null);
-      dispatchWalletModalOpen();
       await connectAsync({ connector: farcasterConnector });
       if (typeof window !== 'undefined' && window.ethereum) {
         await ensureBaseNetwork().catch(() => null);

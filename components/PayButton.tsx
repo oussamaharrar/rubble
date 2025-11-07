@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { formatUnits } from 'viem';
 import type { BoosterType } from '@/lib/game/types';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
-import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
 import { logEvent } from '@/lib/telemetry';
 
@@ -370,7 +369,6 @@ export default function PayButton({
       setIsSubmitting(true);
       setInfoMessage('Preparing Base checkout…');
 
-      dispatchWalletModalOpen();
       const account = await ensureBaseNetwork();
       setWallet(account, BASE_CHAIN_ID_HEX);
 

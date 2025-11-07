@@ -6,7 +6,6 @@ import Modal from './Modal';
 import { PrimaryButton } from './Buttons';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWallet } from '@/lib/hooks/useWallet';
-import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import { getDailyKeyUTC } from '@/lib/daily';
 import { ensureBaseNetwork } from '@/lib/base';
@@ -86,7 +85,6 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
     }
     try {
       setConnectError(null);
-      dispatchWalletModalOpen();
       await connectAsync({ connector: farcasterConnector });
       if (typeof window !== 'undefined' && window.ethereum) {
         await ensureBaseNetwork().catch(() => null);
