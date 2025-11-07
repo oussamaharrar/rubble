@@ -26,6 +26,8 @@ import type { EntryMode } from '@/types/game';
 import { getSiteConfig } from '@/lib/site-config';
 import { useDailyRewardStore } from '@/lib/stores/daily-reward';
 import { useRewardBoostStore } from '@/lib/stores/reward-boost';
+import { fetchWhoAmI } from '@/lib/client/farcaster';
+import { useFarcasterStore } from '@/lib/stores/farcaster';
 
 type ScreenState = 'home' | 'playing' | 'paused';
 
@@ -42,12 +44,6 @@ type EntryExperienceProps = {
   shareBoard?: 'daily' | 'normal';
   tagline?: string;
   referrerAddress?: string;
-};
-
-type FarcasterProfile = {
-  username?: string | null;
-  displayName?: string | null;
-  pfpUrl?: string | null;
 };
 
 const SCREEN_DURATION = 0.24;
@@ -282,7 +278,10 @@ export default function EntryExperience({
   const [showSettings, setShowSettings] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [farcasterProfile, setFarcasterProfile] = useState<FarcasterProfile | null>(null);
+  const farcasterIdentity = useFarcasterStore((state) => state.identity);
+  const setFarcasterIdentity = useFarcasterStore((state) => state.setIdentity);
+  const updateFarcasterIdentity = useFarcasterStore((state) => state.updateIdentity);
+  const [entryPhase, setEntryPhase] = useState<'fc-auth' | 'wallet-link' | 'gate' | 'play'>('fc-auth');
   const [tickets, setTickets] = useState<number>(() => readStoredTickets());
   const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
   const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
@@ -334,6 +333,18 @@ export default function EntryExperience({
   const stats = useGameStore((state) => state.stats);
   const walletAddress = useWalletStore((state) => state.address);
   const leaderboardAddress = walletAddress ?? rememberedAddress ?? null;
+  const walletConnected = Boolean(walletAddress);
+
+  useEffect(() => {
+    const nextPhase: 'fc-auth' | 'wallet-link' | 'gate' | 'play' = !farcasterIdentity
+      ? 'fc-auth'
+      : !walletConnected
+        ? 'wallet-link'
+        : screen === 'home'
+          ? 'gate'
+          : 'play';
+    setEntryPhase((prev) => (prev === nextPhase ? prev : nextPhase));
+  }, [farcasterIdentity, screen, walletConnected]);
 
   useEffect(() => {
     if (!showScoreboard) {
@@ -416,7 +427,6 @@ export default function EntryExperience({
     ]
   );
 
-  const walletConnected = Boolean(walletAddress);
   const boosterOrbs = useGameStore((state) => state.boosterBank.freeOrbs);
   const rewardBoosts = useRewardBoostStore((state) => state.boosts);
   const refreshBoosts = useRewardBoostStore((state) => state.refresh);
@@ -551,22 +561,20 @@ export default function EntryExperience({
     [rememberedAddress, walletAddress]
   );
   const farcasterDisplayName = useMemo(() => {
-    if (!farcasterProfile) return null;
-    const name = farcasterProfile.displayName?.trim();
+    const name = farcasterIdentity?.displayName?.trim();
     if (name && name.length > 0) {
       return name;
     }
-    const username = farcasterProfile.username?.trim().replace(/^@/, '');
+    const username = farcasterIdentity?.username?.trim().replace(/^@/, '');
     if (username && username.length > 0) {
       return `@${username}`;
     }
     return null;
-  }, [farcasterProfile]);
+  }, [farcasterIdentity]);
   const farcasterHandle = useMemo(() => {
-    if (!farcasterProfile?.username) return null;
-    const handle = farcasterProfile.username.trim().replace(/^@/, '');
-    return handle.length > 0 ? `@${handle}` : null;
-  }, [farcasterProfile]);
+    const username = farcasterIdentity?.username?.trim().replace(/^@/, '');
+    return username && username.length > 0 ? `@${username}` : null;
+  }, [farcasterIdentity]);
   const leaderboardIdentityLabel = useMemo(
     () => farcasterDisplayName ?? farcasterHandle ?? shortAddress,
     [farcasterDisplayName, farcasterHandle, shortAddress],
@@ -603,6 +611,25 @@ export default function EntryExperience({
     setRememberFlag(readRememberedFlag());
     setRememberedAddress(readRememberedAddress());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const me = await fetchWhoAmI();
+      if (cancelled || !me) {
+        return;
+      }
+      setFarcasterIdentity({
+        fid: me.fid,
+        username: me.username ?? null,
+        displayName: me.displayName ?? null,
+        pfpUrl: me.pfpUrl ?? null,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [setFarcasterIdentity]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -643,11 +670,13 @@ export default function EntryExperience({
         if (cancelled) {
           return;
         }
-        const castContext = context as { user?: { username?: string | null; displayName?: string | null; pfpUrl?: string | null } } | null;
+        const castContext = context as {
+          user?: { username?: string | null; displayName?: string | null; pfpUrl?: string | null };
+        } | null;
         if (!castContext?.user) {
           return;
         }
-        setFarcasterProfile({
+        updateFarcasterIdentity({
           username: castContext.user.username ?? null,
           displayName: castContext.user.displayName ?? null,
           pfpUrl: castContext.user.pfpUrl ?? null,
@@ -659,7 +688,7 @@ export default function EntryExperience({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [updateFarcasterIdentity]);
 
   useEffect(() => {
     if (!hydrated || typeof window === 'undefined') return;
@@ -1486,9 +1515,6 @@ export default function EntryExperience({
                     onManage={handleManageFromChip}
                     onDisconnect={handleDisconnect}
                     background={identityGradient}
-                    profileName={farcasterDisplayName}
-                    profileHandle={farcasterHandle}
-                    profileAvatarUrl={farcasterProfile?.pfpUrl ?? null}
                   />
                 ) : checkingWallet ? (
                   <div
@@ -1882,6 +1908,49 @@ export default function EntryExperience({
             </div>
           </div>
         </Modal>
+
+        {entryPhase === 'fc-auth' ? (
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/85 px-6">
+            <div
+              className="w-full max-w-sm rounded-3xl border border-white/15 bg-slate-950/85 p-6 text-center shadow-2xl"
+              data-testid="farcaster-auth-card"
+            >
+              <h2 className="text-2xl font-semibold">Link Farcaster to continue</h2>
+              <p className="mt-3 text-sm text-white/70">
+                Please open and authorize this mini-app in Farcaster to continue.
+              </p>
+              <p className="mt-4 text-xs uppercase tracking-[0.3em] text-white/40">Refresh after approving</p>
+            </div>
+          </div>
+        ) : null}
+
+        {entryPhase === 'wallet-link' ? (
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6">
+            <div
+              className="w-full max-w-sm rounded-3xl border border-white/15 bg-slate-950/85 p-6 text-center shadow-2xl"
+              data-testid="wallet-link-card"
+            >
+              <h2 className="text-2xl font-semibold">Connect your wallet</h2>
+              <p className="mt-3 text-sm text-white/70">
+                Farcaster linked. Connect any Base wallet to jump into the arcade.
+              </p>
+              <div className="mt-6 flex flex-col gap-3">
+                <button
+                  type="button"
+                  data-testid="wallet-link-connect"
+                  className={clsx(GLASS_BUTTON_CLASS, (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-50')}
+                  onClick={attemptConnect}
+                  disabled={!hasProvider || !walletReady}
+                >
+                  {walletReady ? 'Connect Wallet' : 'Checking…'}
+                </button>
+              </div>
+              <p className="mt-4 text-xs uppercase tracking-[0.25em] text-white/35">
+                Works with any Base-compatible wallet
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         <AnimatePresence>
           {toast ? (
