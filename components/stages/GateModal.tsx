@@ -4,10 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '@/lib/store';
 import { getDailyKeyUTC } from '@/lib/daily';
+import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWalletStore } from '@/lib/wallet-store';
-import { ConnectWalletButton } from '@/components/ConnectWalletButton';
-import { useConnect } from 'wagmi';
 import type { EntryMode } from '@/types/game';
 
 const TRIAL_PREFIX = 'trial_used_';
@@ -47,27 +46,46 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
   const officialDaily = useGameStore((state) => state.officialDailyEligible);
   const dailyRunCount = useGameStore((state) => state.dailyRunCount);
   const address = useWalletStore((state) => state.address);
+  const setWallet = useWalletStore((state) => state.setWallet);
 
   const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
-  const { connectors, error: connectError, status: connectStatus } = useConnect();
-  const hasConnector = connectors.length > 0;
-  const connectErrorMessage = useMemo(() => {
-    if (!hasConnector) {
-      return 'Open this mini-app in Warpcast to connect your Farcaster wallet.';
-    }
-    if (connectStatus === 'error' && connectError) {
-      return connectError.message;
-    }
-    return null;
-  }, [connectError, connectStatus, hasConnector]);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   const connected = Boolean(address);
 
   useEffect(() => {
     if (!open) return;
     setTrialUnavailable(hasUsedTrial());
+    setConnectError(null);
     resetError();
   }, [open, resetError]);
+
+  const handleConnect = useCallback(async () => {
+    if (connecting) return;
+    if (typeof window === 'undefined' || !window.ethereum) {
+      setConnectError('No wallet detected. Install Coinbase Wallet or MetaMask.');
+      return;
+    }
+    try {
+      setConnecting(true);
+      setConnectError(null);
+      dispatchWalletModalOpen();
+      const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
+      const [primary] = accounts;
+      if (!primary) {
+        setConnectError('Wallet connection was cancelled.');
+        return;
+      }
+      const chainId = await window.ethereum.request<string>({ method: 'eth_chainId' }).catch(() => null);
+      setWallet(primary, chainId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Wallet connection was cancelled.';
+      setConnectError(message);
+    } finally {
+      setConnecting(false);
+    }
+  }, [connecting, setWallet]);
 
   const handleTrial = useCallback(() => {
     markTrialUsed();
@@ -131,16 +149,16 @@ export default function GateModal({ open, onClose, onComplete }: GateModalProps)
                   Wallet connected · {address?.slice(0, 6)}…{address?.slice(-4)}
                 </div>
               ) : (
-                <ConnectWalletButton asChild>
-                  <button
-                    type="button"
-                    className="button-tap inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Connect Wallet
-                  </button>
-                </ConnectWalletButton>
+                <button
+                  type="button"
+                  onClick={handleConnect}
+                  className="button-tap inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-sky-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                  disabled={connecting}
+                >
+                  {connecting ? 'Connecting…' : 'Connect Wallet'}
+                </button>
               )}
-              {connectErrorMessage ? <p className="text-xs text-rose-200">{connectErrorMessage}</p> : null}
+              {connectError ? <p className="text-xs text-rose-200">{connectError}</p> : null}
             </div>
             <div className="mt-6 space-y-3">
               <button

@@ -15,7 +15,7 @@ interface HeaderIdentityChipProps {
 }
 
 export default function HeaderIdentityChip({
-  address: _address,
+  address,
   shortAddress,
   bubbles,
   onCopy,
@@ -75,7 +75,9 @@ export default function HeaderIdentityChip({
   const primaryLabel = profile.displayName ?? profile.username ?? shortAddress;
   const showShortBadge = hasProfile && shortAddress && shortAddress !== primaryLabel;
   const avatarUrl = profile.avatar;
-  const statusLabel = `Connected wallet ${shortAddress}`;
+  const statusLabel = farcasterIdentity
+    ? `Connected wallet ${shortAddress}`
+    : `Connected wallet ${address}`;
 
   return (
     <div className="relative">

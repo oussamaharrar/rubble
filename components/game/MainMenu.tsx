@@ -1,13 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import Image from 'next/image';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ConnectWalletButton } from '@/components/ConnectWalletButton';
-import { useConnect } from 'wagmi';
 
 interface MainMenuProps {
   onPlay: () => void;
+  onConnectWallet: () => Promise<void>;
   walletAddress?: string | null;
   boosterStore: React.ReactNode;
 }
@@ -17,20 +16,24 @@ function formatAddress(address?: string | null) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export default function MainMenu({ onPlay, walletAddress, boosterStore }: MainMenuProps) {
+export default function MainMenu({ onPlay, onConnectWallet, walletAddress, boosterStore }: MainMenuProps) {
   const [showHowTo, setShowHowTo] = useState(false);
-  const { connectors, status: connectStatus, error: connectError } = useConnect();
-  const hasConnector = connectors.length > 0;
-  const connecting = connectStatus === 'pending';
-  const connectErrorMessage = useMemo(() => {
-    if (!hasConnector) {
-      return 'Open this mini-app in Warpcast to connect your Farcaster wallet.';
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    setError(null);
+    try {
+      await onConnectWallet();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Failed to connect wallet';
+      setError(reason);
+    } finally {
+      setConnecting(false);
     }
-    if (connectStatus === 'error' && connectError) {
-      return connectError.message;
-    }
-    return null;
-  }, [connectError, connectStatus, hasConnector]);
+  };
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto bg-gradient-to-b from-midnight/60 via-midnight/40 to-midnight/80 p-6 text-sky-50">
@@ -54,33 +57,20 @@ export default function MainMenu({ onPlay, walletAddress, boosterStore }: MainMe
         >
           How to Play
         </button>
-        {walletAddress ? (
-          <div className="flex items-center justify-between rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-left text-sm font-semibold text-emerald-100">
-            <span>
-              Wallet Linked
-              <span className="block text-xs font-medium text-emerald-100/70">{formatAddress(walletAddress)}</span>
-            </span>
-            <span className="text-[0.7rem] uppercase tracking-[0.22em] text-emerald-100/70">
-              {connecting ? 'Linking…' : 'Base'}
-            </span>
-          </div>
-        ) : (
-          <ConnectWalletButton asChild>
-            <button
-              type="button"
-              className="flex items-center justify-between rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-left text-sm font-semibold text-emerald-100 transition hover:border-emerald-300/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span>
-                Connect Wallet
-                <span className="block text-xs font-medium text-emerald-100/70">{formatAddress(walletAddress)}</span>
-              </span>
-              <span className="text-[0.7rem] uppercase tracking-[0.22em] text-emerald-100/70">
-                {connecting ? 'Linking…' : 'Base'}
-              </span>
-            </button>
-          </ConnectWalletButton>
-        )}
-        {connectErrorMessage && <p className="text-xs text-rose-200/90">{connectErrorMessage}</p>}
+        <button
+          type="button"
+          onClick={handleConnect}
+          className="flex items-center justify-between rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-left text-sm font-semibold text-emerald-100 transition hover:border-emerald-300/60 hover:text-white"
+        >
+          <span>
+            Connect Wallet
+            <span className="block text-xs font-medium text-emerald-100/70">{formatAddress(walletAddress)}</span>
+          </span>
+          <span className="text-[0.7rem] uppercase tracking-[0.22em] text-emerald-100/70">
+            {connecting ? 'Linking…' : 'Base'}
+          </span>
+        </button>
+        {error && <p className="text-xs text-rose-200/90">{error}</p>}
       </div>
 
       <section className="holo-card space-y-3">

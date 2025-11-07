@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Modal from './Modal';
 import { PrimaryButton } from './Buttons';
-import { ConnectWalletButton } from '@/components/ConnectWalletButton';
 import { useBoost } from '@/lib/hooks/useBoost';
 import { useWallet } from '@/lib/hooks/useWallet';
+import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
+import { useWalletStore } from '@/lib/wallet-store';
 import { getDailyKeyUTC } from '@/lib/daily';
-import { useConnect } from 'wagmi';
 
 const TRIAL_PREFIX = 'trial_used_';
 
@@ -46,6 +46,7 @@ interface PrePlayModalProps {
 
 export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalProps) {
   const { walletConnected } = useWallet();
+  const setWallet = useWalletStore((state) => state.setWallet);
   const grantPaidOrb = useGameStore((state) => state.grantOrbOnPaidEntry);
   const boardKind = useGameStore((state) => state.boardKind);
   const dailyEligible = useGameStore((state) => state.officialDailyEligible);
@@ -53,24 +54,42 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
   const { payToPlay, loading, error, status, resetError } = useBoost();
 
   const [trialUnavailable, setTrialUnavailable] = useState(() => hasUsedTrial());
-  const { connectors, error: connectError, status: connectStatus } = useConnect();
-  const hasConnector = connectors.length > 0;
-  const connectErrorMessage = useMemo(() => {
-    if (!hasConnector) {
-      return 'Open this mini-app in Warpcast to connect your Farcaster wallet.';
-    }
-    if (connectStatus === 'error' && connectError) {
-      return connectError.message;
-    }
-    return null;
-  }, [connectError, connectStatus, hasConnector]);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     if (open) {
       setTrialUnavailable(hasUsedTrial());
+      setConnectError(null);
       resetError();
     }
   }, [open, resetError]);
+
+  const handleConnect = useCallback(async () => {
+    if (connecting) return;
+    if (typeof window === 'undefined' || !window.ethereum) {
+      setConnectError('No wallet detected. Install Coinbase Wallet or MetaMask.');
+      return;
+    }
+    try {
+      setConnecting(true);
+      setConnectError(null);
+      dispatchWalletModalOpen();
+      const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
+      const [primary] = accounts;
+      if (!primary) {
+        setConnectError('Wallet connection was cancelled.');
+        return;
+      }
+      const chainId = await window.ethereum.request<string>({ method: 'eth_chainId' }).catch(() => null);
+      setWallet(primary, chainId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Wallet connection was cancelled.';
+      setConnectError(message);
+    } finally {
+      setConnecting(false);
+    }
+  }, [connecting, setWallet]);
 
   const handleTrial = useCallback(() => {
     markTrialUsed();
@@ -137,16 +156,16 @@ export default function PrePlayModal({ open, onClose, onStart }: PrePlayModalPro
               </button>,
             ].filter(Boolean)
           : [
-              <ConnectWalletButton asChild key="connect">
-                <PrimaryButton>Connect Wallet</PrimaryButton>
-              </ConnectWalletButton>,
+              <PrimaryButton key="connect" onClick={handleConnect} disabled={connecting}>
+                {connecting ? 'Connecting…' : 'Connect Wallet'}
+              </PrimaryButton>,
             ]
       }
     >
       <p>{description}</p>
       {status ? <p className="text-xs text-sky-200">{status}</p> : null}
       {error ? <p className="text-xs text-rose-200">{error}</p> : null}
-      {connectErrorMessage ? <p className="text-xs text-rose-200">{connectErrorMessage}</p> : null}
+      {connectError ? <p className="text-xs text-rose-200">{connectError}</p> : null}
       {dailyStatus ? <p className="text-xs text-amber-200">{dailyStatus}</p> : null}
       <p className="text-xs text-slate-300">
         Paid entries grant +1 Energy Orb instantly. Free trials refresh daily at 00:00 UTC.
