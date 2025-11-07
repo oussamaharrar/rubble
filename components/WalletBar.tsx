@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useConnect } from 'wagmi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PrimaryButton, GhostButton } from './Buttons';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
@@ -25,78 +26,24 @@ export default function WalletBar() {
   const address = useWalletStore((state) => state.address);
   const chainId = useWalletStore((state) => state.chainId);
   const setWallet = useWalletStore((state) => state.setWallet);
-  const setChainId = useWalletStore((state) => state.setChainId);
-  const resetWallet = useWalletStore((state) => state.reset);
-
-  const [connecting, setConnecting] = useState(false);
+  const { connectAsync, connectors, status: connectStatus } = useConnect();
+  const farcasterConnector = useMemo(
+    () =>
+      connectors.find(
+        (connector) =>
+          connector.id?.toLowerCase().includes('farcaster') ||
+          connector.name?.toLowerCase().includes('farcaster')
+      ) ?? connectors[0] ?? null,
+    [connectors]
+  );
+  const connecting = connectStatus === 'pending';
+  const hasProvider = connectors.length > 0;
   const [switching, setSwitching] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [hasProvider, setHasProvider] = useState(false);
 
   const normalisedChainId = normalizeChainId(chainId);
   const onBase = normalisedChainId === BASE_CHAIN_ID_HEX;
   const connected = Boolean(address);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const provider = window.ethereum as (typeof window.ethereum) & {
-      on?: (event: string, handler: (...args: unknown[]) => void) => void;
-      removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
-    };
-    if (!provider) {
-      setHasProvider(false);
-      return;
-    }
-    setHasProvider(true);
-
-    let cancelled = false;
-
-    const syncAccounts = async () => {
-      try {
-        const accounts = (await provider.request<string[]>({ method: 'eth_accounts' })) ?? [];
-        const [primary] = accounts;
-        const currentChain = await provider.request<string>({ method: 'eth_chainId' }).catch(() => null);
-        if (!cancelled) {
-          if (primary) {
-            setWallet(primary, normalizeChainId(currentChain));
-          } else {
-            resetWallet();
-          }
-        }
-      } catch (error) {
-        console.debug('Wallet sync failed', error);
-      }
-    };
-
-    void syncAccounts();
-
-    const handleAccountsChanged = (accounts: unknown) => {
-      if (!Array.isArray(accounts)) return;
-      const [primary] = accounts as string[];
-      if (primary) {
-        provider
-          .request<string>({ method: 'eth_chainId' })
-          .then((next) => setWallet(primary, normalizeChainId(next)))
-          .catch(() => setWallet(primary, normalizeChainId(null)));
-      } else {
-        resetWallet();
-      }
-    };
-
-    const handleChainChanged = (nextChainId: unknown) => {
-      if (typeof nextChainId !== 'string') return;
-      setChainId(normalizeChainId(nextChainId));
-    };
-
-    provider.on?.('accountsChanged', handleAccountsChanged);
-    provider.on?.('chainChanged', handleChainChanged);
-
-    return () => {
-      cancelled = true;
-      provider.removeListener?.('accountsChanged', handleAccountsChanged);
-      provider.removeListener?.('chainChanged', handleChainChanged);
-    };
-  }, [resetWallet, setChainId, setWallet]);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -105,30 +52,29 @@ export default function WalletBar() {
   }, [statusMessage]);
 
   const handleConnect = useCallback(async () => {
-    if (connecting || switching) return;
-    if (typeof window === 'undefined' || !window.ethereum) {
-      setStatusMessage('No wallet detected. Install Coinbase Wallet or MetaMask.');
+    if (connecting || switching) {
+      return;
+    }
+    if (!farcasterConnector) {
+      setStatusMessage('Farcaster wallet unavailable.');
       return;
     }
     try {
-      setConnecting(true);
       dispatchWalletModalOpen();
-      const accounts = (await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })) ?? [];
-      const [primary] = accounts;
-      const currentChain = await window.ethereum
-        .request<string>({ method: 'eth_chainId' })
-        .catch(() => null);
-      if (primary) {
-        setWallet(primary, normalizeChainId(currentChain));
-        setStatusMessage('Wallet connected.');
+      await connectAsync({ connector: farcasterConnector });
+      if (typeof window !== 'undefined' && window.ethereum) {
+        const nextAddress = await ensureBaseNetwork().catch(() => null);
+        if (nextAddress) {
+          setWallet(nextAddress, BASE_CHAIN_ID_HEX);
+        }
       }
+      setStatusMessage('Wallet connected.');
     } catch (error) {
       console.debug('Wallet connection rejected', error);
-      setStatusMessage('Wallet connection was cancelled.');
-    } finally {
-      setConnecting(false);
+      const message = error instanceof Error ? error.message : 'Wallet connection was cancelled.';
+      setStatusMessage(message);
     }
-  }, [connecting, switching, setWallet]);
+  }, [connectAsync, connecting, farcasterConnector, setWallet, switching]);
 
   const handleSwitchNetwork = useCallback(async () => {
     if (switching) return;
@@ -149,8 +95,8 @@ export default function WalletBar() {
   }, [setWallet, switching]);
 
   const statusLabel = useMemo(() => {
-    if (!hasProvider) {
-      return 'Install a Base-compatible wallet to play.';
+    if (!hasProvider || !farcasterConnector) {
+      return 'Open in Farcaster to connect your wallet.';
     }
     if (!connected) {
       return 'Connect your wallet to unlock Base boosts.';
@@ -159,7 +105,7 @@ export default function WalletBar() {
       return 'Switch to Base Mainnet (chain 8453) to continue.';
     }
     return 'Ready on Base Mainnet.';
-  }, [connected, hasProvider, onBase]);
+  }, [connected, farcasterConnector, hasProvider, onBase]);
 
   return (
     <div className="flex w-full flex-col gap-2 rounded-3xl border border-white/10 bg-slate-900/60 p-4 shadow-inner shadow-black/20">
@@ -189,7 +135,10 @@ export default function WalletBar() {
             </GhostButton>
           ) : null}
           {!connected ? (
-            <PrimaryButton onClick={handleConnect} disabled={connecting || !hasProvider}>
+            <PrimaryButton
+              onClick={handleConnect}
+              disabled={connecting || !hasProvider || !farcasterConnector}
+            >
               {connecting ? 'Connecting…' : 'Connect Wallet'}
             </PrimaryButton>
           ) : null}

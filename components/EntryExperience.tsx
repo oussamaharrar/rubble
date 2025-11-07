@@ -2,6 +2,7 @@
 
 import * as miniAppSdk from '@farcaster/miniapp-sdk';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAccount, useConnect } from 'wagmi';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import GameCanvas from '@/app/game/GameCanvas';
@@ -15,7 +16,7 @@ import { VhFixProvider } from '@/components/VhFixProvider';
 import HeaderIdentityChip from '@/components/HeaderIdentityChip';
 import { useGameStore } from '@/lib/store';
 import { useWalletStore } from '@/lib/wallet-store';
-import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
+import { ensureBaseNetwork } from '@/lib/base';
 import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { getRuntimeConfig } from '@/app/config/runtime';
 import { shortenAddress, normalizeAddress } from '@/lib/address';
@@ -87,105 +88,54 @@ function readRememberedAddress(): string | null {
 }
 
 function useWalletSession(onRememberChange?: (flag: 0 | 1, address: string | null) => void) {
+  const { connectors } = useConnect();
+  const { address, status, chainId } = useAccount();
   const setWallet = useWalletStore((state) => state.setWallet);
   const resetWallet = useWalletStore((state) => state.reset);
-  const setChainId = useWalletStore((state) => state.setChainId);
   const [ready, setReady] = useState(false);
   const [hasProvider, setHasProvider] = useState(false);
+  const lastPersistedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const provider = window.ethereum as (typeof window.ethereum) & {
-      on?: (event: string, handler: (...args: unknown[]) => void) => void;
-      removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
-      request?: <T = unknown>(args: { method: string; params?: unknown[] }) => Promise<T>;
-    };
-    if (!provider?.request) {
-      setHasProvider(false);
-      persistRememberedWallet(null);
-      onRememberChange?.(0, null);
-      resetWallet();
+    setHasProvider(connectors.length > 0);
+  }, [connectors]);
+
+  useEffect(() => {
+    if (!ready) {
       setReady(true);
+    }
+  }, [ready]);
+
+  useEffect(() => {
+    if ((status === 'connected' || status === 'reconnecting') && address) {
+      const hexChain = typeof chainId === 'number' ? `0x${chainId.toString(16)}` : null;
+      setWallet(address, hexChain);
+    } else if (status === 'disconnected') {
+      resetWallet();
+    }
+  }, [address, chainId, resetWallet, setWallet, status]);
+
+  useEffect(() => {
+    if (!ready) {
       return;
     }
-    setHasProvider(true);
-
-    let cancelled = false;
-
-    const finishReady = () => {
-      if (!cancelled) {
-        setReady(true);
-      }
-    };
-
-    const syncAccounts = async () => {
-      try {
-        const accounts = (await provider.request<string[]>({ method: 'eth_accounts' })) ?? [];
-        const [primary] = accounts;
-        if (!primary) {
-          const flag = persistRememberedWallet(null);
-          onRememberChange?.(flag, null);
-          resetWallet();
-          return;
-        }
-        const chain = await provider.request<string>({ method: 'eth_chainId' }).catch(() => null);
-        setWallet(primary, chain ? chain.toLowerCase() : null);
-        const flag = persistRememberedWallet(primary);
-        onRememberChange?.(flag, primary);
-      } catch (error) {
-        console.debug('[rubble] wallet sync failed', error);
-      }
-    };
-
-    if (readRememberedFlag() === 1) {
-      void (async () => {
-        try {
-          await syncAccounts();
-        } finally {
-          finishReady();
-        }
-      })();
-    } else {
-      finishReady();
+    const nextAddress = address ?? null;
+    if (lastPersistedRef.current === nextAddress) {
+      return;
     }
+    lastPersistedRef.current = nextAddress;
+    const flag = persistRememberedWallet(nextAddress);
+    onRememberChange?.(flag, nextAddress);
+  }, [address, onRememberChange, ready]);
 
-    const handleAccountsChanged = (accounts: unknown) => {
-      if (!Array.isArray(accounts)) return;
-      const [primary] = accounts as string[];
-      if (primary) {
-        provider
-          .request<string>({ method: 'eth_chainId' })
-          .then((next) => {
-            setWallet(primary, typeof next === 'string' ? next.toLowerCase() : null);
-            const flag = persistRememberedWallet(primary);
-            onRememberChange?.(flag, primary);
-          })
-          .catch(() => {
-            setWallet(primary, null);
-            const flag = persistRememberedWallet(primary);
-            onRememberChange?.(flag, primary);
-          });
-      } else {
-        const flag = persistRememberedWallet(null);
-        onRememberChange?.(flag, null);
-        resetWallet();
-      }
-    };
-
-    const handleChainChanged = (next: unknown) => {
-      if (typeof next !== 'string') return;
-      setChainId(next.toLowerCase());
-    };
-
-    provider.on?.('accountsChanged', handleAccountsChanged);
-    provider.on?.('chainChanged', handleChainChanged);
-
-    return () => {
-      cancelled = true;
-      provider.removeListener?.('accountsChanged', handleAccountsChanged);
-      provider.removeListener?.('chainChanged', handleChainChanged);
-    };
-  }, [onRememberChange, resetWallet, setChainId, setWallet]);
+  useEffect(() => {
+    if (!ready || hasProvider) {
+      return;
+    }
+    lastPersistedRef.current = null;
+    const flag = persistRememberedWallet(null);
+    onRememberChange?.(flag, null);
+  }, [hasProvider, onRememberChange, ready]);
 
   return { ready, hasProvider } as const;
 }
@@ -263,14 +213,6 @@ export default function EntryExperience({
   const prefersReducedMotion = useReducedMotion();
   const { toast, showToast } = useToast();
 
-  useEffect(() => {
-    try {
-      const sdkInstance = resolveMiniAppSdk();
-      void sdkInstance?.actions?.ready?.();
-    } catch {
-      // ignore sdk issues outside Farcaster
-    }
-  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [screen, setScreen] = useState<ScreenState>('home');
   const [gateOpen, setGateOpen] = useState(false);
@@ -281,7 +223,7 @@ export default function EntryExperience({
   const farcasterIdentity = useFarcasterStore((state) => state.identity);
   const setFarcasterIdentity = useFarcasterStore((state) => state.setIdentity);
   const updateFarcasterIdentity = useFarcasterStore((state) => state.updateIdentity);
-  const [entryPhase, setEntryPhase] = useState<'fc-auth' | 'wallet-link' | 'gate' | 'play'>('fc-auth');
+  const [entryPhase, setEntryPhase] = useState<'fc-auth' | 'wallet' | 'gate' | 'play'>('fc-auth');
   const [tickets, setTickets] = useState<number>(() => readStoredTickets());
   const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
   const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
@@ -334,12 +276,22 @@ export default function EntryExperience({
   const walletAddress = useWalletStore((state) => state.address);
   const leaderboardAddress = walletAddress ?? rememberedAddress ?? null;
   const walletConnected = Boolean(walletAddress);
+  const { connectAsync, connectors, status: connectStatus } = useConnect();
+  const farcasterConnector = useMemo(
+    () =>
+      connectors.find(
+        (connector) =>
+          connector.id?.toLowerCase().includes('farcaster') ||
+          connector.name?.toLowerCase().includes('farcaster')
+      ) ?? connectors[0] ?? null,
+    [connectors]
+  );
 
   useEffect(() => {
-    const nextPhase: 'fc-auth' | 'wallet-link' | 'gate' | 'play' = !farcasterIdentity
+    const nextPhase: 'fc-auth' | 'wallet' | 'gate' | 'play' = !farcasterIdentity
       ? 'fc-auth'
       : !walletConnected
-        ? 'wallet-link'
+        ? 'wallet'
         : screen === 'home'
           ? 'gate'
           : 'play';
@@ -1135,21 +1087,20 @@ export default function EntryExperience({
   }, [grantRewardBoost, handleToast, site.siteUrl]);
 
   const attemptConnect = useCallback(async () => {
-    if (walletConnected) return;
-    if (typeof window === 'undefined') return;
-    if (!hasProvider || !window.ethereum) {
-      dispatchWalletModalOpen();
+    if (walletConnected || !farcasterConnector) {
       return;
     }
     try {
-      const address = await ensureBaseNetwork();
-      useWalletStore.getState().setWallet(address, BASE_CHAIN_ID_HEX);
-      updateRemember(address);
+      dispatchWalletModalOpen();
+      await connectAsync({ connector: farcasterConnector });
+      if (typeof window !== 'undefined' && window.ethereum) {
+        await ensureBaseNetwork().catch(() => null);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to connect wallet.';
       handleToast(message);
     }
-  }, [handleToast, hasProvider, updateRemember, walletConnected]);
+  }, [connectAsync, farcasterConnector, handleToast, walletConnected]);
 
   const showGate = useCallback(
     (reason: string) => {
@@ -1527,11 +1478,19 @@ export default function EntryExperience({
                   <button
                     type="button"
                     data-testid="connect-wallet-home"
-                    className={clsx(GLASS_BUTTON_CLASS, (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-50')}
+                    className={clsx(
+                      GLASS_BUTTON_CLASS,
+                      (!hasProvider || !walletReady || !farcasterConnector || connectStatus === 'pending') &&
+                        'cursor-not-allowed opacity-50'
+                    )}
                     onClick={attemptConnect}
-                    disabled={!hasProvider || !walletReady}
+                    disabled={!hasProvider || !walletReady || !farcasterConnector || connectStatus === 'pending'}
                   >
-                    {walletReady ? 'Connect Wallet' : 'Checking…'}
+                    {connectStatus === 'pending'
+                      ? 'Connecting…'
+                      : walletReady
+                        ? 'Connect Wallet'
+                        : 'Checking…'}
                   </button>
                 )}
               </div>
@@ -1733,12 +1692,17 @@ export default function EntryExperience({
                         data-testid="gate-connect-wallet"
                         className={clsx(
                           GLASS_BUTTON_CLASS,
-                          (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-40'
+                          (!hasProvider || !walletReady || !farcasterConnector || connectStatus === 'pending') &&
+                            'cursor-not-allowed opacity-40'
                         )}
                         onClick={attemptConnect}
-                        disabled={!hasProvider || !walletReady}
+                        disabled={!hasProvider || !walletReady || !farcasterConnector || connectStatus === 'pending'}
                       >
-                        {walletReady ? 'Connect Wallet' : 'Checking…'}
+                        {connectStatus === 'pending'
+                          ? 'Connecting…'
+                          : walletReady
+                            ? 'Connect Wallet'
+                            : 'Checking…'}
                       </button>
                       {runtime.trialEnabled ? (
                         <button
@@ -1924,7 +1888,7 @@ export default function EntryExperience({
           </div>
         ) : null}
 
-        {entryPhase === 'wallet-link' ? (
+        {entryPhase === 'wallet' ? (
           <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6">
             <div
               className="w-full max-w-sm rounded-3xl border border-white/15 bg-slate-950/85 p-6 text-center shadow-2xl"
@@ -1938,11 +1902,19 @@ export default function EntryExperience({
                 <button
                   type="button"
                   data-testid="wallet-link-connect"
-                  className={clsx(GLASS_BUTTON_CLASS, (!hasProvider || !walletReady) && 'cursor-not-allowed opacity-50')}
+                  className={clsx(
+                    GLASS_BUTTON_CLASS,
+                    (!hasProvider || !walletReady || !farcasterConnector || connectStatus === 'pending') &&
+                      'cursor-not-allowed opacity-50'
+                  )}
                   onClick={attemptConnect}
-                  disabled={!hasProvider || !walletReady}
+                  disabled={!hasProvider || !walletReady || !farcasterConnector || connectStatus === 'pending'}
                 >
-                  {walletReady ? 'Connect Wallet' : 'Checking…'}
+                  {connectStatus === 'pending'
+                    ? 'Connecting…'
+                    : walletReady
+                      ? 'Connect Wallet'
+                      : 'Checking…'}
                 </button>
               </div>
               <p className="mt-4 text-xs uppercase tracking-[0.25em] text-white/35">

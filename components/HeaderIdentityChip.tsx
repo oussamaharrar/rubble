@@ -72,12 +72,13 @@ export default function HeaderIdentityChip({
     };
   }, [farcasterIdentity]);
   const hasProfile = Boolean(profile.displayName || profile.username);
-  const primaryLabel = profile.displayName ?? profile.username ?? shortAddress;
+  const primaryLabel = profile.username ?? profile.displayName ?? shortAddress;
   const showShortBadge = hasProfile && shortAddress && shortAddress !== primaryLabel;
   const avatarUrl = profile.avatar;
-  const statusLabel = farcasterIdentity
-    ? `Connected wallet ${shortAddress}`
-    : `Connected wallet ${address}`;
+  const fallbackAddressLabel = shortAddress || address;
+  const statusLabel = fallbackAddressLabel
+    ? `Connected wallet ${fallbackAddressLabel}`
+    : 'Connected wallet';
 
   return (
     <div className="relative">
@@ -106,9 +107,9 @@ export default function HeaderIdentityChip({
             {primaryLabel}
           </span>
           {showShortBadge ? (
-            <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-black/30 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-white/60">
+            <small className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-black/30 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-white/60">
               {shortAddress}
-            </span>
+            </small>
           ) : null}
         </div>
         <span
