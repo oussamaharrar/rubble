@@ -1,7 +1,7 @@
 'use client';
 
-import sdk from '@farcaster/miniapp-sdk';
 import { useEffect } from 'react';
+import { sdk } from '@farcaster/miniapp-sdk';
 
 export default function MiniAppBoot() {
   useEffect(() => {
@@ -16,12 +16,13 @@ export default function MiniAppBoot() {
     (async () => {
       try {
         const nonce =
-          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random()}`;
-        await sdk.actions.signIn?.({ nonce });
+        await sdk.actions.signIn?.({ nonce, acceptAuthAddress: true });
+        // If already signed in, this resolves silently; otherwise Farcaster shows the prompt.
       } catch {
-        // ignore signin errors when not in Farcaster
+        // Not in Farcaster context or user canceled; leave UI to whoami gate
       }
     })();
   }, []);

@@ -17,7 +17,6 @@ import HeaderIdentityChip from '@/components/HeaderIdentityChip';
 import { useGameStore } from '@/lib/store';
 import { useWalletStore } from '@/lib/wallet-store';
 import { ensureBaseNetwork } from '@/lib/base';
-import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { getRuntimeConfig } from '@/app/config/runtime';
 import { shortenAddress, normalizeAddress } from '@/lib/address';
 import { useToast } from '@/lib/use-toast';
@@ -223,7 +222,7 @@ export default function EntryExperience({
   const farcasterIdentity = useFarcasterStore((state) => state.identity);
   const setFarcasterIdentity = useFarcasterStore((state) => state.setIdentity);
   const updateFarcasterIdentity = useFarcasterStore((state) => state.updateIdentity);
-  const [entryPhase, setEntryPhase] = useState<'fc-auth' | 'wallet' | 'gate' | 'play'>('fc-auth');
+  const [entryPhase, setEntryPhase] = useState<'fc-auth' | 'wallet-link' | 'gate' | 'play'>('fc-auth');
   const [tickets, setTickets] = useState<number>(() => readStoredTickets());
   const [trialAvailable, setTrialAvailable] = useState<boolean>(false);
   const [hudRect, setHudRect] = useState<DOMRectReadOnly | null>(null);
@@ -288,10 +287,10 @@ export default function EntryExperience({
   );
 
   useEffect(() => {
-    const nextPhase: 'fc-auth' | 'wallet' | 'gate' | 'play' = !farcasterIdentity
+    const nextPhase: 'fc-auth' | 'wallet-link' | 'gate' | 'play' = !farcasterIdentity
       ? 'fc-auth'
       : !walletConnected
-        ? 'wallet'
+        ? 'wallet-link'
         : screen === 'home'
           ? 'gate'
           : 'play';
@@ -568,15 +567,19 @@ export default function EntryExperience({
     let cancelled = false;
     (async () => {
       const me = await fetchWhoAmI();
-      if (cancelled || !me) {
+      if (cancelled) {
         return;
       }
-      setFarcasterIdentity({
-        fid: me.fid,
-        username: me.username ?? null,
-        displayName: me.displayName ?? null,
-        pfpUrl: me.pfpUrl ?? null,
-      });
+      if (me) {
+        setFarcasterIdentity({
+          fid: me.fid,
+          username: me.username ?? null,
+          displayName: me.displayName ?? null,
+          pfpUrl: me.pfpUrl ?? null,
+        });
+      } else {
+        setFarcasterIdentity(null);
+      }
     })();
     return () => {
       cancelled = true;
@@ -1091,7 +1094,6 @@ export default function EntryExperience({
       return;
     }
     try {
-      dispatchWalletModalOpen();
       await connectAsync({ connector: farcasterConnector });
       if (typeof window !== 'undefined' && window.ethereum) {
         await ensureBaseNetwork().catch(() => null);
@@ -1888,7 +1890,7 @@ export default function EntryExperience({
           </div>
         ) : null}
 
-        {entryPhase === 'wallet' ? (
+        {entryPhase === 'wallet-link' ? (
           <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6">
             <div
               className="w-full max-w-sm rounded-3xl border border-white/15 bg-slate-950/85 p-6 text-center shadow-2xl"

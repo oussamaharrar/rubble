@@ -13,7 +13,6 @@ import SummaryScreen from './stages/SummaryScreen';
 import type { LifetimeStats } from './StatsModal';
 import SettingsModal from './SettingsModal';
 import TutorialOverlay, { shouldShowTutorial } from './TutorialOverlay';
-import { WALLET_MODAL_EVENT } from '@/lib/wallet-events';
 import { useGameStore } from '@/lib/store';
 import type { BoardKind, EntryMode, GamePhase } from '@/types/game';
 import { saveScore, shareUrl } from '@/lib/leaderboard';
@@ -193,15 +192,6 @@ export default function HomeContent({ shareScore, shareBoard = 'normal' }: HomeC
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [pauseRun]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handleWalletModal = () => {
-      pauseRun();
-    };
-    window.addEventListener(WALLET_MODAL_EVENT, handleWalletModal as EventListener);
-    return () => window.removeEventListener(WALLET_MODAL_EVENT, handleWalletModal as EventListener);
   }, [pauseRun]);
 
   const playing = phase === 'playing' || phase === 'storm';

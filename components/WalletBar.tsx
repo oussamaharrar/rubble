@@ -5,7 +5,6 @@ import { useConnect } from 'wagmi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PrimaryButton, GhostButton } from './Buttons';
 import { BASE_CHAIN_ID_HEX, ensureBaseNetwork } from '@/lib/base';
-import { dispatchWalletModalOpen } from '@/lib/wallet-events';
 import { useWalletStore } from '@/lib/wallet-store';
 
 const STATUS_VARIANTS = {
@@ -60,7 +59,6 @@ export default function WalletBar() {
       return;
     }
     try {
-      dispatchWalletModalOpen();
       await connectAsync({ connector: farcasterConnector });
       if (typeof window !== 'undefined' && window.ethereum) {
         const nextAddress = await ensureBaseNetwork().catch(() => null);
@@ -80,7 +78,6 @@ export default function WalletBar() {
     if (switching) return;
     try {
       setSwitching(true);
-      dispatchWalletModalOpen();
       const nextAddress = await ensureBaseNetwork();
       setWallet(nextAddress, BASE_CHAIN_ID_HEX);
       setStatusMessage('Switched to Base Mainnet.');
