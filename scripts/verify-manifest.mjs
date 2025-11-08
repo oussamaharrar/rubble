@@ -122,9 +122,9 @@ try {
 
   const { version, miniapp, baseBuilder } = manifest ?? {};
 
-  assert(version === '1', 'manifest.version must be "1"');
-  assert(miniapp?.version === '1', 'miniapp.version must be "1"');
-  assert(miniapp?.name === 'Rubble (Bubble Hunt)', 'miniapp.name mismatch');
+  assert(version === 'next', 'manifest.version must be "next"');
+  assert(miniapp?.version === 'next', 'miniapp.version must be "next"');
+  assert(miniapp?.name === "Bubble’it!", 'miniapp.name mismatch');
 
   const manifestHomeRaw = String(miniapp?.homeUrl ?? '');
   let manifestHomeUrl;
@@ -151,14 +151,21 @@ try {
     );
   }
 
-  const expectedIcon = `${manifestOrigin}/game-icons/icon.png`;
+  const expectedIcon = `${manifestOrigin}/icons/app-icon-1024.png`;
   assert(miniapp?.iconUrl === expectedIcon, 'miniapp.iconUrl mismatch');
 
-  const expectedSplash = `${manifestOrigin}/game-icons/splash.png`;
+  const expectedSplash = `${manifestOrigin}/og/bubbleit-splash.png`;
   assert(miniapp?.splashImageUrl === expectedSplash, 'miniapp.splashImageUrl mismatch');
 
-  const expectedOg = `${manifestOrigin}/game-icons/og.png`;
-  assert(miniapp?.ogImageUrl === expectedOg, 'miniapp.ogImageUrl mismatch');
+  const expectedHero = `${manifestOrigin}/og/bubbleit-hero-1200x630.jpg`;
+  assert(miniapp?.heroImageUrl === expectedHero, 'miniapp.heroImageUrl mismatch');
+  assert(typeof miniapp?.tagline === 'string' && miniapp.tagline.length > 0, 'miniapp.tagline missing');
+  assert(typeof miniapp?.ogTitle === 'string' && miniapp.ogTitle.length > 0, 'miniapp.ogTitle missing');
+  assert(
+    typeof miniapp?.ogDescription === 'string' && miniapp.ogDescription.length > 0,
+    'miniapp.ogDescription missing'
+  );
+  assert(typeof miniapp?.noindex === 'boolean', 'miniapp.noindex must be a boolean');
 
   const webhookUrlRaw = String(miniapp?.webhookUrl ?? '');
   let webhookUrl;
@@ -184,7 +191,7 @@ try {
 
   assert(Array.isArray(miniapp?.tags) && miniapp.tags.length > 0, 'miniapp.tags must be populated');
 
-  const expectedEmbed = `${manifestOrigin}/game-icons/embed.png`;
+  const expectedEmbed = `${manifestOrigin}/og/bubbleit-embed-1200x630.jpg`;
   assert(
     Array.isArray(miniapp?.screenshotUrls) && miniapp.screenshotUrls.includes(expectedEmbed),
     'miniapp.screenshotUrls must include the embed artwork'
@@ -193,6 +200,11 @@ try {
   if (Array.isArray(miniapp?.embeds) && miniapp.embeds.length > 0) {
     const embedEntry = miniapp.embeds.find((entry) => entry?.url === expectedEmbed);
     assert(Boolean(embedEntry), 'miniapp.embeds must reference the embed artwork');
+    if (embedEntry) {
+      assert(embedEntry.mimeType === 'image/jpeg', 'embed mimeType must be image/jpeg');
+      assert(embedEntry.width === 1200, 'embed width must be 1200');
+      assert(embedEntry.height === 630, 'embed height must be 630');
+    }
   }
 
   assert(baseBuilder && baseBuilder.ownerAddress, 'baseBuilder.ownerAddress missing');
