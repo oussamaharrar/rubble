@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { initWalletStub } from './utils/wallet';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/';
-const HERO_ENDPOINT = new URL('/og/bubbleit-hero-1200x630.jpg', BASE_URL).toString();
+const HERO_ENDPOINT = new URL('/api/og/hero', BASE_URL).toString();
 const METADATA_ENDPOINT = new URL('/api/site/metadata', BASE_URL).toString();
 const ACCOUNT_ENDPOINT = new URL('/.well-known/app-account.json', BASE_URL).toString();
 
@@ -131,7 +131,7 @@ test.describe('wallet + trial gate', () => {
       ogDescription?: string;
       noindex?: boolean;
     };
-    expect(metadataJson.heroImageUrl).toMatch(/\/og\/bubbleit-hero-1200x630\.jpg$/);
+    expect(metadataJson.heroImageUrl).toMatch(/\/api\/og\/hero$/);
     expect(metadataJson.tagline).toBeTruthy();
     expect(metadataJson.ogTitle).toBeTruthy();
     expect(metadataJson.ogDescription).toBeTruthy();

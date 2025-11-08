@@ -15,11 +15,10 @@ export default function MiniAppBoot() {
   useEffect(() => {
     (async () => {
       try {
-        const randomSource =
-          typeof globalThis.crypto?.randomUUID === 'function'
-            ? globalThis.crypto.randomUUID()
+        const nonce =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
             : `${Date.now()}-${Math.random()}`;
-        const nonce = randomSource.replace(/[^a-zA-Z0-9-]/g, '');
         await sdk.actions.signIn?.({ nonce, acceptAuthAddress: true });
         // If already signed in, this resolves silently; otherwise Farcaster shows the prompt.
       } catch {

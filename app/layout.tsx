@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     description: site.ogDescription,
     url: site.siteUrl,
     type: 'website',
-    siteName: site.miniAppName,
+    siteName: 'Bubble’it!',
     images: [site.heroImageUrl],
   },
   twitter: {
@@ -27,18 +27,11 @@ export const metadata: Metadata = {
     images: [site.heroImageUrl],
   },
   other: {
-    'fc:miniapp': JSON.stringify({
-      version: 'next',
-      imageUrl: site.embedImageUrl,
-      button: {
-        title: site.miniAppButtonTitle,
-        action: {
-          type: 'launch_miniapp',
-          name: site.miniAppName,
-          url: site.siteUrl,
-        },
-      },
-    }),
+    'fc:miniapp:name': 'Bubble’it!',
+    'fc:miniapp:image': site.heroImageUrl,
+    'fc:miniapp:url': '/',
+    'fc:miniapp:button:text': 'Play',
+    'fc:miniapp:description': site.tagline,
   },
   robots: site.noindex ? { index: false, follow: false } : undefined,
   alternates: {
@@ -55,26 +48,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no"
         />
         <meta name="format-detection" content="telephone=no" />
-        <meta property="og:title" content={site.ogTitle} />
-        <meta property="og:description" content={site.ogDescription} />
-        <meta property="og:image" content={site.heroImageUrl} />
-        <meta property="og:url" content={site.siteUrl} />
-        <meta name="robots" content={site.noindex ? 'noindex' : 'index,follow'} />
-        <meta
-          name="fc:miniapp"
-          content={JSON.stringify({
-            version: 'next',
-            imageUrl: site.embedImageUrl,
-            button: {
-              title: site.miniAppButtonTitle,
-              action: {
-                type: 'launch_miniapp',
-                name: site.miniAppName,
-                url: site.siteUrl,
-              },
-            },
-          })}
-        />
       </head>
       <body className="bg-[#030712] text-slate-100 antialiased">
         <Providers>

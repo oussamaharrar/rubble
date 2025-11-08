@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { Buffer } from 'node:buffer';
 import { getEnv } from '@/lib/env';
-import { getSiteConfig } from '@/lib/site-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,24 +36,20 @@ export async function GET(request: Request) {
   const env = getEnv();
   const origin = resolveOrigin(request);
   const webhookUrl = resolveWebhookUrl(origin, env.NEXT_PUBLIC_WEBHOOK_URL);
-  const site = getSiteConfig();
 
-  const heroImageUrl = `${origin}/og/bubbleit-hero-1200x630.jpg`;
-  const splashImageUrl = `${origin}/og/bubbleit-splash.png`;
-  const iconUrl = `${origin}/icons/app-icon-1024.png`;
-  const embedUrl = `${origin}/og/bubbleit-embed-1200x630.jpg`;
+  const embedUrl = `${origin}/game-icons/embed.png`;
 
   const miniapp = {
-    version: 'next',
-    name: site.miniAppName,
+    version: '1',
+    name: 'Rubble (Bubble Hunt)',
+    subtitle: 'Tap • Combo • Boost on Base',
+    description:
+      'Tap bubbles, rack combos, and trigger Base boosts to freeze time on-chain.',
     homeUrl: origin,
-    iconUrl,
-    splashImageUrl,
-    heroImageUrl,
-    tagline: site.tagline,
-    ogTitle: site.ogTitle,
-    ogDescription: site.ogDescription,
-    noindex: site.noindex,
+    iconUrl: `${origin}/game-icons/icon.png`,
+    splashImageUrl: `${origin}/game-icons/splash.png`,
+    splashBackgroundColor: '#04060B',
+    ogImageUrl: `${origin}/game-icons/og.png`,
     webhookUrl,
     primaryCategory: 'games',
     tags: ['game', 'arcade', 'base', 'booster'],
@@ -63,74 +57,33 @@ export async function GET(request: Request) {
     embeds: [
       {
         url: embedUrl,
-        mimeType: 'image/jpeg',
-        width: 1200,
-        height: 630,
+        mimeType: 'image/png',
+        width: 424,
+        height: 695,
       },
     ],
-    buttonTitle: site.miniAppButtonTitle,
+    buttonTitle: 'Play',
   } as const;
 
   const body: Record<string, unknown> = {
-    version: 'next',
+    version: '1',
     miniapp,
   };
 
-  const { FARCASTER_ACCOUNT_SIGNATURE, FARCASTER_ACCOUNT_PAYLOAD, FARCASTER_ACCOUNT_HEADER } = env;
-
-  if (FARCASTER_ACCOUNT_SIGNATURE && FARCASTER_ACCOUNT_PAYLOAD) {
-    const trimmed = FARCASTER_ACCOUNT_PAYLOAD.trim();
-    const tryParse = (input: string) => {
-      const text = input.trim();
-      if (!text) return null;
-      if (text.startsWith('{')) {
-        try {
-          return JSON.parse(text);
-        } catch {
-          return null;
-        }
-      }
-      try {
-        const decoded = Buffer.from(text, 'base64').toString('utf8');
-        if (decoded.trim().startsWith('{')) {
-          return JSON.parse(decoded);
-        }
-      } catch {
-        return null;
-      }
-      return null;
-    };
-
-    const parsed = tryParse(trimmed);
-
-    if (parsed && typeof parsed === 'object') {
-      const claims = 'claims' in parsed && parsed.claims && typeof parsed.claims === 'object' ? parsed.claims : parsed;
-      body.accountAssociation = {
-        signature: FARCASTER_ACCOUNT_SIGNATURE,
-        claims,
-      } as const;
-    } else if (FARCASTER_ACCOUNT_HEADER) {
-      body.accountAssociation = {
-        header: FARCASTER_ACCOUNT_HEADER,
-        payload: FARCASTER_ACCOUNT_PAYLOAD,
-        signature: FARCASTER_ACCOUNT_SIGNATURE,
-      } as const;
-    }
-  }
-
-  const ownerAddress = env.BASE_BUILDER_OWNER_ADDRESS ?? env.PAY_TO_ADDRESS;
-  if (ownerAddress) {
-    body.baseBuilder = { ownerAddress } as const;
-  }
-
-  if (!('accountAssociation' in body)) {
+  if (
+    env.FARCASTER_ACCOUNT_HEADER &&
+    env.FARCASTER_ACCOUNT_PAYLOAD &&
+    env.FARCASTER_ACCOUNT_SIGNATURE
+  ) {
     body.accountAssociation = {
-      signature: '0x' + '0'.repeat(130),
-      claims: {
-        domain: origin,
-        owner: ownerAddress,
-      },
+      header: env.FARCASTER_ACCOUNT_HEADER,
+      payload: env.FARCASTER_ACCOUNT_PAYLOAD,
+      signature: env.FARCASTER_ACCOUNT_SIGNATURE,
     } as const;
+  }
+
+  if (env.BASE_BUILDER_OWNER_ADDRESS) {
+    body.baseBuilder = { ownerAddress: env.BASE_BUILDER_OWNER_ADDRESS } as const;
   }
 
   return NextResponse.json(body, {
